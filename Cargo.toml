@@ -72,6 +72,8 @@ rustypipe-botguard = "0.1.2"
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
+# pango_font_map_add_font_file (1.56) loads the bundled Adwaita fonts into GTK's font map.
+pango = { version = "0.22", features = ["v1_56"] }
 # SQLite is not a system library on Windows. The Linux builds link the system one.
 rusqlite = { version = "0.40", features = ["bundled"] }
 

@@ -2664,6 +2664,7 @@ dependencies = [
  "lofty",
  "md-5",
  "mpris-server",
+ "pango",
  "pinyin",
  "regex",
  "reqwest 0.13.5",

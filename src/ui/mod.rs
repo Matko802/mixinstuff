@@ -156,6 +156,27 @@ pub fn load_css() {
         // 96 dpi, in 1024ths.
         settings.set_gtk_xft_dpi(96 * 1024);
     }
+    #[cfg(windows)]
+    add_bundled_fonts();
+}
+
+/// Adds share/fonts (Adwaita Sans and Mono) to GTK's font map, so style.css finds
+/// them whether Pango lays text out through fontconfig or DirectWrite.
+#[cfg(windows)]
+fn add_bundled_fonts() {
+    use gtk::pango::prelude::FontMapExt;
+    let Some(dir) = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.parent()?.join("share").join("fonts"))) else {
+        return;
+    };
+    let Some(font_map) = gtk::Label::new(None).pango_context().font_map() else { return };
+    tracing::info!(backend = %font_map.type_().name(), "font map");
+    for path in std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|entry| entry.path()) {
+        if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("ttf")) {
+            if let Err(err) = font_map.add_font_file(&path) {
+                tracing::warn!(%err, path = %path.display(), "bundled font did not load");
+            }
+        }
+    }
 }
 
 /// "m:ss" for the timings label.
