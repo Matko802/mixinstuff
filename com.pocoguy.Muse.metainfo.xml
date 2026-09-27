@@ -107,6 +107,7 @@
           <li>Playlists, likes and artist subscriptions without a Google account. They live on this device, in the library beside Downloads, and every menu that adds to a playlist offers them</li>
           <li>Open YouTube and YouTube Music links: paste one into search, run mixtapes with the link, or use the Open in Mixtapes userscript in your browser. Songs play, and playlists, albums and artists open their page</li>
           <li>Listening history without a Google account, kept on this device</li>
+          <li>Podcasts: a Podcasts page under Explore, shows that open with every episode, and shows, episodes and profiles in search and on Home</li>
           <li>A personal Home without a Google account. Quick picks, Listen again, new releases and similar artists come from what you play, like and subscribe to on this device</li>
           <li>Live stations from the home feed play, marked with an antenna. The player shows LIVE instead of a length</li>
         </ul>

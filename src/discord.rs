@@ -4,7 +4,6 @@
 //! activity payload from `PlayerState` and the shared prefs, then hands it over.
 
 use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -126,7 +125,34 @@ pub fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
+/// The IPC connection: a Unix socket, or on Windows the named pipe Discord
+/// listens on, which opens like a file. The frames are the same on both.
+#[cfg(unix)]
+type IpcStream = std::os::unix::net::UnixStream;
+#[cfg(windows)]
+type IpcStream = std::fs::File;
+
+#[cfg(unix)]
+fn open_ipc(path: &std::path::Path) -> std::io::Result<IpcStream> {
+    let stream = IpcStream::connect(path)?;
+    stream.set_read_timeout(Some(IO_TIMEOUT))?;
+    stream.set_write_timeout(Some(IO_TIMEOUT))?;
+    Ok(stream)
+}
+
+/// A pipe has no timeouts to set. Discord answers the handshake at once, or not at all.
+#[cfg(windows)]
+fn open_ipc(path: &std::path::Path) -> std::io::Result<IpcStream> {
+    std::fs::OpenOptions::new().read(true).write(true).open(path)
+}
+
+#[cfg(windows)]
+fn candidate_ipc_paths() -> Vec<PathBuf> {
+    (0..10).map(|i| PathBuf::from(format!(r"\\.\pipe\discord-ipc-{i}"))).collect()
+}
+
 /// Every path a Discord client exposes, Flatpak and Snap variants included.
+#[cfg(unix)]
 fn candidate_ipc_paths() -> Vec<PathBuf> {
     let mut bases: Vec<PathBuf> = Vec::new();
     if let Some(xdg) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from) {
@@ -226,7 +252,7 @@ fn set_status(status: &Arc<Mutex<String>>, text: &str) {
 }
 
 struct Connection {
-    stream: Option<UnixStream>,
+    stream: Option<IpcStream>,
     status: Arc<Mutex<String>>,
     attempt: usize,
     reconnect_at: Option<Instant>,
@@ -298,7 +324,8 @@ impl Connection {
             return;
         }
         for path in candidate_ipc_paths() {
-            if !path.exists() {
+            // A named pipe does not show up as an existing path; opening it is the test.
+            if cfg!(unix) && !path.exists() {
                 continue;
             }
             match self.handshake(&path) {
@@ -318,10 +345,8 @@ impl Connection {
         self.schedule_reconnect();
     }
 
-    fn handshake(&self, path: &std::path::Path) -> std::io::Result<UnixStream> {
-        let mut stream = UnixStream::connect(path)?;
-        stream.set_read_timeout(Some(IO_TIMEOUT))?;
-        stream.set_write_timeout(Some(IO_TIMEOUT))?;
+    fn handshake(&self, path: &std::path::Path) -> std::io::Result<IpcStream> {
+        let mut stream = open_ipc(path)?;
         send_frame(&mut stream, OP_HANDSHAKE, &json!({"v": 1, "client_id": DISCORD_APP_ID}))?;
         recv_frame(&mut stream)?;
         Ok(stream)

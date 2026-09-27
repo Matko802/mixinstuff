@@ -11,6 +11,8 @@ use crate::model::{ItemKind, LikeStatus, MediaItem, Named, Person, Track, VideoI
 
 pub const MRLIR: &str = "musicResponsiveListItemRenderer";
 pub const MTRIR: &str = "musicTwoRowItemRenderer";
+/// A podcast episode card: title, show, date and length.
+pub const MMRLIR: &str = "musicMultiRowListItemRenderer";
 
 static DURATION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\d+:)*\d+:\d+$").unwrap());
 static YEAR_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{4}$").unwrap());
@@ -127,6 +129,48 @@ pub fn thumbnails_at(node: &Value, pointer: &str) -> Vec<String> {
 
 pub fn runs_text(runs: &[Value]) -> String {
     runs.iter().filter_map(|r| r.get("text").and_then(Value::as_str)).collect()
+}
+
+/// "50 min", "1 hr 5 min" or "2 hr" to seconds, how an episode states its length.
+pub fn parse_spoken_duration(text: &str) -> Option<u32> {
+    let mut total = 0;
+    let mut words = text.split_whitespace();
+    while let Some(number) = words.next() {
+        let n: u32 = number.parse().ok()?;
+        total += match words.next()? {
+            u if u.starts_with("hr") || u.starts_with("hour") => n * 3600,
+            u if u.starts_with("min") => n * 60,
+            u if u.starts_with("sec") => n,
+            _ => return None,
+        };
+    }
+    (total > 0).then_some(total)
+}
+
+/// A podcast episode card as a video marked "Episode". Its show goes where a
+/// song's album goes, so the row names it and a tap on it opens the show.
+pub fn parse_episode_card(data: &Value) -> Option<MediaItem> {
+    let id = owned_at(data, "/onTap/watchEndpoint/videoId")?;
+    let show = array_at(data, "/secondTitle/runs").first().map(|run| Named { name: owned_at(run, "/text").unwrap_or_default(), id: owned_at(run, "/navigationEndpoint/browseEndpoint/browseId") });
+    let subtitle: Vec<String> = array_at(data, "/subtitle/runs").iter().filter_map(|r| owned_at(r, "/text")).map(|t| t.trim().to_owned()).filter(|t| !t.is_empty() && t != "\u{2022}").collect();
+    let length = array_at(data, "/playbackProgress/musicPlaybackProgressRenderer/durationText/runs").iter().filter_map(|r| owned_at(r, "/text")).find_map(|t| parse_spoken_duration(&t));
+    // Some episodes name a channel rather than a show. A channel opens as an artist.
+    let (album, artists) = match show.filter(|s| !s.name.is_empty()) {
+        Some(channel) if channel.id.as_deref().is_some_and(|id| id.starts_with("UC")) => (None, vec![Person { name: channel.name, id: channel.id }]),
+        show => (show, Vec::new()),
+    };
+    Some(MediaItem {
+        kind: ItemKind::Video,
+        item_type: Some("Episode".to_owned()),
+        id,
+        title: owned_at(data, "/title/runs/0/text")?,
+        album,
+        artists,
+        thumb: last_thumbnail_url(array_at(data, "/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")),
+        views: subtitle.iter().find(|t| t.contains("view")).map(|t| t.split_whitespace().next().unwrap_or_default().to_owned()),
+        duration_seconds: length,
+        ..MediaItem::default()
+    })
 }
 
 /// "3:07" or "1:02:03" to seconds, like ytmusicapi's parse_duration.
@@ -490,8 +534,8 @@ pub fn is_year(text: &str) -> bool {
 /// or browse carousel, whatever kind it turns out to be.
 ///
 /// `section_title` comes along because a card with no video type is told apart
-/// by the shelf it sits in, the way home.py's _detect_kind reads it. Podcast
-/// shows and episodes answer None: no page here draws them.
+/// by the shelf it sits in, the way home.py's _detect_kind reads it. A podcast
+/// show opens on the playlist page, marked "Podcast". An episode plays as a video, marked "Episode".
 pub fn parse_mixed_item(entry: &Value, section_title: &str) -> Option<MediaItem> {
     if let Some(data) = entry.get(MTRIR) {
         return match str_at(data, CARD_PAGE_TYPE) {
@@ -509,8 +553,15 @@ pub fn parse_mixed_item(entry: &Value, section_title: &str) -> Option<MediaItem>
             Some("MUSIC_PAGE_TYPE_ALBUM" | "MUSIC_PAGE_TYPE_AUDIOBOOK") => Some(parse_album_card(data)),
             Some("MUSIC_PAGE_TYPE_ARTIST" | "MUSIC_PAGE_TYPE_USER_CHANNEL") => parse_artist_card(data),
             Some("MUSIC_PAGE_TYPE_PLAYLIST") => parse_playlist_card(data),
+            Some("MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE") => parse_playlist_card(data).map(|mut show| {
+                show.item_type = Some("Podcast".to_owned());
+                show
+            }),
             Some(_) => None,
         };
+    }
+    if let Some(data) = entry.get(MMRLIR) {
+        return parse_episode_card(data);
     }
     entry.get(MRLIR).and_then(|data| parse_song_row(data, section_title))
 }
@@ -653,9 +704,12 @@ pub fn parse_song_row(data: &Value, section_title: &str) -> Option<MediaItem> {
 
 /// Port of home.py _detect_kind for something that plays: the video type
 /// decides, then the shelf it sits in, then the thumbnail address, then the
-/// shape of what was parsed. None means a podcast episode, which no page draws.
+/// shape of what was parsed. A podcast episode is a video marked "Episode".
 pub fn with_playable_kind(mut item: MediaItem, video_type: Option<&str>, section_title: &str) -> Option<MediaItem> {
     item.kind = detect_kind(video_type, item.thumb.as_deref(), section_title, &item)?;
+    if video_type.is_some_and(|t| t.contains("PODCAST") || t.contains("EPISODE")) {
+        item.item_type = Some("Episode".to_owned());
+    }
     Some(item)
 }
 
@@ -667,9 +721,6 @@ pub fn detect_kind(video_type: Option<&str>, thumb: Option<&str>, section_title:
     if let Some(video_type) = video_type {
         if video_type == "MUSIC_VIDEO_TYPE_ATV" {
             return Some(ItemKind::Song);
-        }
-        if video_type.contains("PODCAST") || video_type.contains("EPISODE") {
-            return None;
         }
         return Some(ItemKind::Video);
     }
@@ -836,5 +887,13 @@ mod tests {
         assert_eq!(track.set_video_id.as_deref(), Some("SET1"));
         assert_eq!(track.like_status, LikeStatus::Like);
         assert!(track.is_available);
+    }
+
+    #[test]
+    fn an_episode_states_its_length_in_words() {
+        assert_eq!(parse_spoken_duration("50 min"), Some(3000));
+        assert_eq!(parse_spoken_duration("1 hr 5 min"), Some(3900));
+        assert_eq!(parse_spoken_duration("2 hr"), Some(7200));
+        assert_eq!(parse_spoken_duration(" \u{2022} "), None);
     }
 }

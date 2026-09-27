@@ -298,7 +298,7 @@ needs a listener with one.
 
 The playlist disk cache is `PlaylistDiskCache` in `net/cache.rs`, a JSON file per playlist under the data directory standing in for DownloadDB's library_cache table: header fields, author, count and rows. The page reads it on the runtime when it opens (header and rows render before the live fetch, which then waits the two seconds the Python page waited), serves the whole page from it offline, writes it 1.5 s after each fetch with the same no-regression guard, and deletes it when rows are removed or the page is refreshed. The library's offline greying keeps rows live when a cached copy with rows exists.
 
-Two deliberate differences: the Python edit dialog's save job never called the edit endpoint, only mirrored the cover and reloaded, so this port sends changed title, description and privacy too. Download badges and Download All have no data source until the download manager lands, and the yt-dlp flat enumeration stage of the full fetch is not ported.
+Two deliberate differences: the Python edit dialog's save job never called the edit endpoint, only mirrored the cover and reloaded, so this port sends changed title, description and privacy too. The full fetch keeps the raw-continuation stage for a playlist that comes back short of its track count. Python's last stage, a yt-dlp flat listing that filled the remaining gap with bare stubs, is not ported.
 
 ## Playback details that matched the Python player late
 
@@ -542,25 +542,27 @@ asked for the default.
 
 ## Not ported yet, and where it attaches
 
-Audited against the Python tree on 2026-09-14. The two smallest entries,
-library search and the audio-version swap, were closed the same day. The
-settings dialog, scrobbling, Discord Rich Presence, cover theming and the
-lyrics view landed on 2026-09-18, see "Settings, presence and theming" below.
+Audited against the Python tree on 2026-09-14. Library search and the
+audio-version swap closed that day. The settings dialog, scrobbling, Discord
+Rich Presence, cover theming and the lyrics view landed on 2026-09-18, see
+"Settings, presence and theming" below. Podcast shows and profiles landed on
+2026-09-27, see Podcasts below.
 
-- Search drops podcast and profile rows. Episodes are kept: they map to
-  `ItemKind::Video` with item type "Episode" and sit under "More results".
-  Python listed the other two there as well. `ItemKind` has no kind for
-  them, and the app has no page that opens one.
 - Non-seekable streams: fragmented m4a, which is what uploads come as, seeks
   through playbin's download flag (`set_download_buffering`). Python's tmpfs
   staging and its `noseek_vids.json` memory are not ported and not needed for
   that case. A stream that refuses to seek for another reason stays unseekable.
-- Windows support: system media controls, a tray icon and a sign-in webview.
-  The Python app had them (`player/smtc.py`, `ui/tray_win.py`,
-  `ui/login_webview_win.py`, in git history). `fonts/` is kept for this port.
-  `discord.rs` uses a Unix socket and needs a named-pipe transport there.
-- Podcast shows in search results. Episodes are listed and play, a show has no
-  page to open.
+- Windows support, in progress. `.github/workflows/build-windows.yml` builds
+  against MSYS2's UCRT64 GTK 4, libadwaita and GStreamer and runs the tests;
+  nothing Windows-only is compiled anywhere else. In place: Discord over the
+  `\\.\pipe\discord-ipc-N` named pipe, bundled SQLite, `.exe` helpers found
+  beside the app, and PO tokens from the bundled `rustypipe-botguard.exe`
+  (`net/potoken_cli.rs`), since V8 has no prebuilt library for windows-gnu.
+  Still to do: System Media Transport Controls in `smtc.rs` (a stub keeping
+  the two calls main.rs makes), the sign-in window in WebView2 (`login.rs`
+  shows a placeholder on Windows), a tray icon, the `mixtapes://` registry
+  entry, exe metadata, and packaging the DLLs and GStreamer plugins with the
+  installer in `windows/installer.iss`.
 
 Dead in the Python tree, deliberately skipped: `ui/pages/mix.py`,
 `ui/pages/mood.py`, `ui/pages/album.py` and `ui/queue.py` are never
@@ -719,9 +721,9 @@ plays instantly and offline, gapless arming included. The cover of a downloaded
 track is cached under `<cache>/local_covers` and rows prefer it, which is what
 makes art appear with no connection.
 
-Settings for format and folder layout are not ported yet: the values come from
-the shared prefs.json, so changing them in the Python app changes both.
-`Downloads::migrate_layout` is ready for the settings page to call.
+Format and folder layout are set under Preferences, General, Downloads. A new
+folder layout moves the files already downloaded through
+`Downloads::migrate_layout`.
 
 ## Lyrics
 
@@ -959,3 +961,30 @@ music.youtube.com and an automatic handover, on by default, on the first page
 load only, since the site never reloads between pages. Linux routes links per
 scheme, never per domain, so a plain https link cannot reach the app without
 the browser.
+
+## Podcasts
+
+A show is a playlist to the app, with id `MPSP` plus its playlist id and
+`item_type` "Podcast". `playlists::get_podcast` builds it from two browses in
+parallel: the show page for the header (title, description, art, and the host
+from `straplineTextOne`), and `VL` plus the playlist id for the episodes,
+since the show page lists them as multi-row items while the playlist browse
+answers with ordinary rows and no header. Every episode gets
+`MUSIC_VIDEO_TYPE_PODCAST_EPISODE`, so `Track::is_episode` holds and the
+audio-version swap leaves it alone: a song search for an episode finds a
+stranger. The playlist page opens `MPSP` ids through `get_podcast`, and a bare
+`PL` id whose playlist browse has no header is tried as a show once. The page
+says "Podcast" where a playlist says its privacy, and counts episodes.
+
+Episode cards (`musicMultiRowListItemRenderer`) parse in `items::parse_episode_card`:
+a video marked "Episode", its show in the album slot so a tap opens it, or a
+channel in the artist slot when the card names one, and the length read from
+"50 min" or "1 hr 5 min". Explore puts a Podcasts pill first among the genres.
+It opens the category page with `explore::PODCASTS_KEY`, which loads
+`get_podcasts_page`: the feed behind Home's Podcasts chip, whose params are
+read from Home by name, with the params seen on 2026-09-27 as the fallback.
+
+Search keeps podcast, episode and profile rows. A profile is an artist with
+`item_type` "Profile", and the artist page already draws user channels. Home
+keeps podcast shelves and cards. Trending on Explore stays a music chart and
+leaves episodes out.

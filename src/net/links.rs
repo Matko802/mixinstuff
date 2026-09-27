@@ -81,6 +81,9 @@ pub fn parse(text: &str) -> Option<Link> {
 fn from_browse_id(id: &str) -> Option<Link> {
     if id.starts_with("MPREb") {
         Some(Link::Album(id.to_owned()))
+    } else if id.starts_with("MPSP") {
+        // A podcast show opens on the playlist page, which knows the id.
+        Some(Link::Playlist(id.to_owned()))
     } else if id.starts_with("UC") {
         Some(Link::Artist(id.to_owned()))
     } else {
@@ -130,6 +133,7 @@ mod tests {
         assert_eq!(parse("https://music.youtube.com/browse/VLPLabc"), Some(Link::Playlist("PLabc".into())));
         assert_eq!(parse("https://music.youtube.com/channel/UCabc"), Some(Link::Artist("UCabc".into())));
         assert_eq!(parse("https://music.youtube.com/browse/UCabc"), Some(Link::Artist("UCabc".into())));
+        assert_eq!(parse("https://music.youtube.com/browse/MPSPPLabc"), Some(Link::Playlist("MPSPPLabc".into())));
     }
 
     #[test]

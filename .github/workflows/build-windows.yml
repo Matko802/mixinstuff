@@ -1,0 +1,71 @@
+name: Build Windows (Experimental)
+
+# Builds the Rust app against MSYS2's GTK 4, libadwaita and GStreamer, then
+# runs the test suite. The Windows-only code (named-pipe Discord, the bundled
+# botguard program, the sign-in placeholder) is compiled nowhere else, so this
+# job is its only check until someone runs the build on a Windows machine.
+
+on:
+  push:
+    branches: [main, rust]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-rust
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-libadwaita
+            mingw-w64-ucrt-x86_64-gstreamer
+            mingw-w64-ucrt-x86_64-gst-plugins-base
+            mingw-w64-ucrt-x86_64-gst-plugins-good
+            mingw-w64-ucrt-x86_64-gst-plugins-bad
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: windows-cargo-
+
+      - name: Toolchain versions
+        run: |
+          rustc -vV
+          pkg-config --modversion gtk4 libadwaita-1 gstreamer-1.0
+
+      - name: Build
+        run: cargo build --locked --release
+
+      - name: Test
+        # Network tests are #[ignore]d, as on Linux.
+        run: cargo test --locked --release
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: mixtapes-windows-exe
+          path: target/release/mixtapes.exe
+          if-no-files-found: error

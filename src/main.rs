@@ -14,6 +14,8 @@ mod downloads;
 mod local_library;
 mod lyrics;
 mod model;
+// MPRIS on Linux. Elsewhere the same two calls land in smtc.rs.
+#[cfg_attr(not(target_os = "linux"), path = "smtc.rs")]
 mod mpris;
 mod net;
 mod paths;

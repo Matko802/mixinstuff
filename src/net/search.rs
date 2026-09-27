@@ -165,9 +165,6 @@ pub fn parse_search_response(response: &Value, filter_kind: Option<ItemKind>) ->
         let Some(shelf) = section.get("musicShelfRenderer") else { continue };
         let category = shelf.pointer("/title/runs/0/text").and_then(Value::as_str).unwrap_or("");
         let shelf_kind = filter_kind.or_else(|| kind_from_category(category));
-        if is_skipped_category(category) {
-            continue;
-        }
         let Some(contents) = shelf.get("contents").and_then(Value::as_array) else { continue };
         for entry in contents {
             if let Some(renderer) = entry.get("musicResponsiveListItemRenderer") {
@@ -180,11 +177,6 @@ pub fn parse_search_response(response: &Value, filter_kind: Option<ItemKind>) ->
     results
 }
 
-fn is_skipped_category(category: &str) -> bool {
-    let low = category.to_lowercase();
-    low.contains("podcast") || low.contains("episode") || low.contains("profile")
-}
-
 fn kind_from_category(category: &str) -> Option<ItemKind> {
     let low = category.to_lowercase();
     if low.starts_with("song") {
@@ -195,8 +187,12 @@ fn kind_from_category(category: &str) -> Option<ItemKind> {
         Some(ItemKind::Album)
     } else if low.starts_with("artist") {
         Some(ItemKind::Artist)
-    } else if low.contains("playlist") {
+    } else if low.contains("playlist") || low.starts_with("podcast") {
         Some(ItemKind::Playlist)
+    } else if low.starts_with("profile") {
+        Some(ItemKind::Artist)
+    } else if low.starts_with("episode") {
+        Some(ItemKind::Video)
     } else {
         None
     }
@@ -208,7 +204,9 @@ fn kind_from_type_word(word: &str) -> Option<ItemKind> {
         "video" => Some(ItemKind::Video),
         "album" | "single" | "ep" => Some(ItemKind::Album),
         "artist" => Some(ItemKind::Artist),
-        "playlist" => Some(ItemKind::Playlist),
+        "playlist" | "podcast" => Some(ItemKind::Playlist),
+        "profile" => Some(ItemKind::Artist),
+        "episode" => Some(ItemKind::Video),
         _ => None,
     }
 }
@@ -307,8 +305,10 @@ fn parse_list_item(renderer: &Value, shelf_kind: Option<ItemKind>) -> Option<Med
     let leading_kind = runs.first().and_then(|(t, _)| kind_from_type_word(t));
     let mut item_type = None;
     if let Some(kind) = leading_kind {
-        if kind == ItemKind::Album {
-            item_type = Some(runs[0].0.trim().to_owned());
+        let word = runs[0].0.trim().to_owned();
+        // Album says which kind of release. Podcast, Profile and Episode say what the row opens.
+        if kind == ItemKind::Album || matches!(word.as_str(), "Podcast" | "Profile" | "Episode") {
+            item_type = Some(word);
         }
         runs.remove(0);
     }
@@ -329,8 +329,14 @@ fn parse_list_item(renderer: &Value, shelf_kind: Option<ItemKind>) -> Option<Med
         (None, Some((id, page_type))) => {
             if id.starts_with("MPRE") || page_type.as_deref() == Some("MUSIC_PAGE_TYPE_ALBUM") {
                 ItemKind::Album
+            } else if page_type.as_deref() == Some("MUSIC_PAGE_TYPE_USER_CHANNEL") {
+                item_type = Some("Profile".to_owned());
+                ItemKind::Artist
             } else if id.starts_with("UC") || page_type.as_deref() == Some("MUSIC_PAGE_TYPE_ARTIST") {
                 ItemKind::Artist
+            } else if id.starts_with("MPSP") || page_type.as_deref() == Some("MUSIC_PAGE_TYPE_PODCAST_SHOW_DETAIL_PAGE") {
+                item_type = Some("Podcast".to_owned());
+                ItemKind::Playlist
             } else if id.starts_with("VL") || id.starts_with("PL") || id.starts_with("RD") || page_type.as_deref() == Some("MUSIC_PAGE_TYPE_PLAYLIST") {
                 ItemKind::Playlist
             } else {
@@ -574,3 +580,4 @@ mod tests {
         assert!(results.items.iter().any(|i| i.kind == ItemKind::Artist));
     }
 }
+

@@ -147,7 +147,13 @@ impl CategoryPage {
         self.loading_wrap.set_visible(true);
         let api = self.ctx.net.client().api();
         let params = params.to_owned();
-        let handle = self.ctx.net.spawn(async move { explore::get_category_page(&api, &params).await });
+        let handle = self.ctx.net.spawn(async move {
+            if params == explore::PODCASTS_KEY {
+                explore::get_podcasts_page(&api).await
+            } else {
+                explore::get_category_page(&api, &params).await
+            }
+        });
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let outcome = handle.await;
@@ -234,7 +240,7 @@ impl CategoryPage {
         for item in showing {
             let row = SongRow::new(self.ctx.clone());
             row.set_search_style(true);
-            row.set_plain_subtitle(Some(item.artists_text()));
+            row.set_plain_subtitle(Some(plain_subtitle(item)));
             row.bind(item, None);
             list.append(row.widget());
             self.rows.borrow_mut().push(row);
@@ -301,4 +307,13 @@ fn is_song_section(section: &CategorySection) -> bool {
 
 fn heading(title: &str) -> gtk::Label {
     gtk::Label::builder().label(title).css_classes(["heading"]).halign(gtk::Align::Start).build()
+}
+
+/// The artists, or for an episode its show and length.
+fn plain_subtitle(item: &MediaItem) -> String {
+    if item.item_type.as_deref() != Some("Episode") {
+        return item.artists_text();
+    }
+    let show = item.album.as_ref().map(|a| a.name.clone()).unwrap_or_else(|| item.artists_text());
+    [show, item.duration_text().unwrap_or_default()].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" \u{2022} ")
 }

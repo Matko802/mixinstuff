@@ -398,7 +398,8 @@ impl TrackRow {
 
         let dur_text = track
             .duration_seconds
-            .map(|d| format!("{}:{:02}", d / 60, d % 60))
+            // An episode or a long mix runs past the hour: "3:36:56", not "216:56".
+            .map(|d| if d >= 3600 { format!("{}:{:02}:{:02}", d / 3600, (d % 3600) / 60, d % 60) } else { format!("{}:{:02}", d / 60, d % 60) })
             .unwrap_or_default();
         self.duration.set_label(&dur_text);
         self.duration.set_visible(!dur_text.is_empty() && !multi);

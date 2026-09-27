@@ -274,9 +274,11 @@ pub async fn write_netscape_cookies(dir: &Path, cookie_header: &str) -> std::io:
 
 /// PATH lookup plus the install spots the Python app checked.
 pub fn find_executable(name: &str) -> Option<PathBuf> {
-    let mut candidates: Vec<PathBuf> = std::env::var_os("PATH")
-        .map(|p| std::env::split_paths(&p).map(|d| d.join(name)).collect())
-        .unwrap_or_default();
+    let name = &format!("{name}{}", std::env::consts::EXE_SUFFIX);
+    // A Windows install carries its helpers beside the app.
+    let beside_app = std::env::current_exe().ok().filter(|_| cfg!(windows)).and_then(|exe| exe.parent().map(|dir| dir.join(name)));
+    let mut candidates: Vec<PathBuf> = beside_app.into_iter().collect();
+    candidates.extend(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).map(|d| d.join(name)).collect::<Vec<_>>()).unwrap_or_default());
     if let Some(home) = std::env::var_os("HOME") {
         candidates.push(PathBuf::from(home).join(".cargo/bin").join(name));
     }

@@ -6,19 +6,27 @@
 //! the app follows. The Python app also offered browser.json and pasted
 //! headers; those tabs are gone.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
+#[cfg(not(windows))]
+use std::cell::Cell;
+#[cfg(not(windows))]
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
+#[cfg(not(windows))]
 use gtk::glib;
+#[cfg(not(windows))]
 use webkit6::prelude::*;
 
 use crate::ui::context::UiContext;
 
+#[cfg_attr(windows, allow(dead_code))]
 const LOGIN_URL: &str = "https://accounts.google.com/ServiceLogin?ltmpl=music&service=youtube&uilel=3&passive=true&continue=https%3A%2F%2Fmusic.youtube.com%2Flibrary";
+#[cfg_attr(windows, allow(dead_code))]
 const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0";
 
+#[cfg(not(windows))]
 pub struct LoginDialog {
     window: adw::Window,
     webview: webkit6::WebView,
@@ -29,6 +37,7 @@ pub struct LoginDialog {
     on_success: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
+#[cfg(not(windows))]
 impl LoginDialog {
     pub fn new(ctx: Rc<UiContext>, parent: &impl IsA<gtk::Window>) -> Rc<Self> {
         let window = adw::Window::builder()
@@ -230,6 +239,49 @@ impl LoginDialog {
                 Err(_) => done(&d, false),
             }
         });
+    }
+}
+
+/// Windows has no WebKitGTK. Until its sign-in runs in WebView2, the window
+/// says so, and closing it counts as skipping like on Linux.
+#[cfg(windows)]
+pub struct LoginDialog {
+    dialog: adw::AlertDialog,
+    parent: gtk::Window,
+    ctx: Rc<UiContext>,
+    /// Kept for the WebView2 sign-in, which calls it like the Linux one.
+    #[allow(dead_code)]
+    on_success: RefCell<Option<Rc<dyn Fn()>>>,
+}
+
+#[cfg(windows)]
+impl LoginDialog {
+    pub fn new(ctx: Rc<UiContext>, parent: &impl IsA<gtk::Window>) -> Rc<Self> {
+        let dialog = adw::AlertDialog::builder()
+            .heading("Sign-in Is Coming to Windows")
+            .body("Signing in to YouTube Music is not available on Windows yet. Playlists, likes and your listening history stay on this device until then.")
+            .build();
+        dialog.add_response("close", "Close");
+        let this = Rc::new(Self { dialog, parent: parent.clone().upcast(), ctx, on_success: RefCell::new(None) });
+        let weak = Rc::downgrade(&this);
+        this.dialog.connect_closed(move |_| {
+            if let Some(d) = weak.upgrade() {
+                set_login_skipped(&d.ctx.paths, true);
+            }
+        });
+        this
+    }
+
+    pub fn set_on_success(&self, f: impl Fn() + 'static) {
+        self.on_success.replace(Some(Rc::new(f)));
+    }
+
+    pub fn present(&self) {
+        self.dialog.present(Some(&self.parent));
+    }
+
+    pub fn connect_close(&self, f: impl Fn() + 'static) {
+        self.dialog.connect_closed(move |_| f());
     }
 }
 

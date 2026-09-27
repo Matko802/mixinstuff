@@ -1042,6 +1042,10 @@ impl Player {
         if track.video_type.as_deref() == Some(AUDIO_VIDEO_TYPE) {
             return false;
         }
+        // An episode has no song twin, and a search for one finds a stranger.
+        if track.is_episode() {
+            return false;
+        }
         self.swap_checked.borrow_mut().insert(track.video_id.0.clone())
     }
 

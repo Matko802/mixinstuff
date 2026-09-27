@@ -227,31 +227,13 @@ With no credentials the Last.fm row in Preferences stays disabled and says so. L
 
 ## Authentication
 
-> [!TIP]
-> You can authenticate directly in the app using the built-in browser - no manual setup needed!
-> Only do the manual authentication if you know what you are doing.
+Mixtapes asks on first launch whether to sign in. The sign-in window is Google's own page. Once you are signed in, Mixtapes keeps its own copy of the session and clears the window's cookies.
 
-<details>
-<summary>Manual authentication (legacy)</summary>
+- **Skip it** and Mixtapes remembers. Playlists, likes, artist subscriptions and listening history then live on this device, and Home builds shelves from what you play. Sign in any time from the main menu.
+- **Brand accounts:** if your library lives on a channel of your Google account, pick it under Preferences, General, Account.
+- **Sign out** from the main menu or Preferences. Reset Mixtapes under Preferences, Advanced signs out and runs the setup again.
 
-This app uses `ytmusicapi` for backend data. Authentication gives access to your library and higher quality streams.
-
-1. Run: `ytmusicapi browser`
-2. Follow instructions to log in via your browser and paste the headers. Use a private browser profile so you don't get logged out.
-3. The output will be saved as `browser.json`.
-
-**Flatpak users:** Open YouTube Music in your browser, copy request headers as described in the [ytmusicapi docs](https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html), then:
-
-```bash
-flatpak run --command=sh com.pocoguy.Muse
-mkdir -p ~/data/Muse && cd ~/data/Muse && ytmusicapi browser
-```
-
-Paste the headers and press `Ctrl-D`.
-
-Without a `browser.json` file, the app falls back to the unauthenticated API, which may cause playback issues.
-
-</details>
+The session is stored in `headers_auth.json` in the data folder (`~/.local/share/muse`, or `~/.var/app/com.pocoguy.Muse/data/muse` for the Flatpak). Treat it like a password.
 
 ## Opening Links
 

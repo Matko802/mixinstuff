@@ -808,8 +808,8 @@ impl PlaylistPage {
             meta1_parts.push(author_markup);
         }
         let total = cached.meta.duration_seconds.filter(|s| *s > 0).unwrap_or_else(|| cached.tracks.iter().filter_map(|t| t.duration_seconds).sum());
-        let song_text = if n == 1 { "song" } else { "songs" };
-        let meta2 = if total > 0 { format!("{n} {song_text} • {}", short_duration(total)) } else { format!("{n} {song_text}") };
+        let count = count_text(n, playlists::is_podcast(&pid));
+        let meta2 = if total > 0 { format!("{count} • {}", short_duration(total)) } else { count };
         let mut thumbnails = cached.meta.thumbnails.clone();
         if thumbnails.is_empty() {
             if let Some(thumb) = initial.and_then(|i| i.thumb.clone()) {
@@ -1049,19 +1049,20 @@ impl PlaylistPage {
         let is_album = playlist_id.starts_with("MPRE") || playlist_id.starts_with("OLAK");
         let is_local = crate::local_library::is_local(playlist_id);
         let track_len = details.tracks.len();
-        let song_text = if track_len == 1 { "song" } else { "songs" };
+        let is_podcast = playlists::is_podcast(playlist_id) || playlists::is_podcast(&details.id);
+        let song_count = count_text(track_len, is_podcast);
 
         let (count_str, is_owned, author, album_type) = if is_local {
             // The likes list is yours but not something to rename or delete.
             let owned = playlist_id != crate::local_library::LIKED_ID;
-            (format!("{track_len} {song_text}"), owned, crate::local_library::HERE.to_owned(), None)
+            (song_count.clone(), owned, crate::local_library::HERE.to_owned(), None)
         } else if is_upload {
             let author = details.author.iter().map(|a| glib::markup_escape_text(&a.name).to_string()).collect::<Vec<_>>().join(", ");
-            (format!("{track_len} {song_text}"), false, author, Some("Upload".to_owned()))
+            (song_count.clone(), false, author, Some("Upload".to_owned()))
         } else if playlist_id == "LM" {
             // Liked Music shows no year, as the Python branch set year = None.
             details.year = None;
-            (format!("{track_len} {song_text}"), false, "You".to_owned(), None)
+            (song_count.clone(), false, "You".to_owned(), None)
         } else if is_album {
             self.audio_playlist_id.replace(details.audio_playlist_id.clone());
             let track_count = details.track_count.unwrap_or(track_len as u32);
@@ -1070,9 +1071,9 @@ impl PlaylistPage {
             self.ctx.net.caches().set_album_track_count(playlist_id, track_count);
             let author = artist_markup(&details.author);
             let owned = playlists::is_own_playlist(&details, playlist_id, self.account_name().as_deref());
-            (format!("{track_len} {song_text}"), owned, author, Some(album_type.to_owned()))
+            (song_count.clone(), owned, author, Some(album_type.to_owned()))
         } else {
-            let count_str = if details.track_count.is_none() && self.is_inf() { "Infinite".to_owned() } else { format!("{track_len} {song_text}") };
+            let count_str = if details.track_count.is_none() && self.is_inf() { "Infinite".to_owned() } else { song_count.clone() };
             let owned = playlists::is_own_playlist(&details, playlist_id, self.account_name().as_deref());
             self.privacy_text.replace(Some(details.privacy.clone().unwrap_or_else(|| "PUBLIC".to_owned())));
             let mut author = if details.author.is_empty() { "Unknown".to_owned() } else { artist_markup(&details.author) };
@@ -1098,8 +1099,14 @@ impl PlaylistPage {
         } else if is_local {
             meta1_parts.push("Playlist".to_owned());
         } else {
-            let privacy = self.privacy_text.borrow().clone().or_else(|| details.privacy.clone());
-            meta1_parts.push(privacy.map(capitalize).unwrap_or_else(|| "Playlist".to_owned()));
+            if is_podcast {
+                // A show has no privacy to speak of.
+                self.privacy_text.replace(None);
+                meta1_parts.push("Podcast".to_owned());
+            } else {
+                let privacy = self.privacy_text.borrow().clone().or_else(|| details.privacy.clone());
+                meta1_parts.push(privacy.map(capitalize).unwrap_or_else(|| "Playlist".to_owned()));
+            }
         }
         if let Some(year) = details.year.as_ref().filter(|y| !y.is_empty()) {
             meta1_parts.push(year.clone());
@@ -1431,7 +1438,8 @@ impl PlaylistPage {
         let tracks = list.source();
         let total: u32 = tracks.iter().filter_map(|t| t.duration_seconds).sum();
         let count = tracks.len();
-        let mut parts = vec![format!("{count} {}", if count == 1 { "song" } else { "songs" })];
+        let podcast = self.playlist_id.borrow().as_deref().is_some_and(playlists::is_podcast);
+        let mut parts = vec![count_text(count, podcast)];
         if total > 0 {
             parts.push(long_duration(total));
         }
@@ -2635,6 +2643,16 @@ fn long_duration(total: u32) -> String {
     if hours > 0 { format!("{hours} hr {minutes} min") } else { format!("{minutes} min {seconds} sec") }
 }
 
+/// "12 songs", or "12 episodes" on a podcast show.
+fn count_text(n: usize, podcast: bool) -> String {
+    match (podcast, n) {
+        (true, 1) => "1 episode".to_owned(),
+        (true, n) => format!("{n} episodes"),
+        (false, 1) => "1 song".to_owned(),
+        (false, n) => format!("{n} songs"),
+    }
+}
+
 /// "1 hr 5 min" or "4 min", what the virtual lists show.
 fn short_duration(total: u32) -> String {
     let hours = total / 3600;
@@ -2664,6 +2682,9 @@ fn yt_music_link(item_id: &str, is_album: bool, audio_playlist_id: Option<&str>)
     }
     if item_id.starts_with("OLAK") {
         return format!("https://music.youtube.com/playlist?list={item_id}");
+    }
+    if item_id.starts_with("MPSP") {
+        return format!("https://music.youtube.com/browse/{item_id}");
     }
     if is_album || item_id.starts_with("MPRE") {
         return match audio_playlist_id {
@@ -2729,11 +2750,24 @@ async fn fetch_details(api: &ytmusicapi::YTMusicClient, http: &reqwest::Client, 
         let details = playlists::get_album(api, &playlist_id).await?;
         return Ok(Fetched::Details(Box::new(details)));
     }
+    // A show lists every episode at once: there is no count to page towards.
+    if playlists::is_podcast(&playlist_id) {
+        let details = playlists::get_podcast(api, &playlist_id, None).await?;
+        return Ok(Fetched::Details(Box::new(details)));
+    }
     // Brand new playlists take a moment to appear: retry like the Python page.
     let mut last_err = None;
     for attempt in 0..3 {
         match playlists::get_playlist(api, &playlist_id, Some(limit)).await {
             Ok(details) if !details.title.is_empty() => return Ok(Fetched::Details(Box::new(details))),
+            // A podcast's own playlist id answers with rows and no header. Its show page has one.
+            Err(err) if attempt == 0 && playlist_id.starts_with("PL") => match playlists::get_podcast(api, &format!("MPSP{playlist_id}"), None).await {
+                Ok(details) => return Ok(Fetched::Details(Box::new(details))),
+                Err(_) => {
+                    tracing::warn!(%err, attempt = attempt + 1, "playlist fetch attempt failed");
+                    last_err = Some(err);
+                }
+            },
             Ok(details) => {
                 if attempt == 2 {
                     return Ok(Fetched::Details(Box::new(details)));

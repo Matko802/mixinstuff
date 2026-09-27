@@ -54,7 +54,7 @@
 //! MIXTAPES_DEMO_NEXT_AT=ms   skip to the next queue entry after that many ms
 //! MIXTAPES_DEMO_EDIT_AT=ms   append a copy of the first track after that many ms
 //! MIXTAPES_DEMO_ARTIST=id    open an artist page 1.5 s in
-//! MIXTAPES_DEMO_CLICK=ms,tooltip[,tab]  click the mapped button with that tooltip, then optionally show a tab
+//! MIXTAPES_DEMO_CLICK=ms,text[,tab]  click the mapped button with that tooltip or label, then optionally show a tab
 //! MIXTAPES_DEMO_ARTIST_RADIO=1  press the artist page's radio button six seconds in
 
 use std::collections::HashMap;
@@ -475,7 +475,10 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
                 if last > 0 && now.saturating_sub(last) > limit && reported != last {
                     reported = last;
                     // SAFETY: raising a signal in our own process has no memory safety conditions.
-                    unsafe { libc::raise(libc::SIGUSR2) };
+                    #[cfg(unix)]
+                    unsafe {
+                        libc::raise(libc::SIGUSR2)
+                    };
                 }
             }
         });
@@ -811,7 +814,7 @@ fn find_label(widget: &gtk::Widget, text: &str) -> Option<gtk::Label> {
 
 fn find_button(widget: &gtk::Widget, tooltip: &str) -> Option<gtk::Button> {
     if let Some(button) = widget.downcast_ref::<gtk::Button>() {
-        if button.is_mapped() && button.tooltip_text().as_deref() == Some(tooltip) {
+        if button.is_mapped() && (button.tooltip_text().as_deref() == Some(tooltip) || button.label().as_deref() == Some(tooltip)) {
             return Some(button.clone());
         }
     }

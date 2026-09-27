@@ -62,6 +62,7 @@ pub fn truncate_bytes(name: &str, max_bytes: usize) -> String {
 /// ext4 and APFS report 255, an encrypted home reports about 143, some network
 /// mounts less. The directory may not exist yet, so probe the nearest ancestor
 /// that does.
+#[cfg(unix)]
 pub fn name_max(dir: &Path) -> usize {
     let mut probe = dir;
     while !probe.exists() {
@@ -76,6 +77,12 @@ pub fn name_max(dir: &Path) -> usize {
     // SAFETY: the path is a valid NUL-terminated string for the length of the call.
     let value = unsafe { libc::pathconf(c_path.as_ptr(), libc::_PC_NAME_MAX) };
     if value > 0 { value as usize } else { NAME_MAX_BYTES }
+}
+
+/// NTFS and exFAT both cap a name at 255 characters, whatever the drive.
+#[cfg(windows)]
+pub fn name_max(_dir: &Path) -> usize {
+    NAME_MAX_BYTES
 }
 
 /// A filename component: invalid characters removed, length capped.

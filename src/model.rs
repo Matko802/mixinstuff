@@ -133,6 +133,11 @@ impl Default for Track {
 }
 
 impl Track {
+    /// A podcast episode: plays like a video, but has no song version.
+    pub fn is_episode(&self) -> bool {
+        self.video_type.as_deref().is_some_and(|t| t.contains("PODCAST") || t.contains("EPISODE"))
+    }
+
     pub fn is_upload(&self) -> bool {
         self.entity_id.is_some()
     }
@@ -261,7 +266,14 @@ impl MediaItem {
 
     /// The small icon beside the subtitle. A live stream shows an antenna, whatever its kind.
     pub fn kind_icon(&self) -> &'static str {
-        if self.is_live { "triangular-antenna-symbolic" } else { self.kind.icon() }
+        if self.is_live {
+            return "triangular-antenna-symbolic";
+        }
+        match self.item_type.as_deref() {
+            Some("Podcast" | "Episode") => "audio-input-microphone-symbolic",
+            Some("Profile") => "avatar-default-symbolic",
+            _ => self.kind.icon(),
+        }
     }
 
     pub fn kind_word(&self) -> String {
@@ -271,8 +283,11 @@ impl MediaItem {
         match self.kind {
             ItemKind::Album => self.item_type.clone().unwrap_or_else(|| "Album".to_owned()),
             ItemKind::Song => "Song".to_owned(),
+            ItemKind::Video if self.item_type.as_deref() == Some("Episode") => "Episode".to_owned(),
             ItemKind::Video => "Video".to_owned(),
+            ItemKind::Playlist if self.item_type.as_deref() == Some("Podcast") => "Podcast".to_owned(),
             ItemKind::Playlist => "Playlist".to_owned(),
+            ItemKind::Artist if self.item_type.as_deref() == Some("Profile") => "Profile".to_owned(),
             ItemKind::Artist => "Artist".to_owned(),
         }
     }
@@ -354,13 +369,20 @@ impl MediaItem {
             thumb: self.thumb.clone(),
             duration_seconds: self.duration_seconds,
             like_status: self.like_status.unwrap_or_default(),
-            video_type: Some(if self.kind == ItemKind::Song { "MUSIC_VIDEO_TYPE_ATV".to_owned() } else { "MUSIC_VIDEO_TYPE_OMV".to_owned() }),
+            video_type: Some(match self.kind {
+                ItemKind::Song => "MUSIC_VIDEO_TYPE_ATV".to_owned(),
+                _ if self.item_type.as_deref() == Some("Episode") => EPISODE_VIDEO_TYPE.to_owned(),
+                _ => "MUSIC_VIDEO_TYPE_OMV".to_owned(),
+            }),
             is_explicit: self.explicit,
             is_live: self.is_live,
             ..Track::default()
         })
     }
 }
+
+/// What YouTube Music calls a podcast episode's video type.
+pub const EPISODE_VIDEO_TYPE: &str = "MUSIC_VIDEO_TYPE_PODCAST_EPISODE";
 
 /// Snapshot of the signed-in session that the media layers attach to HTTP requests.
 /// Produced by the network client, consumed by yt-dlp and souphttpsrc.

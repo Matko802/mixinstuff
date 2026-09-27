@@ -269,12 +269,17 @@ impl ExplorePage {
         // The separated grids when the categories call answered, the feed's
         // own single row when it did not. "For you" is picked for the account
         // and leads, the way the Moods & Genres page orders them.
+        // Podcasts lead the genre pills, since YouTube keeps them behind a Home chip rather than a genre.
+        let with_podcasts = |pills: &[Category]| {
+            let podcasts = Category { title: "Podcasts".to_owned(), params: crate::net::explore::PODCASTS_KEY.to_owned() };
+            std::iter::once(podcasts).chain(pills.iter().cloned()).collect::<Vec<_>>()
+        };
         if !data.for_you.is_empty() || !data.moods.is_empty() || !data.genres.is_empty() {
             self.add_pill_section("For You", &data.for_you);
             self.add_pill_section("Moods & Moments", &data.moods);
-            self.add_pill_section("Genres", &data.genres);
+            self.add_pill_section("Genres", &with_podcasts(&data.genres));
         } else {
-            self.add_pill_section("Moods & Genres", &data.feed.moods_and_genres);
+            self.add_pill_section("Moods & Genres", &with_podcasts(&data.feed.moods_and_genres));
         }
 
         self.add_row_section("New Albums & Singles", capped(&data.feed.new_releases, NEW_RELEASE_LIMIT));

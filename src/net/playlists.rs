@@ -79,6 +79,17 @@ pub async fn get_playlist(api: &dyn Browse, playlist_id: &str, limit: Option<usi
         details.id = playlist_id.trim_start_matches("VL").to_owned();
     }
     let collaborative = details.collaborators.is_some();
+    details.tracks = playlist_rows(api, &response, limit, collaborative).await?;
+    details.sum_duration();
+    if playlist_id == "LM" {
+        details.title = "Your Likes".to_owned();
+        details.description = "Your liked songs from YouTube Music.".to_owned();
+    }
+    Ok(details)
+}
+
+/// The rows of a playlist browse response, following its continuations.
+async fn playlist_rows(api: &dyn Browse, response: &Value, limit: Option<usize>, collaborative: bool) -> Result<Vec<Track>, NetError> {
     let shelf = response.pointer(&format!("{SECONDARY_SECTIONS}/0/musicPlaylistShelfRenderer"));
     // Like get_continuations_2025, `limit` bounds the rows that continuations
     // add, not the first page, and nothing is truncated afterwards.
@@ -91,12 +102,40 @@ pub async fn get_playlist(api: &dyn Browse, playlist_id: &str, limit: Option<usi
         .collect(|entries| parse_playlist_items(entries.iter().copied(), false, collaborative))
         .await;
     tracks.extend(rest.strict()?);
-    details.tracks = tracks;
-    details.sum_duration();
-    if playlist_id == "LM" {
-        details.title = "Your Likes".to_owned();
-        details.description = "Your liked songs from YouTube Music.".to_owned();
+    Ok(tracks)
+}
+
+/// Whether an id names a podcast show page rather than a playlist.
+pub fn is_podcast(id: &str) -> bool {
+    id.starts_with("MPSP")
+}
+
+/// A podcast show, in the shape the playlist page draws. The show page
+/// (`MPSP` plus the playlist id) has the header: title, host, description and
+/// art. Its episode rows come in a multi-row shape, so the episodes come from
+/// the same id browsed as a playlist, which answers with ordinary rows and no
+/// header.
+pub async fn get_podcast(api: &dyn Browse, show_id: &str, limit: Option<usize>) -> Result<PlaylistDetails, NetError> {
+    let playlist_id = show_id.trim_start_matches("MPSP").to_owned();
+    let (show, list) = tokio::join!(api.post("browse", json!({ "browseId": show_id })), api.post("browse", json!({ "browseId": format!("VL{playlist_id}") })));
+    let show = show?;
+    let mut details = parse_playlist_header(&show).ok_or_else(|| message(format!("podcast {show_id}: header missing")))?;
+    details.id = show_id.to_owned();
+    // A show names its host above the title, where a playlist has its facepile.
+    if details.author.is_empty() {
+        let header = show.pointer(&format!("{HEADER_SECTION}/musicResponsiveHeaderRenderer"));
+        if let Some(host) = header.and_then(|h| array_at(h, "/straplineTextOne/runs").first().cloned()) {
+            details.author = vec![Person { name: owned_at(&host, "/text").unwrap_or_default(), id: owned_at(&host, "/navigationEndpoint/browseEndpoint/browseId") }];
+        }
     }
+    details.privacy = None;
+    details.tracks = playlist_rows(api, &list?, limit, false).await?;
+    // The playlist rows do not say they are episodes. The swap and the menus need to know.
+    for track in &mut details.tracks {
+        track.video_type = Some(crate::model::EPISODE_VIDEO_TYPE.to_owned());
+    }
+    details.track_count = Some(details.tracks.len() as u32);
+    details.sum_duration();
     Ok(details)
 }
 
@@ -1159,5 +1198,18 @@ mod tests {
         let out = editable_playlists(&[mine, theirs, liked], Some("Mohamad Obeid"));
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].id, "PL1");
+    }
+
+    /// `cargo test -- --ignored a_podcast_loads --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn a_podcast_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = crate::net::ytmusic::YtMusic::new(&crate::paths::Paths::for_tests(dir.path())).unwrap();
+        let d = get_podcast(&client.api(), "MPSPPLrAXtmErZgOdP_8GztsuKi9nrraNbKKp4", Some(150)).await.unwrap();
+        println!("{} by {:?}: {} episodes, first {:?} ({:?})", d.title, d.author.first().map(|a| &a.name), d.tracks.len(), d.tracks.first().map(|t| &t.title), d.tracks.first().and_then(|t| t.video_type.clone()));
+        assert_eq!(d.title, "Lex Fridman Podcast");
+        assert_eq!(d.author.first().map(|a| a.name.as_str()), Some("Lex Fridman"));
+        assert!(d.tracks.len() > 100, "continuations followed");
     }
 }

@@ -19,6 +19,11 @@ pub mod links;
 pub mod online;
 pub mod player_endpoint;
 pub mod playlists;
+#[cfg(not(windows))]
+pub mod potoken;
+// Windows has no prebuilt V8 for its GNU target. The bundled program mints tokens there.
+#[cfg(windows)]
+#[path = "potoken_cli.rs"]
 pub mod potoken;
 pub mod search;
 pub mod stream;

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use super::browse::Browse;
+use super::browse::{Browse, Continuation};
 use super::items::{MRLIR, MTRIR, THUMBNAIL_RENDERER, THUMBNAILS, array_at, detect_kind, is_year, last_thumbnail_url, owned_at, parse_album_card, parse_song_row, parse_video_card, str_at};
 use crate::model::{ItemKind, MediaItem, Person};
 use crate::net::ytmusic::NetError;
@@ -164,7 +164,8 @@ pub fn parse_explore(response: &Value) -> ExploreFeed {
             "FEmusic_new_releases_videos" => feed.new_videos = contents.iter().filter_map(|c| c.get(MTRIR)).filter_map(parse_video_card).collect(),
             "FEmusic_moods_and_genres" => feed.moods_and_genres = contents.iter().filter_map(parse_category).collect(),
             // The trending shelf is addressed by the playlist behind it.
-            id if id.starts_with("VLOLA") => feed.trending = contents.iter().filter_map(|c| c.get(MRLIR)).filter_map(|row| parse_song_row(row, "Trending")).collect(),
+            // Trending is a music chart. An episode that slips in stays out of it.
+            id if id.starts_with("VLOLA") => feed.trending = contents.iter().filter_map(|c| c.get(MRLIR)).filter_map(|row| parse_song_row(row, "Trending")).filter(|item| item.item_type.as_deref() != Some("Episode")).collect(),
             _ => {}
         }
     }
@@ -220,21 +221,49 @@ pub fn parse_charts(response: &Value, country: &str) -> Charts {
 }
 
 pub fn parse_category_page(response: &Value) -> Vec<CategorySection> {
-    array_at(response, SECTIONS)
+    array_at(response, SECTIONS).iter().filter_map(parse_category_shelf).collect()
+}
+
+fn parse_category_shelf(shelf: &Value) -> Option<CategorySection> {
+    let carousel = shelf.get("musicCarouselShelfRenderer")?;
+    let title = owned_at(carousel, CAROUSEL_TITLE)?;
+    let items: Vec<MediaItem> = array_at(carousel, "/contents").iter().filter_map(|entry| parse_category_item(entry, &title)).collect();
+    (!items.is_empty()).then_some(CategorySection { title, items })
+}
+
+/// What the category page is handed to show podcasts instead of a mood.
+pub const PODCASTS_KEY: &str = "podcasts";
+/// Home's Podcasts chip as read on 2026-09-27, for when the chip is not found by name.
+const PODCASTS_CHIP: &str = "ggNCSgQIDBADSgQIBxABSgQICRABSgQICBABSgQIDhABSgQIBBABSgQIDRABSgQIAxABSgQIChABSgQIBhABSgQIBRAB";
+/// Shelves of the podcasts feed, paged in the way Home pages its own.
+const PODCAST_SHELVES: usize = 20;
+
+/// The podcasts feed YouTube Music shows behind Home's Podcasts chip: shelves
+/// of episodes and shows by topic. The chip's params come from Home itself,
+/// so a change on YouTube's side is followed. The saved params are the fallback.
+pub async fn get_podcasts_page(api: &dyn Browse) -> Result<Vec<CategorySection>, NetError> {
+    let home = api.post("browse", json!({ "browseId": "FEmusic_home" })).await?;
+    let chips = array_at(&home, "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/header/chipCloudRenderer/chips");
+    let params = chips
         .iter()
-        .filter_map(|shelf| {
-            let carousel = shelf.get("musicCarouselShelfRenderer")?;
-            let title = owned_at(carousel, CAROUSEL_TITLE)?;
-            let items: Vec<MediaItem> = array_at(carousel, "/contents").iter().filter_map(|entry| parse_category_item(entry, &title)).collect();
-            (!items.is_empty()).then_some(CategorySection { title, items })
-        })
-        .collect()
+        .find(|chip| str_at(chip, "/chipCloudChipRenderer/text/runs/0/text").is_some_and(|t| t.to_lowercase().contains("podcast")))
+        .and_then(|chip| owned_at(chip, "/chipCloudChipRenderer/navigationEndpoint/browseEndpoint/params"))
+        .unwrap_or_else(|| PODCASTS_CHIP.to_owned());
+    let response = api.post("browse", json!({ "browseId": "FEmusic_home", "params": params })).await?;
+    let mut sections = parse_category_page(&response);
+    let token = owned_at(&response, "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/continuations/0/nextContinuationData/continuation");
+    let paged = Continuation::browse(api, token).limit(PODCAST_SHELVES.saturating_sub(sections.len())).collect(|page| page.iter().filter_map(|shelf| parse_category_shelf(shelf)).collect()).await;
+    sections.extend(paged.items);
+    Ok(sections)
 }
 
 /// Port of MusicClient.get_category_page's per-item read: the title, the one
 /// endpoint the item carries, its picture, and only the runs that point at an
 /// artist. A view count sits in the same column and is not one.
 fn parse_category_item(entry: &Value, section_title: &str) -> Option<MediaItem> {
+    if let Some(data) = entry.get(super::items::MMRLIR) {
+        return super::items::parse_episode_card(data);
+    }
     let (renderer, title, endpoint, thumbs, subtitle_runs) = match (entry.get(MRLIR), entry.get(MTRIR)) {
         (Some(r), _) => {
             let column = "/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0";
@@ -279,6 +308,9 @@ fn parse_category_item(entry: &Value, section_title: &str) -> Option<MediaItem> 
         } else {
             ItemKind::Playlist
         };
+        if browse_id.starts_with("MPSP") {
+            item.item_type = Some("Podcast".to_owned());
+        }
         item.id = if item.kind == ItemKind::Playlist { browse_id.trim_start_matches("VL").to_owned() } else { browse_id };
     }
     Some(item)
@@ -560,5 +592,20 @@ mod tests {
         let options = country_options(&codes);
         let names: Vec<&str> = options.iter().map(|(_, name)| name.as_str()).collect();
         assert_eq!(names, ["Global", "Germany", "United States", "XX"]);
+    }
+
+    /// `cargo test -- --ignored the_podcasts_page_loads --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn the_podcasts_page_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = crate::net::ytmusic::YtMusic::new(&crate::paths::Paths::for_tests(dir.path())).unwrap();
+        let sections = get_podcasts_page(&client.api()).await.unwrap();
+        for s in &sections {
+            let first = s.items.first().unwrap();
+            println!("{}: {} items, first {:?} {:?} show={:?} {:?}s", s.title, s.items.len(), first.item_type, first.title, first.album.as_ref().map(|a| (&a.name, &a.id)), first.duration_seconds);
+        }
+        assert!(sections.len() >= 3);
+        assert!(sections.iter().flat_map(|s| &s.items).any(|i| i.item_type.as_deref() == Some("Episode") && i.duration_seconds.is_some() && i.album.is_some()));
     }
 }

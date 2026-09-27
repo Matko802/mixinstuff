@@ -73,12 +73,6 @@ fn parse_section(shelf: &Value) -> Option<HomeSection> {
     Some(HomeSection { title, items, strapline_thumb, strapline })
 }
 
-/// Shelves the feed shows that no page here draws. Long listens stay: those are mixes, not podcasts.
-pub fn is_podcast_section(title: &str) -> bool {
-    let low = title.to_lowercase();
-    ["shows for you", "podcast", "episode"].iter().any(|k| low.contains(k))
-}
-
 /// The "Long listens" shelf: hour-long mixes, shown as rows with their length.
 pub fn is_long_listens(title: &str) -> bool {
     title.to_lowercase().contains("long listen")
@@ -134,7 +128,7 @@ pub fn section_icon(title: &str) -> Option<&'static str> {
 /// Port of _populate_feed's ordering: drop what no page draws, take the
 /// quick-picks row out for the dial, then lead with the four named rows.
 pub fn arrange(sections: Vec<HomeSection>) -> (Vec<MediaItem>, Vec<HomeSection>) {
-    let mut sections: Vec<HomeSection> = sections.into_iter().filter(|s| !s.items.is_empty() && !is_podcast_section(&s.title)).collect();
+    let mut sections: Vec<HomeSection> = sections.into_iter().filter(|s| !s.items.is_empty()).collect();
 
     let quick = sections.iter().position(|s| s.title.to_lowercase().contains("quick pick"));
     let mut dial = match quick {
@@ -242,8 +236,9 @@ mod tests {
         )]);
         let items = &parse_home(&response)[0].items;
         let kinds: Vec<ItemKind> = items.iter().map(|i| i.kind).collect();
-        assert_eq!(kinds, [ItemKind::Album, ItemKind::Artist, ItemKind::Playlist, ItemKind::Song], "the podcast show is dropped");
+        assert_eq!(kinds, [ItemKind::Album, ItemKind::Artist, ItemKind::Playlist, ItemKind::Playlist, ItemKind::Song]);
         assert_eq!(items[2].id, "PL1", "a playlist card loses its VL prefix");
+        assert_eq!((items[3].id.as_str(), items[3].item_type.as_deref()), ("MPSPabc", Some("Podcast")), "a podcast show opens as one");
     }
 
     #[test]
@@ -301,9 +296,9 @@ mod tests {
     }
 
     #[test]
-    fn podcast_shelves_and_empty_ones_are_dropped() {
+    fn empty_shelves_are_dropped_and_podcast_shelves_kept() {
         let section = |title: &str, n: usize| HomeSection { title: title.into(), items: vec![MediaItem::default(); n], ..HomeSection::default() };
-        let (_, ordered) = arrange(vec![section("Shows for you", 3), section("Episodes for you", 3), section("Nothing here", 0), section("Mixed for you", 2)]);
-        assert_eq!(ordered.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(), ["Mixed for you"]);
+        let (_, ordered) = arrange(vec![section("Shows for you", 3), section("Nothing here", 0), section("Mixed for you", 2)]);
+        assert_eq!(ordered.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(), ["Shows for you", "Mixed for you"]);
     }
 }
