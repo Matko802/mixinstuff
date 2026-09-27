@@ -9,7 +9,7 @@ use std::time::Duration;
 use gtk::{glib, prelude::*};
 
 use crate::model::{ItemKind, MediaItem};
-use crate::net::home;
+use crate::net::{home, local_feed};
 use crate::ui::context::UiContext;
 use crate::ui::cover::CoverImage;
 use crate::ui::pages::{activate_item_with_radio, attach_item_menu, clear_children, loading_box};
@@ -130,7 +130,23 @@ impl HomePage {
             return;
         }
         let api = self.ctx.net.client().api();
-        let handle = self.ctx.net.spawn(home::get_home(api, FEED_SECTIONS));
+        // Signed out, YouTube's feed is the same for everyone. Shelves from
+        // this device's plays and likes go in front of it.
+        let signals = if self.ctx.net.client().is_authenticated() { Default::default() } else { local_feed::Signals::read(&self.ctx.local) };
+        let handle = self.ctx.net.spawn(async move {
+            if signals.is_empty() {
+                return home::get_home(api, FEED_SECTIONS).await;
+            }
+            let (remote, local) = tokio::join!(home::get_home(api.clone(), FEED_SECTIONS), local_feed::build(api, signals));
+            match remote {
+                Ok(remote) => Ok(local_feed::merge(local, remote)),
+                Err(err) if !local.is_empty() => {
+                    tracing::warn!(%err, "home fetch failed, showing the local shelves");
+                    Ok(local)
+                }
+                Err(err) => Err(err),
+            }
+        });
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let outcome = handle.await;

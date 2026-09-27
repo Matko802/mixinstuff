@@ -144,7 +144,8 @@ fn main() -> glib::ExitCode {
         // A demo run is its own instance. As a unique application it handed off to
         // whatever Mixtapes was already open and exited, so testing meant closing
         // the instance the listener was using.
-        .flags(if app_ctx.demo.is_some() { gio::ApplicationFlags::NON_UNIQUE } else { gio::ApplicationFlags::FLAGS_NONE })
+        // HANDLES_OPEN: `mixtapes <link>` hands the link to the running window.
+        .flags(if app_ctx.demo.is_some() { gio::ApplicationFlags::NON_UNIQUE } else { gio::ApplicationFlags::FLAGS_NONE } | gio::ApplicationFlags::HANDLES_OPEN)
         .build();
 
     app.connect_startup(glib::clone!(
@@ -156,6 +157,20 @@ fn main() -> glib::ExitCode {
         #[strong]
         app_ctx,
         move |app| on_activate(app, &app_ctx)
+    ));
+    app.connect_open(glib::clone!(
+        #[strong]
+        app_ctx,
+        move |app, files, _| {
+            on_activate(app, &app_ctx);
+            let Some(window) = app_ctx.window.borrow().clone() else { return };
+            for file in files {
+                let uri = file.uri();
+                if !window.open_link(&uri) {
+                    tracing::warn!(%uri, "not a YouTube link");
+                }
+            }
+        }
     ));
     app.connect_shutdown(glib::clone!(
         #[strong]

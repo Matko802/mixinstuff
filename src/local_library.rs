@@ -19,6 +19,8 @@ pub const PREFIX: &str = "LOCAL_";
 /// The likes list. It is a playlist to the pages, never edited or deleted.
 pub const LIKED_ID: &str = "LOCAL_LIKED";
 pub const LIKED_TITLE: &str = "Liked Songs";
+/// YouTube's own art for its likes list, so both lists wear the same cover.
+pub const LIKED_ART: &str = "https://www.gstatic.com/youtube/media/ytm/images/pbg/liked-songs-delhi-576.png";
 /// What cards and headers say instead of an author.
 pub const HERE: &str = "On this device";
 
@@ -43,7 +45,29 @@ CREATE TABLE IF NOT EXISTS liked (
     liked_at INTEGER NOT NULL,
     track_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS plays (
+    id INTEGER PRIMARY KEY,
+    video_id TEXT NOT NULL,
+    played_at INTEGER NOT NULL,
+    track_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS plays_by_time ON plays (played_at);
+CREATE TABLE IF NOT EXISTS artists (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    thumb TEXT,
+    subscribed_at INTEGER NOT NULL
+);
 ";
+
+/// Columns added after a table first shipped. Each runs once; on a database that
+/// has the column already the statement fails and is ignored.
+const MIGRATIONS: [&str; 1] = ["ALTER TABLE artists ADD COLUMN subscribers TEXT"];
+
+/// Plays older than this leave the log, so the feed follows current taste.
+const PLAYS_KEPT_SECS: u64 = 180 * 24 * 3600;
+/// And never more rows than this.
+const PLAYS_KEPT_ROWS: i64 = 5000;
 
 pub fn is_local(id: &str) -> bool {
     id.starts_with(PREFIX)
@@ -58,7 +82,13 @@ impl LocalLibrary {
     pub fn open(paths: &Paths) -> Arc<Self> {
         let path = paths.data_dir.join("local.db");
         let library = Self { db: Mutex::new(None), path };
-        library.with_db(|db| db.execute_batch(SCHEMA));
+        library.with_db(|db| {
+            db.execute_batch(SCHEMA)?;
+            for migration in MIGRATIONS {
+                let _ = db.execute_batch(migration);
+            }
+            Ok(())
+        });
         Arc::new(library)
     }
 
@@ -117,13 +147,8 @@ impl LocalLibrary {
     }
 
     fn liked_item(&self) -> MediaItem {
-        let (count, thumb) = self.with_db(|db| {
-            let count: i64 = db.query_row("SELECT COUNT(*) FROM liked", [], |r| r.get(0))?;
-            let mut stmt = db.prepare("SELECT track_json FROM liked ORDER BY liked_at DESC")?;
-            let thumb = stmt.query_map([], |r| r.get::<_, String>(0))?.flatten().find_map(|json| thumb_of(&json));
-            Ok((count as usize, thumb))
-        });
-        item(LIKED_ID.to_owned(), LIKED_TITLE.to_owned(), count, thumb)
+        let count = self.with_db(|db| db.query_row("SELECT COUNT(*) FROM liked", [], |r| r.get::<_, i64>(0)));
+        item(LIKED_ID.to_owned(), LIKED_TITLE.to_owned(), count as usize, Some(LIKED_ART.to_owned()))
     }
 
     pub fn title_of(&self, id: &str) -> Option<String> {
@@ -160,7 +185,7 @@ impl LocalLibrary {
             title,
             description,
             privacy: None,
-            thumbnails: tracks.iter().filter_map(|t| t.thumb.clone()).take(1).collect(),
+            thumbnails: if id == LIKED_ID { vec![LIKED_ART.to_owned()] } else { tracks.iter().filter_map(|t| t.thumb.clone()).take(1).collect() },
             author: vec![Person { name: HERE.to_owned(), id: None }],
             collaborators: None,
             year: None,
@@ -274,6 +299,109 @@ impl LocalLibrary {
         });
     }
 
+    // -- subscriptions -------------------------------------------------------
+
+    /// Artists followed on this device, newest first, as library cards.
+    pub fn subscriptions(&self) -> Vec<MediaItem> {
+        self.with_db(|db| {
+            let mut stmt = db.prepare("SELECT id, name, thumb, subscribers FROM artists ORDER BY subscribed_at DESC, rowid DESC")?;
+            let rows = stmt.query_map([], |r| {
+                Ok(MediaItem { kind: ItemKind::Artist, id: r.get(0)?, title: r.get(1)?, thumb: r.get(2)?, subscribers: r.get(3)?, ..MediaItem::default() })
+            })?;
+            Ok(rows.flatten().collect())
+        })
+    }
+
+    pub fn is_subscribed(&self, artist_id: &str) -> bool {
+        self.with_db(|db| db.query_row("SELECT 1 FROM artists WHERE id = ?1", params![artist_id], |_| Ok(true)).optional().map(|found| found.unwrap_or(false)))
+    }
+
+    /// Follow or drop an artist. `artist` carries the card: name, picture and
+    /// the subscriber count as the page shows it, "19.1M".
+    pub fn set_subscribed(&self, artist: &MediaItem, subscribed: bool) {
+        self.with_db(|db| {
+            if subscribed {
+                db.execute(
+                    "INSERT OR REPLACE INTO artists (id, name, thumb, subscribers, subscribed_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![artist.id, artist.title, artist.thumb, artist.subscribers, now_millis()],
+                )?;
+            } else {
+                db.execute("DELETE FROM artists WHERE id = ?1", params![artist.id])?;
+            }
+            Ok(())
+        });
+    }
+
+    /// Fresh name, picture and count for a followed artist, keeping its place in the list.
+    pub fn refresh_subscription(&self, artist: &MediaItem) {
+        self.with_db(|db| {
+            db.execute(
+                "UPDATE artists SET name = ?2, thumb = COALESCE(?3, thumb), subscribers = COALESCE(?4, subscribers) WHERE id = ?1",
+                params![artist.id, artist.title, artist.thumb, artist.subscribers],
+            )?;
+            Ok(())
+        });
+    }
+
+    // -- listening -----------------------------------------------------------
+
+    /// One real listen, for the feed built without an account.
+    pub fn log_play(&self, track: &Track) {
+        let json = serde_json::to_string(track).unwrap_or_default();
+        let now = now() as i64;
+        self.with_db(|db| {
+            db.execute("INSERT INTO plays (video_id, played_at, track_json) VALUES (?1, ?2, ?3)", params![track.video_id.as_str(), now, json])?;
+            db.execute(
+                "DELETE FROM plays WHERE played_at < ?1 OR id <= (SELECT id FROM plays ORDER BY id DESC LIMIT 1 OFFSET ?2)",
+                params![now - PLAYS_KEPT_SECS as i64, PLAYS_KEPT_ROWS],
+            )?;
+            Ok(())
+        });
+    }
+
+    /// The last songs played, newest first, each once.
+    pub fn recent_plays(&self, limit: usize) -> Vec<Track> {
+        self.with_db(|db| {
+            let mut stmt = db.prepare("SELECT track_json FROM plays GROUP BY video_id ORDER BY MAX(played_at) DESC, MAX(id) DESC LIMIT ?1")?;
+            let rows = stmt.query_map(params![limit as i64], |r| r.get::<_, String>(0))?;
+            Ok(rows.flatten().filter_map(|json| serde_json::from_str::<Track>(&json).ok()).collect())
+        })
+    }
+
+    /// Every play, newest first, with its time in seconds, for the history page.
+    pub fn play_history(&self, limit: usize) -> Vec<(Track, i64)> {
+        self.with_db(|db| {
+            let mut stmt = db.prepare("SELECT track_json, played_at FROM plays ORDER BY played_at DESC, id DESC LIMIT ?1")?;
+            let rows = stmt.query_map(params![limit as i64], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+            Ok(rows.flatten().filter_map(|(json, at)| serde_json::from_str::<Track>(&json).ok().map(|t| (t, at))).collect())
+        })
+    }
+
+    /// Drop every play of a song from the log.
+    pub fn forget_plays(&self, video_id: &str) {
+        self.with_db(|db| db.execute("DELETE FROM plays WHERE video_id = ?1", params![video_id]).map(|_| ()));
+    }
+
+    /// The songs played most since `since_secs` ago, most first.
+    pub fn top_plays(&self, since_secs: u64, limit: usize) -> Vec<Track> {
+        let since = now().saturating_sub(since_secs) as i64;
+        self.with_db(|db| {
+            let mut stmt = db.prepare("SELECT track_json FROM plays WHERE played_at >= ?1 GROUP BY video_id ORDER BY COUNT(*) DESC, MAX(played_at) DESC LIMIT ?2")?;
+            let rows = stmt.query_map(params![since, limit as i64], |r| r.get::<_, String>(0))?;
+            Ok(rows.flatten().filter_map(|json| serde_json::from_str::<Track>(&json).ok()).collect())
+        })
+    }
+
+    /// Every play since `since_secs` ago, one track per play, for counting artists.
+    pub fn plays_since(&self, since_secs: u64) -> Vec<Track> {
+        let since = now().saturating_sub(since_secs) as i64;
+        self.with_db(|db| {
+            let mut stmt = db.prepare("SELECT track_json FROM plays WHERE played_at >= ?1")?;
+            let rows = stmt.query_map(params![since], |r| r.get::<_, String>(0))?;
+            Ok(rows.flatten().filter_map(|json| serde_json::from_str::<Track>(&json).ok()).collect())
+        })
+    }
+
     /// A bare track for a like made from a card that carries no more than an id.
     pub fn track_or_stub(&self, video_id: &VideoId, known: Option<Track>) -> Track {
         known.unwrap_or_else(|| Track { video_id: video_id.clone(), title: "Unknown".to_owned(), ..Track::default() })
@@ -372,5 +500,34 @@ mod tests {
         assert_eq!(details.description, "desc");
         assert_eq!(details.tracks.len(), 1);
         assert_eq!(again.title_of(&second).as_deref(), Some("Other"));
+    }
+
+    #[test]
+    fn a_subscription_is_kept_newest_first_until_dropped() {
+        let (_dir, lib) = library();
+        let artist = |id: &str, subs: Option<&str>| MediaItem { kind: ItemKind::Artist, id: id.to_owned(), title: id.to_owned(), subscribers: subs.map(str::to_owned), ..MediaItem::default() };
+        lib.set_subscribed(&artist("UCa", Some("1.2M")), true);
+        lib.set_subscribed(&artist("UCb", None), true);
+        let ids: Vec<String> = lib.subscriptions().into_iter().map(|a| a.id).collect();
+        assert_eq!(ids, ["UCb", "UCa"]);
+        assert!(lib.is_subscribed("UCa"));
+        lib.refresh_subscription(&artist("UCb", Some("300K")));
+        let subs: Vec<Option<String>> = lib.subscriptions().into_iter().map(|a| a.subscribers).collect();
+        assert_eq!(subs, [Some("300K".to_owned()), Some("1.2M".to_owned())], "a refresh keeps the order");
+        lib.set_subscribed(&artist("UCa", None), false);
+        assert!(!lib.is_subscribed("UCa"));
+        assert_eq!(lib.subscriptions().len(), 1);
+    }
+
+    #[test]
+    fn history_lists_every_play_newest_first_and_forgets_a_song() {
+        let (_dir, lib) = library();
+        lib.log_play(&track("a"));
+        lib.log_play(&track("b"));
+        lib.log_play(&track("a"));
+        let ids: Vec<String> = lib.play_history(10).into_iter().map(|(t, _)| t.video_id.0).collect();
+        assert_eq!(ids, ["a", "b", "a"]);
+        lib.forget_plays("a");
+        assert_eq!(lib.play_history(10).len(), 1);
     }
 }

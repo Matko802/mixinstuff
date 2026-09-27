@@ -109,7 +109,7 @@ pub async fn search_all(client: Arc<dyn Browse>, query: String) -> Result<Search
 }
 
 /// Await a set of futures concurrently without adding a futures dependency.
-async fn futures_join_all<F>(futures: impl IntoIterator<Item = F>) -> Vec<F::Output>
+pub(crate) async fn futures_join_all<F>(futures: impl IntoIterator<Item = F>) -> Vec<F::Output>
 where
     F: std::future::Future + Send + 'static,
     F::Output: Send + 'static,

@@ -493,6 +493,14 @@ impl ArtistPage {
         {
             subscribed = true;
         }
+        // Signed out, following lives on this device.
+        if !self.ctx.net.client().is_authenticated() {
+            subscribed = !channel_id.is_empty() && self.ctx.local.is_subscribed(&channel_id);
+            // The saved card follows the page, so its count does not go stale.
+            if subscribed {
+                self.ctx.local.refresh_subscription(&self.artist_card());
+            }
+        }
         self.is_subscribed.set(subscribed);
         self.update_subscribe_button();
 
@@ -1084,6 +1092,11 @@ impl ArtistPage {
         let new = !old;
         self.is_subscribed.set(new);
         self.update_subscribe_button();
+        if !self.ctx.net.client().is_authenticated() {
+            self.ctx.local.set_subscribed(&self.artist_card(), new);
+            self.ctx.nav.refresh_library();
+            return;
+        }
         let api = self.ctx.net.client().api();
         let id = channel_id.clone();
         let handle = self.ctx.net.spawn(async move {
@@ -1106,6 +1119,19 @@ impl ArtistPage {
                 Err(_) => {}
             }
         });
+    }
+
+    /// This artist as a library card, for the subscriptions kept on this device.
+    fn artist_card(&self) -> MediaItem {
+        let data = self.data.borrow();
+        MediaItem {
+            kind: ItemKind::Artist,
+            id: self.channel_id.borrow().clone(),
+            title: data.as_ref().map(|d| d.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| self.artist_name.borrow().clone()),
+            thumb: data.as_ref().and_then(|d| d.thumbnails.last().cloned()),
+            subscribers: data.as_ref().and_then(|d| d.subscribers.clone()).filter(|s| !s.is_empty()),
+            ..MediaItem::default()
+        }
     }
 
     fn update_subscribe_button(&self) {

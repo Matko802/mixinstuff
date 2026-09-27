@@ -235,7 +235,32 @@ delete paths write there. Likes without a session go through
 store when there is no session. The New Playlist dialog offers "Save To" when
 signed in and creates locally when signed out.
 
-Preferences, Application has Reset Mixtapes: after a confirmation it signs
+Subscribing without a session writes the `artists` table in `local.db` (id,
+name, thumb, time). The artist page reads and toggles it when signed out, the
+library's Artists section lists it, and a card's menu offers Unsubscribe. The
+library also watches the auth state, since a startup check that ends signed
+out never flips the `authenticated` flag the page otherwise loads on.
+
+Signed out, Listening History reads the same `plays` table: every play newest
+first, each song once per heading, under Today, Yesterday, This week, Last week
+and then the month, computed in local time. Remove from History deletes the
+song's rows. The menu entry stays enabled signed out and needs no network then.
+
+Home without an account: `net/local_feed.rs` builds shelves from this device.
+`Player::log_local_play` writes a play to the `plays` table in `local.db` once
+a signed-out listener has heard 30 seconds or half the song, unless history is
+set to Never. The log keeps 180 days and at most 5000 rows. On Home,
+`Signals::read` picks the seeds (most played in 30 days, then likes) and the
+top artists (plays in 90 days, a like counts twice), then up to five
+followed artists not already among them. `build` fetches a radio
+per seed and an artist page per artist, all anonymous, and returns Quick picks
+(the radios taking turns, seeds left out), Listen again, New from artists you
+like (this year and last, artists taking turns) and "Similar to" shelves for
+the first three artists. `merge` puts them ahead of YouTube's signed-out feed and drops
+YouTube's rows of the same name. A failed fetch costs its shelf only. The
+shelves are rebuilt with Home, so they follow new plays on the next refresh.
+
+Preferences, Advanced has Reset Mixtapes: after a confirmation it signs
 out, removes `prefs.json`, the library and album caches, the playlist cache
 and the whole cache dir, then spawns the same executable and quits. The new
 process is a fresh install and opens the wizard. Downloads and `local.db`
@@ -522,9 +547,10 @@ library search and the audio-version swap, were closed the same day. The
 settings dialog, scrobbling, Discord Rich Presence, cover theming and the
 lyrics view landed on 2026-09-18, see "Settings, presence and theming" below.
 
-- Search drops podcast, episode and profile rows. Python lists them under
-  "More results" in the Other tab. `ItemKind` has no kind for them, and the
-  app has no page that opens one.
+- Search drops podcast and profile rows. Episodes are kept: they map to
+  `ItemKind::Video` with item type "Episode" and sit under "More results".
+  Python listed the other two there as well. `ItemKind` has no kind for
+  them, and the app has no page that opens one.
 - Non-seekable streams: fragmented m4a, which is what uploads come as, seeks
   through playbin's download flag (`set_download_buffering`). Python's tmpfs
   staging and its `noseek_vids.json` memory are not ported and not needed for
@@ -533,8 +559,6 @@ lyrics view landed on 2026-09-18, see "Settings, presence and theming" below.
   The Python app had them (`player/smtc.py`, `ui/tray_win.py`,
   `ui/login_webview_win.py`, in git history). `fonts/` is kept for this port.
   `discord.rs` uses a Unix socket and needs a named-pipe transport there.
-- The Nix flake builds the Rust crate but was written without a working Nix
-  store to test it on.
 - Podcast shows in search results. Episodes are listed and play, a show has no
   page to open.
 
@@ -792,6 +816,29 @@ before it was fixed. Closed the same day:
   for Discord and scrobbles (`backfill_album`), Previous restarts after 5 s,
   and Ctrl+slash opens the shortcuts dialog.
 
+## PO tokens
+
+Uploaded songs play only through yt-dlp with a GVS PO token for the
+`web_music` client. `net/potoken.rs` mints them with the `rustypipe-botguard`
+library, which runs YouTube's BotGuard challenge in V8 through `deno_core`.
+It used to be the same project's CLI, run once per token and found on PATH.
+A V8 runtime cannot leave its thread, so one `botguard` thread owns it with a
+current-thread tokio runtime, fed through a channel; it starts on the first
+token asked for, so a listener who never plays an upload never pays for the
+isolate. The first runtime of a process comes from
+`<cache>/botguard_snapshot.bin` when that is still valid, else from a fresh
+challenge that is then saved as the snapshot. The library keeps the first
+snapshot it read for the whole process, so after that one expires the next
+runtime is a fresh challenge without a snapshot. Measured: the first token in
+0.6 to 1.2 s with a fresh challenge, the next in 5 to 18 ms. The isolate
+costs about 55 MB of resident memory once it exists and stays for the process:
+releasing it when idle was tried and measured, only 11 MB came back and the
+next isolate grew the process to 97 MB, so reuse won. The release binary grew
+from 25 MB to 66 MB stripped, almost all of it V8. Tokens are cached per video
+until five minutes before they expire, and a failed challenge is not retried
+for a minute. `an_upload_resolves` and `mints_a_token` are the ignored network
+tests.
+
 ## Resources and packaging
 
 `build.rs` compiles `resources/resources.gresource.xml` into the binary with
@@ -808,9 +855,16 @@ while the Python app occupied `src/`.
 
 The AUR PKGBUILD and the Flatpak manifest build the crate with cargo and
 install one binary (`mixtapes`, with `muse` as a link), the desktop file, the
-metainfo and the app icon. `rustypipe-botguard` still ships beside it
-(`/usr/lib/mixtapes/bin`, or `/app/bin`), and yt-dlp with Node stays a runtime
-dependency for the fallback resolver and downloads.
+metainfo and the app icon. yt-dlp with Node stays a runtime dependency for the fallback resolver and
+downloads. `rustypipe-botguard` is no longer shipped beside the app: it is
+linked in as a crate (see PO tokens below). Its `v8` dependency downloads a
+prebuilt `librusty_v8` of about 28 MB in its build script. The AUR build and
+the Flatpak (whose muse module already has network) fetch it themselves. The
+Nix sandbox has none, so `flake.nix` pins the archive with `fetchurl` and
+passes it as `RUSTY_V8_ARCHIVE`; its version must follow `v8` in Cargo.lock
+(130.0.7 now) and the two hashes with it. The build script's download has
+no timeout: on a flaky connection to GitHub it sat at zero CPU for twenty
+minutes. `RUSTY_V8_ARCHIVE=<local .a.gz>` skips it; the README says how.
 
 Test builds on 2026-09-22, from a committed copy of the tree in /tmp so a
 PKGBUILD's `git+file://` source and the manifest's `type: dir` see the same
@@ -883,3 +937,25 @@ build stalls for its own reasons.
   scroll. The flag is gone. Random enough that neither fix is confirmed.
 - Open: a skip still shows one long frame gap in release (several hundred ms)
   that the frame phases do not account for.
+
+## Links
+
+`net/links.rs` turns a YouTube or YouTube Music URL into a `Link`: a song
+(with its playlist when the link names one), a playlist, an album or an
+artist. `watch`, `youtu.be`, `shorts`, `playlist`, `channel` and `browse`
+parse without a request. Anything else on a YouTube host, @handles for
+example, goes to `navigation/resolve_url` with the host set to
+music.youtube.com, since the music client answers youtube.com URLs with a bare
+`urlEndpoint`. `MainWindow::open_link` plays a song through
+`Player::play_link` (the watch queue YouTube Music would play, from that song
+on) or pushes the page. Two ways in: a link pasted into the search field opens
+instead of searching, and the application sets `HANDLES_OPEN`, so
+`mixtapes <link>` hands the link to the running window. The desktop entry
+passes `%U` and registers `x-scheme-handler/mixtapes`. `mixtapes://open?url=`
+carries a link (one level, a wrapped `mixtapes:` link is refused), and
+`mixtapes://music.youtube.com/...` reads as the same path over https.
+`extras/open-in-mixtapes.user.js` is the browser half: a button on
+music.youtube.com and an automatic handover, on by default, on the first page
+load only, since the site never reloads between pages. Linux routes links per
+scheme, never per domain, so a plain https link cannot reach the app without
+the browser.

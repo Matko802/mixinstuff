@@ -28,6 +28,18 @@
         # JavaScript runtime for YouTube's player code, and ffmpeg to convert.
         runtimeTools = [ pkgs.yt-dlp pkgs.nodejs pkgs.ffmpeg ];
 
+        # The v8 crate under the PO-token minter downloads a prebuilt library in
+        # its build script. The sandbox has no network, so it is fetched here and
+        # handed over through RUSTY_V8_ARCHIVE. The version follows v8 in Cargo.lock.
+        rustyV8Version = "130.0.7";
+        rustyV8Archive = pkgs.fetchurl {
+          url = "https://github.com/denoland/rusty_v8/releases/download/v${rustyV8Version}/librusty_v8_release_${pkgs.stdenv.hostPlatform.rust.rustcTarget}.a.gz";
+          hash = {
+            x86_64-linux = "sha256-pkdsuU6bAkcIHEZUJOt5PXdzK424CEgTLXjLtQ80t10=";
+            aarch64-linux = "sha256-vu/ns1q+53FZ98tVCWZmsHYwwRBH1fOnTdBlhjcpkVo=";
+          }.${system};
+        };
+
         mixtapes = pkgs.rustPlatform.buildRustPackage {
           pname = "mixtapes";
           inherit version;
@@ -50,6 +62,8 @@
             # The ytmusicapi crate brings reqwest with native TLS, so openssl-sys builds too.
             pkgs.openssl
           ] ++ gstPlugins;
+
+          RUSTY_V8_ARCHIVE = rustyV8Archive;
 
           # The tests that matter need the network or a signed-in session.
           doCheck = false;

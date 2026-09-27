@@ -47,6 +47,7 @@ A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 - [Features](#features)
 - [Installation](#installation)
 - [Authentication](#authentication)
+- [Opening Links](#opening-links)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [Star History](#star-history)
@@ -170,14 +171,15 @@ cargo build --release
 > player endpoint directly and need none of them. `yt-dlp` (with `nodejs`) is
 > the fallback for what that endpoint declines, such as your uploaded songs,
 > and it does the downloads, with `ffmpeg` converting formats.
-> `rustypipe-botguard` mints the tokens uploads need. The packaged builds
-> bundle it. From source, install it yourself and keep it on your `PATH`:
+> The tokens uploads need are minted inside the app (the `rustypipe-botguard`
+> crate, which runs YouTube's BotGuard in an embedded V8). A clean build
+> downloads a prebuilt V8 library of about 28 MB from GitHub once. If that
+> download stalls, fetch the file yourself and point the build at it:
 >
 > ```bash
-> cargo install rustypipe-botguard
+> curl -LO https://github.com/denoland/rusty_v8/releases/download/v130.0.7/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz
+> RUSTY_V8_ARCHIVE=$PWD/librusty_v8_release_x86_64-unknown-linux-gnu.a.gz cargo build --release
 > ```
->
-> or grab a prebuilt binary from <https://codeberg.org/ThetaDev/rustypipe-botguard>.
 
 <details>
 <summary>Build with flatpak-builder</summary>
@@ -202,7 +204,6 @@ flatpak run com.pocoguy.Muse
 | SQLite                              | Download library and listening history                   |
 | yt-dlp, yt-dlp-ejs, Node.js         | Fallback stream resolver (uploads) and downloads         |
 | ffmpeg                              | Audio conversion for downloads                           |
-| rustypipe-botguard                  | Tokens for uploaded songs                                |
 
 ### Last.fm API Credentials
 
@@ -251,6 +252,18 @@ Paste the headers and press `Ctrl-D`.
 Without a `browser.json` file, the app falls back to the unauthenticated API, which may cause playback issues.
 
 </details>
+
+## Opening Links
+
+Mixtapes opens YouTube and YouTube Music links. Songs play, and playlists, albums and artists open their page.
+
+- Paste a link into the search field.
+- Run `mixtapes <link>`. A running Mixtapes takes the link.
+- Open a `mixtapes://open?url=<link>` link. Mixtapes registers the `mixtapes://` scheme, so any app or browser hands these over.
+
+To open YouTube Music pages from your browser, install the [Open in Mixtapes](https://raw.githubusercontent.com/m-obeid/Mixtapes/main/extras/open-in-mixtapes.user.js) userscript with [Violentmonkey](https://violentmonkey.github.io/) or Tampermonkey. A song, playlist, album or artist page you open in the browser goes straight to Mixtapes. Browsing within the site stays in the browser, and an "Open in Mixtapes" button hands over the page you are on. The script's menu switches the automatic handover off. The browser asks once before it lets a page open Mixtapes.
+
+Your desktop sends every `https://` link to the browser and has no way to hand one site to another app, so links clicked outside the browser still open there first.
 
 ## Roadmap
 

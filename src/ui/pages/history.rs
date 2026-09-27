@@ -1,6 +1,7 @@
 //! Port of ui/pages/history.py: the plays YouTube has recorded, grouped under
 //! the headings it filed them under. A row plays from there through the rest
-//! of the history, and its menu can forget it.
+//! of the history, and its menu can forget it. Signed out, the page shows the
+//! play log kept on this device instead, under the same kind of headings.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -16,6 +17,9 @@ use crate::ui::widgets::song_row::SongRow;
 /// How far the page scrolls before the header takes over the title.
 const TITLE_HANDOVER: f64 = 50.0;
 const EMPTY_TEXT: &str = "Your listening history will appear here after you play something.";
+const LOCAL_EMPTY_TEXT: &str = "Songs you play without signing in appear here. They stay on this device.";
+/// How many local plays the page lists.
+const LOCAL_LIMIT: usize = 500;
 /// The queue a history row plays is the history itself, not a playlist.
 const QUEUE_SOURCE: &str = "HISTORY";
 
@@ -125,7 +129,7 @@ impl HistoryPage {
     /// replaces them. Without a cache the page waits on the spinner.
     pub fn load(self: &Rc<Self>) {
         if !self.ctx.player.state().authenticated() {
-            self.show_empty("Sign in to view listening history.");
+            self.load_local();
             return;
         }
         let cached = history::cached_history(self.ctx.downloads.store());
@@ -143,7 +147,11 @@ impl HistoryPage {
 
     /// Port of refresh_from_server.
     pub fn refresh(self: &Rc<Self>) {
-        if !self.ctx.player.state().authenticated() || self.loading.get() {
+        if !self.ctx.player.state().authenticated() {
+            self.load_local();
+            return;
+        }
+        if self.loading.get() {
             return;
         }
         if !self.ctx.online.is_online() {
@@ -174,6 +182,25 @@ impl HistoryPage {
                 Err(_) => {}
             }
         });
+    }
+
+    /// The play log on this device, each song once per heading.
+    fn load_local(self: &Rc<Self>) {
+        let now = glib::DateTime::now_local().ok();
+        let mut entries: Vec<HistoryEntry> = Vec::new();
+        for (track, played_at) in self.ctx.local.play_history(LOCAL_LIMIT) {
+            let played = now.as_ref().and_then(|now| local_heading(played_at, now)).unwrap_or_else(|| "Earlier".to_owned());
+            if entries.iter().any(|e| e.played == played && e.track.video_id == track.video_id) {
+                continue;
+            }
+            entries.push(HistoryEntry { track, played, feedback_token: None });
+        }
+        if entries.is_empty() {
+            self.entries.borrow_mut().clear();
+            self.show_empty(LOCAL_EMPTY_TEXT);
+            return;
+        }
+        self.render(entries);
     }
 
     fn render(self: &Rc<Self>, entries: Vec<HistoryEntry>) {
@@ -256,6 +283,16 @@ impl HistoryPage {
                 page.play_from(index);
             }
         })}];
+        if !self.ctx.player.state().authenticated() {
+            let weak = Rc::downgrade(self);
+            extras.push(MenuAction::new("Remove from History", Section::Remove, move || {
+                if let Some(page) = weak.upgrade() {
+                    page.ctx.local.forget_plays(&video_id);
+                    page.load_local();
+                }
+            }));
+            return extras;
+        }
         // No token means a brand account, where YouTube offers no removal.
         if let Some(token) = token {
             let weak = Rc::downgrade(self);
@@ -302,6 +339,25 @@ impl HistoryPage {
     }
 }
 
+/// The heading a play made at `played_at` goes under, the way YouTube files
+/// them: Today, Yesterday, This week, Last week, then the month.
+fn local_heading(played_at: i64, now: &glib::DateTime) -> Option<String> {
+    let played = glib::DateTime::from_unix_local(played_at).ok()?;
+    let midnight = |d: &glib::DateTime| glib::DateTime::from_local(d.year(), d.month(), d.day_of_month(), 0, 0, 0.0).ok();
+    let days = (midnight(now)?.difference(&midnight(&played)?).as_seconds() as f64 / 86400.0).round() as i64;
+    Some(heading_for(days, played.format("%B %Y").ok()?.as_str()))
+}
+
+fn heading_for(days_ago: i64, month: &str) -> String {
+    match days_ago {
+        ..=0 => "Today".to_owned(),
+        1 => "Yesterday".to_owned(),
+        2..=6 => "This week".to_owned(),
+        7..=13 => "Last week".to_owned(),
+        _ => month.to_owned(),
+    }
+}
+
 /// Port of the row's subtitle: the artists, then the album behind a bullet.
 fn subtitle(track: &Track) -> String {
     let album = track.album.as_ref().map(|a| a.name.as_str()).unwrap_or_default();
@@ -331,5 +387,27 @@ fn as_item(track: &Track) -> MediaItem {
 fn clear_children(container: &gtk::Box) {
     while let Some(child) = container.first_child() {
         container.remove(&child);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_plays_file_under_youtubes_headings() {
+        let cases = [(0, "Today"), (1, "Yesterday"), (2, "This week"), (6, "This week"), (7, "Last week"), (13, "Last week"), (14, "March 2026")];
+        for (days, heading) in cases {
+            assert_eq!(heading_for(days, "March 2026"), heading, "{days} days ago");
+        }
+    }
+
+    #[test]
+    fn a_play_from_this_morning_is_today() {
+        let now = glib::DateTime::from_local(2026, 9, 27, 18, 0, 0.0).unwrap();
+        let morning = glib::DateTime::from_local(2026, 9, 27, 0, 30, 0.0).unwrap().to_unix();
+        let late_last_night = glib::DateTime::from_local(2026, 9, 26, 23, 30, 0.0).unwrap().to_unix();
+        assert_eq!(local_heading(morning, &now).as_deref(), Some("Today"));
+        assert_eq!(local_heading(late_last_night, &now).as_deref(), Some("Yesterday"));
     }
 }

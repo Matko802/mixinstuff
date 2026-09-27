@@ -1226,15 +1226,44 @@ impl MainWindow {
         });
     }
 
+    /// Open a YouTube or YouTube Music link: play a song, or show its page.
+    /// Returns false when the text is no YouTube link at all.
+    pub fn open_link(self: &Rc<Self>, text: &str) -> bool {
+        if !crate::net::links::is_youtube_url(text) {
+            return false;
+        }
+        let api = self.ui.net.client().api();
+        let text_c = text.trim().to_owned();
+        let handle = self.ui.net.spawn(async move { crate::net::links::resolve(&api, &text_c).await });
+        let weak = Rc::downgrade(self);
+        let text = text.trim().to_owned();
+        glib::spawn_future_local(async move {
+            let outcome = handle.await;
+            let Some(w) = weak.upgrade() else { return };
+            use crate::net::links::Link;
+            match outcome {
+                Ok(Ok(Some(Link::Song { video_id, playlist_id }))) => w.ui.player.play_link(video_id, playlist_id),
+                Ok(Ok(Some(Link::Playlist(id)))) => w.navigate(NavRequest::Playlist { id, title: String::new(), thumb: None }),
+                Ok(Ok(Some(Link::Album(id)))) => w.navigate(NavRequest::Album { id, title: String::new(), thumb: None }),
+                Ok(Ok(Some(Link::Artist(id)))) => w.navigate(NavRequest::Artist { id: Some(id), name: String::new() }),
+                Ok(Ok(None)) => w.add_toast("Mixtapes cannot open this link"),
+                Ok(Err(err)) => {
+                    tracing::warn!(%err, text, "link did not resolve");
+                    w.add_toast("Could not open the link");
+                }
+                Err(_) => {}
+            }
+        });
+        true
+    }
+
     /// Port of _open_history_from_menu: the page builds its rows once it is
     /// on screen, so the push animation is not stalled by a few hundred of them.
     pub fn open_history(self: &Rc<Self>) {
-        if !self.ui.online.is_online() {
+        // Signed out, the page lists the plays kept on this device, which needs no network.
+        let signed_in = matches!(self.ui.net.client().auth_state(), AuthState::Authenticated(_));
+        if signed_in && !self.ui.online.is_online() {
             self.add_toast("History requires an internet connection");
-            return;
-        }
-        if !matches!(self.ui.net.client().auth_state(), AuthState::Authenticated(_)) {
-            self.add_toast("Sign in to view listening history");
             return;
         }
         let page = HistoryPage::new(self.ui.clone());
@@ -1602,6 +1631,13 @@ impl MainWindow {
                 id.remove();
             }
             let text = entry.text().to_string();
+            // A pasted YouTube link opens what it points at instead of searching for it.
+            if crate::net::links::is_youtube_url(&text) && w.open_link(&text) {
+                let entry = entry.clone();
+                glib::idle_add_local_once(move || entry.set_text(""));
+                w.search_bar.set_search_mode(false);
+                return;
+            }
             // The library, a playlist or a discography filters its own rows instead.
             if let Some(filter) = w.active_filter() {
                 filter(&text);
@@ -2355,7 +2391,7 @@ fn set_account_actions_authed(window: &adw::ApplicationWindow, authed: bool, has
     for (name, enabled) in [
         ("open-channel", authed && has_handle),
         ("open-upload", authed),
-        ("open-history", authed),
+        ("open-history", true),
         ("logout", authed),
         ("sign-in", !authed),
     ] {

@@ -17,13 +17,8 @@ conflicts=("mixtapes")
 install="${pkgname}.install"
 # makepkg's -flto breaks the link of aws-lc-sys, the C library under rustls.
 options=(!lto)
-_botguard_ver=0.1.2
 source=("${pkgname}::git+https://github.com/m-obeid/Mixtapes.git")
-source_x86_64=("rustypipe-botguard-${_botguard_ver}-x86_64.tar.xz::https://codeberg.org/ThetaDev/rustypipe-botguard/releases/download/v${_botguard_ver}/rustypipe-botguard-v${_botguard_ver}-x86_64-unknown-linux-gnu.tar.xz")
-source_aarch64=("rustypipe-botguard-${_botguard_ver}-aarch64.tar.xz::https://codeberg.org/ThetaDev/rustypipe-botguard/releases/download/v${_botguard_ver}/rustypipe-botguard-v${_botguard_ver}-aarch64-unknown-linux-gnu.tar.xz")
 sha256sums=('SKIP')
-sha256sums_x86_64=('4f2ec561e8f9fadece7deadc6ce0624fbdedd852222c3eb194c22153b1323129')
-sha256sums_aarch64=('4d038857374a69aea9be8ded981d93a776dc88d4e254f5c6d292746099abf69a')
 
 pkgver() {
   cd "$pkgname"
@@ -40,7 +35,8 @@ build() {
   cd "$pkgname"
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
-  # The stylesheet and icons are compiled into the binary by build.rs.
+  # The stylesheet and icons are compiled into the binary by build.rs. The v8
+  # crate under the PO-token minter fetches its prebuilt library here.
   cargo build --frozen --release
 }
 
@@ -50,11 +46,6 @@ package() {
   install -Dm755 target/release/mixtapes "$pkgdir/usr/bin/mixtapes"
   # 'muse' stays as an alias, which is what the desktop file runs.
   ln -sf mixtapes "$pkgdir/usr/bin/muse"
-
-  # PO-token minter. The app probes /usr/lib/mixtapes/bin, so this never
-  # collides with a standalone rustypipe-botguard on /usr/bin. It is only
-  # needed for what the player endpoint declines, such as uploaded songs.
-  install -Dm755 "$srcdir/rustypipe-botguard" "$pkgdir/usr/lib/mixtapes/bin/rustypipe-botguard"
 
   install -Dm644 com.pocoguy.Muse.desktop "$pkgdir/usr/share/applications/com.pocoguy.Muse.desktop"
   install -Dm644 com.pocoguy.Muse.metainfo.xml "$pkgdir/usr/share/metainfo/com.pocoguy.Muse.metainfo.xml"

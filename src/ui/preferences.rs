@@ -28,17 +28,32 @@ const LASTFM_POLL: Duration = Duration::from_secs(2);
 
 pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesDialog {
     let dialog = adw::PreferencesDialog::new();
-    let page = adw::PreferencesPage::builder().title("General").icon_name("preferences-system-symbolic").build();
-    dialog.add(&page);
 
-    page.add(&account_group(win, ctx, &dialog));
-    page.add(&application_group(win, ctx));
-    page.add(&appearance_group(win, ctx));
-    page.add(&visualizer_group(win, ctx));
-    page.add(&discord_group(ctx));
-    page.add(&scrobbler_group(win, ctx, &dialog));
-    page.add(&downloads_group(win, ctx));
+    let general = adw::PreferencesPage::builder().name("general").title("General").icon_name("preferences-system-symbolic").build();
+    general.add(&account_group(win, ctx, &dialog));
+    general.add(&playback_group(win, ctx));
+    general.add(&downloads_group(win, ctx));
+    general.add(&updates_group(ctx));
+    dialog.add(&general);
+
+    let appearance = adw::PreferencesPage::builder().name("appearance").title("Appearance").icon_name("preferences-desktop-appearance-symbolic").build();
+    appearance.add(&appearance_group(win, ctx));
+    appearance.add(&layout_group(win, ctx));
+    appearance.add(&visualizer_group(win, ctx));
+    dialog.add(&appearance);
+
     dialog.add(&crate::ui::preferences_lyrics::build_page(win, ctx));
+
+    let services = adw::PreferencesPage::builder().name("services").title("Services").icon_name("network-workgroup-symbolic").build();
+    services.add(&discord_group(ctx));
+    services.add(&scrobbler_group(win, ctx, &dialog));
+    dialog.add(&services);
+
+    let advanced = adw::PreferencesPage::builder().name("advanced").title("Advanced").icon_name("applications-engineering-symbolic").build();
+    advanced.add(&troubleshooting_group(win, ctx));
+    // Last on the last page, away from everything a listener changes often.
+    advanced.add(&reset_group(win, ctx));
+    dialog.add(&advanced);
 
     dialog.present(Some(win.window()));
     dialog
@@ -73,18 +88,24 @@ pub(super) fn combo_row(title: &str, subtitle: &str, labels: &[&str], selected: 
     row
 }
 
-/// The 220 px value slider every numeric setting uses.
-pub(super) fn scale_row(title: &str, subtitle: &str, (min, max, step): (f64, f64, f64), value: f64, digits: i32) -> (adw::ActionRow, gtk::Scale) {
-    let row = adw::ActionRow::builder().title(title).subtitle(subtitle).build();
+/// A numeric setting: title and subtitle on top, the slider across the full
+/// row beneath, so a narrow window leaves the text room to breathe.
+pub(super) fn scale_row(title: &str, subtitle: &str, (min, max, step): (f64, f64, f64), value: f64, digits: i32) -> (adw::PreferencesRow, gtk::Scale) {
+    let row = adw::PreferencesRow::builder().title(title).activatable(false).build();
+    let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).margin_top(8).margin_bottom(4).margin_start(12).margin_end(12).build();
+    content.append(&gtk::Label::builder().label(title).xalign(0.0).wrap(true).css_classes(["title"]).build());
+    if !subtitle.is_empty() {
+        content.append(&gtk::Label::builder().label(subtitle).xalign(0.0).wrap(true).css_classes(["subtitle"]).build());
+    }
     let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, min, max, step);
     scale.set_value(value);
     scale.set_draw_value(true);
     scale.set_value_pos(gtk::PositionType::Right);
     scale.set_digits(digits);
-    scale.set_size_request(220, -1);
-    scale.set_valign(gtk::Align::Center);
-    scale.set_hexpand(false);
-    row.add_suffix(&scale);
+    scale.set_hexpand(true);
+    content.append(&scale);
+    row.set_child(Some(&content));
+    row.add_css_class("scale-row");
     (row, scale)
 }
 
@@ -273,56 +294,33 @@ fn switch_channel(ctx: &Rc<App>, win: std::rc::Weak<MainWindow>, expander: glib:
     });
 }
 
-// -- application ----------------------------------------------------------------
+// -- playback ------------------------------------------------------------------
 
-fn application_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::builder().title("Application").build();
+fn playback_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder().title("Playback").build();
 
-    let debug_row = switch_row("Enable Debug Logs", "Print diagnostic information to the terminal", crate::bootstrap::debug_logs(&ctx.paths));
+    let background_row = switch_row("Background Playback", "Allow music to keep playing when the window is closed", pref_bool(ctx, "background_play", true));
     {
         let ctx = ctx.clone();
-        debug_row.connect_active_notify(move |row| crate::bootstrap::set_debug_logs(&ctx.paths, row.is_active()));
+        background_row.connect_active_notify(move |row| save(&ctx, "background_play", row.is_active()));
     }
-    group.add(&debug_row);
+    group.add(&background_row);
 
-    let notes_row = switch_row("Release Notes After Updates", "Open what's new once for each new version", pref_bool(ctx, crate::ui::release_notes::SHOW_PREF, true));
+    let current = pref_str(ctx, "history_mode", "immediate");
+    let labels: Vec<&str> = HISTORY_MODES.iter().map(|(_, label)| *label).collect();
+    let selected = HISTORY_MODES.iter().position(|(key, _)| *key == current).unwrap_or(0);
+    let history_row = combo_row("Record Plays to History", "When a song counts as played, for YouTube Music or, signed out, for Home on this device", &labels, selected);
     {
         let ctx = ctx.clone();
-        notes_row.connect_active_notify(move |row| save(&ctx, crate::ui::release_notes::SHOW_PREF, row.is_active()));
-    }
-    group.add(&notes_row);
-
-    let donate_row = switch_row("Donation Prompts", "Show the Ko-fi banner under the release notes", pref_bool(ctx, crate::ui::release_notes::DONATION_PREF, true));
-    {
-        let ctx = ctx.clone();
-        donate_row.connect_active_notify(move |row| save(&ctx, crate::ui::release_notes::DONATION_PREF, row.is_active()));
-    }
-    group.add(&donate_row);
-
-    let reset_row = adw::ActionRow::builder().title("Reset Mixtapes").subtitle("Sign out, clear settings and caches, and run the setup again. Downloads and playlists kept on this device stay.").build();
-    let reset_btn = gtk::Button::builder().label("Reset…").valign(gtk::Align::Center).css_classes(["destructive-action"]).build();
-    {
-        let (win, ctx) = (Rc::downgrade(win), ctx.clone());
-        reset_btn.connect_clicked(move |button| {
-            if let Some(win) = win.upgrade() {
-                confirm_reset(button.upcast_ref(), &win, &ctx);
+        history_row.connect_selected_notify(move |row| {
+            if let Some((key, _)) = HISTORY_MODES.get(row.selected() as usize) {
+                save(&ctx, "history_mode", *key);
+                // The next track respects the new mode without a restart.
+                ctx.player.set_history_mode(key);
             }
         });
     }
-    reset_row.add_suffix(&reset_btn);
-    group.add(&reset_row);
-
-    let stream_row = adw::ActionRow::builder().title("Stream Info (Debug)").subtitle("Show format, protocol and seek range of the current stream").activatable(true).build();
-    stream_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
-    {
-        let win = Rc::downgrade(win);
-        stream_row.connect_activated(move |_| {
-            if let Some(win) = win.upgrade() {
-                win.show_stream_info();
-            }
-        });
-    }
-    group.add(&stream_row);
+    group.add(&history_row);
 
     let offline_row = switch_row("Force Offline Mode", "Disable all network requests and use only downloaded content", pref_bool(ctx, "force_offline", false));
     {
@@ -336,26 +334,34 @@ fn application_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGro
         });
     }
     group.add(&offline_row);
+    group
+}
 
-    let background_row = switch_row("Background Playback", "Allow music to keep playing when the window is closed", pref_bool(ctx, "background_play", true));
+// -- updates -------------------------------------------------------------------
+
+fn updates_group(ctx: &Rc<App>) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder().title("Updates").build();
+
+    let notes_row = switch_row("Release Notes After Updates", "Open what's new once for each new version", pref_bool(ctx, crate::ui::release_notes::SHOW_PREF, true));
     {
         let ctx = ctx.clone();
-        background_row.connect_active_notify(move |row| save(&ctx, "background_play", row.is_active()));
+        notes_row.connect_active_notify(move |row| save(&ctx, crate::ui::release_notes::SHOW_PREF, row.is_active()));
     }
-    group.add(&background_row);
+    group.add(&notes_row);
 
-    let sidebar_row = switch_row("Sidebar on the Right", "Place the queue sidebar on the right edge", pref_str(ctx, "sidebar_position", "left") == "right");
+    let donate_row = switch_row("Donation Prompts", "Show the Ko-fi and GitHub Sponsors banner under the release notes", pref_bool(ctx, crate::ui::release_notes::DONATION_PREF, true));
     {
         let ctx = ctx.clone();
-        let win = Rc::downgrade(win);
-        sidebar_row.connect_active_notify(move |row| {
-            save(&ctx, "sidebar_position", if row.is_active() { "right" } else { "left" });
-            if let Some(win) = win.upgrade() {
-                win.set_sidebar_on_right(row.is_active());
-            }
-        });
+        donate_row.connect_active_notify(move |row| save(&ctx, crate::ui::release_notes::DONATION_PREF, row.is_active()));
     }
-    group.add(&sidebar_row);
+    group.add(&donate_row);
+    group
+}
+
+// -- advanced ------------------------------------------------------------------
+
+fn troubleshooting_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder().title("Troubleshooting").build();
 
     // Some GPU and driver pairs crash inside the default renderer. Read at the next launch.
     let current = pref_str(ctx, "gsk_renderer", "default");
@@ -372,21 +378,43 @@ fn application_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGro
     }
     group.add(&renderer_row);
 
-    let current = pref_str(ctx, "history_mode", "immediate");
-    let labels: Vec<&str> = HISTORY_MODES.iter().map(|(_, label)| *label).collect();
-    let selected = HISTORY_MODES.iter().position(|(key, _)| *key == current).unwrap_or(0);
-    let history_row = combo_row("Record Plays to History", "When Mixtapes should tell YouTube Music a song was played", &labels, selected);
+    let debug_row = switch_row("Enable Debug Logs", "Print diagnostic information to the terminal", crate::bootstrap::debug_logs(&ctx.paths));
     {
         let ctx = ctx.clone();
-        history_row.connect_selected_notify(move |row| {
-            if let Some((key, _)) = HISTORY_MODES.get(row.selected() as usize) {
-                save(&ctx, "history_mode", *key);
-                // The next track respects the new mode without a restart.
-                ctx.player.set_history_mode(key);
+        debug_row.connect_active_notify(move |row| crate::bootstrap::set_debug_logs(&ctx.paths, row.is_active()));
+    }
+    group.add(&debug_row);
+
+    let stream_row = adw::ActionRow::builder().title("Stream Info (Debug)").subtitle("Show format, protocol and seek range of the current stream").activatable(true).build();
+    stream_row.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
+    {
+        let win = Rc::downgrade(win);
+        stream_row.connect_activated(move |_| {
+            if let Some(win) = win.upgrade() {
+                win.show_stream_info();
             }
         });
     }
-    group.add(&history_row);
+    group.add(&stream_row);
+    group
+}
+
+fn reset_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder()
+        .description("Sign out, clear settings and caches, and run the setup again. Downloads and playlists kept on this device stay.")
+        .build();
+    let reset_row = adw::ButtonRow::builder().title("Reset Mixtapes").end_icon_name("go-next-symbolic").build();
+    // The builder would replace the button class the row styles itself with.
+    reset_row.add_css_class("destructive-action");
+    {
+        let (win, ctx) = (Rc::downgrade(win), ctx.clone());
+        reset_row.connect_activated(move |row| {
+            if let Some(win) = win.upgrade() {
+                confirm_reset(row.upcast_ref(), &win, &ctx);
+            }
+        });
+    }
+    group.add(&reset_row);
     group
 }
 
@@ -439,7 +467,7 @@ fn reset_and_restart(win: &Rc<MainWindow>, ctx: &Rc<App>) {
 // -- appearance -------------------------------------------------------------------
 
 fn appearance_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::builder().title("Appearance").build();
+    let group = adw::PreferencesGroup::builder().title("Theme").build();
 
     let blur_row = switch_row("Blurred Cover Background", "Use the current track's cover as a blurred window background", pref_bool(ctx, "blurred_background", false));
     {
@@ -487,6 +515,24 @@ fn appearance_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGrou
     }
     group.add(&accent_row);
     accent_row.add_row(&tinted_row);
+    group
+}
+
+fn layout_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder().title("Layout").build();
+
+    let sidebar_row = switch_row("Queue on the Right", "Place the queue sidebar on the right edge of the window", pref_str(ctx, "sidebar_position", "left") == "right");
+    {
+        let ctx = ctx.clone();
+        let win = Rc::downgrade(win);
+        sidebar_row.connect_active_notify(move |row| {
+            save(&ctx, "sidebar_position", if row.is_active() { "right" } else { "left" });
+            if let Some(win) = win.upgrade() {
+                win.set_sidebar_on_right(row.is_active());
+            }
+        });
+    }
+    group.add(&sidebar_row);
     group
 }
 

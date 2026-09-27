@@ -43,7 +43,7 @@
 //! MIXTAPES_DEMO_CLASSES=1    with TOGGLE: log every widget's classes and state after each toggle, to diff
 //! MIXTAPES_DEMO_FRAMES=1     log once a second: frames, worst gap, gaps over 25 ms, and time spent inside frames
 //! MIXTAPES_DEMO_PRESENCE=1   let a demo run scrobble and publish Discord presence
-//! MIXTAPES_DEMO_PREFS=ms[,px[,page]]  open Preferences, scroll px, show page "lyrics"
+//! MIXTAPES_DEMO_PREFS=ms[,px[,page]]  open Preferences, show the named page, scroll px
 //! MIXTAPES_DEMO_STREAM_INFO=ms  open the expanded player's Stream Info dialog
 //! MIXTAPES_DEMO_SWIPE=ms[,covers]  swipe the carousel over two seconds
 //! MIXTAPES_DEMO_DELETE_DOWNLOAD=id  delete one download
@@ -54,6 +54,7 @@
 //! MIXTAPES_DEMO_NEXT_AT=ms   skip to the next queue entry after that many ms
 //! MIXTAPES_DEMO_EDIT_AT=ms   append a copy of the first track after that many ms
 //! MIXTAPES_DEMO_ARTIST=id    open an artist page 1.5 s in
+//! MIXTAPES_DEMO_CLICK=ms,tooltip[,tab]  click the mapped button with that tooltip, then optionally show a tab
 //! MIXTAPES_DEMO_ARTIST_RADIO=1  press the artist page's radio button six seconds in
 
 use std::collections::HashMap;
@@ -506,14 +507,14 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         let mut parts = spec.split(',');
         let delay = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(3000);
         let pixels = parts.next().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
-        let lyrics = parts.next() == Some("lyrics");
+        let page = parts.next().map(str::to_owned);
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
             let Some(mw) = ctx_w.window.borrow().clone() else { return };
             mw.window().present();
             let dialog = crate::ui::preferences::present(&mw, &ctx_w);
-            if lyrics {
-                adw::prelude::PreferencesDialogExt::set_visible_page_name(&dialog, "lyrics");
+            if let Some(page) = &page {
+                adw::prelude::PreferencesDialogExt::set_visible_page_name(&dialog, page);
             }
             glib::timeout_add_local_once(Duration::from_millis(1200), move || {
                 let mut scrollers = Vec::new();
@@ -610,6 +611,22 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         glib::timeout_add_local_once(Duration::from_millis(1500), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
                 mw.open_discography_for_demo(&id);
+            }
+        });
+    }
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_CLICK") {
+        let mut parts = spec.splitn(3, ',');
+        let ms = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(6000);
+        let (tooltip, tab) = (parts.next().unwrap_or_default().to_owned(), parts.next().map(str::to_owned));
+        let (win, ctx_w) = (window.clone(), ctx.clone());
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
+            let button = find_button(win.upcast_ref(), &tooltip);
+            tracing::info!(tooltip, found = button.is_some(), "demo: click");
+            if let Some(button) = button {
+                button.emit_clicked();
+            }
+            if let (Some(tab), Some(mw)) = (tab, ctx_w.window.borrow().as_ref()) {
+                mw.select_tab(&tab);
             }
         });
     }
@@ -785,6 +802,22 @@ fn find_label(widget: &gtk::Widget, text: &str) -> Option<gtk::Label> {
     let mut child = widget.first_child();
     while let Some(c) = child {
         if let Some(found) = find_label(&c, text) {
+            return Some(found);
+        }
+        child = c.next_sibling();
+    }
+    None
+}
+
+fn find_button(widget: &gtk::Widget, tooltip: &str) -> Option<gtk::Button> {
+    if let Some(button) = widget.downcast_ref::<gtk::Button>() {
+        if button.is_mapped() && button.tooltip_text().as_deref() == Some(tooltip) {
+            return Some(button.clone());
+        }
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if let Some(found) = find_button(&c, tooltip) {
             return Some(found);
         }
         child = c.next_sibling();

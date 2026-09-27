@@ -239,6 +239,25 @@ impl LibraryPage {
                 });
             }
         }
+        // A session check that ends signed out flips nothing above, since the
+        // flag was false all along. The local library shows once it is known.
+        {
+            let weak = Rc::downgrade(&page);
+            let mut auth = page.ctx.net.client().subscribe_auth();
+            glib::spawn_future_local(async move {
+                loop {
+                    let anonymous = matches!(*auth.borrow_and_update(), crate::net::ytmusic::AuthState::Anonymous);
+                    let Some(p) = weak.upgrade() else { break };
+                    if anonymous {
+                        p.load_library(true);
+                    }
+                    drop(p);
+                    if auth.changed().await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
         page
     }
 
@@ -327,6 +346,7 @@ impl LibraryPage {
             forget_library(&self.ctx.paths);
             // Signed out, the library is what lives on this device.
             sync_store(&self.sections[0].store, with_local_items(&self.ctx, Vec::new()));
+            sync_store(&self.sections[2].store, self.ctx.local.subscriptions());
             self.apply_layout();
         } else if self.sections[0].store.n_items() == 0 {
             self.fill_from_disk();
@@ -558,6 +578,9 @@ impl LibraryPage {
             .filter(|item| item.id != DOWNLOADS_ID && !crate::local_library::is_local(&item.id))
             .collect();
         sync_store(store, with_local_items(&self.ctx, remote));
+        if !self.ctx.net.client().is_authenticated() {
+            sync_store(&self.sections[2].store, self.ctx.local.subscriptions());
+        }
         self.apply_layout();
     }
 
@@ -752,6 +775,8 @@ fn with_local_items(ctx: &UiContext, remote: Vec<MediaItem>) -> Vec<MediaItem> {
 fn card_style(item: &MediaItem) -> (String, &'static str, Option<&'static str>) {
     match item.kind {
         ItemKind::Playlist if item.id == DOWNLOADS_ID => (item.description.clone().unwrap_or_default(), "media-playlist-audio-symbolic", Some("folder-download-symbolic")),
+        // An empty playlist on this device has no art yet. It gets the tile Downloads wears.
+        ItemKind::Playlist if crate::local_library::is_local(&item.id) && item.thumb.is_none() => (item.description.clone().unwrap_or_default(), "folder-music-symbolic", Some("audio-x-generic-symbolic")),
         ItemKind::Playlist if item.id.len() == 2 || crate::local_library::is_local(&item.id) => (item.description.clone().unwrap_or_default(), "folder-music-symbolic", None),
         ItemKind::Playlist => (item.count.as_ref().map(|c| format!("{c} songs")).unwrap_or_default(), "folder-music-symbolic", None),
         ItemKind::Album => (album_subtitle(item), "media-optical-symbolic", None),
@@ -898,6 +923,13 @@ fn playlist_extras(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem) 
         return vec![MenuAction::new("Delete Playlist", context_menu::Section::Remove, move || confirm_delete(&ctx, &anchor, &id, &title))];
     }
     if !ctx.net.client().is_authenticated() {
+        if item.kind == ItemKind::Artist && ctx.local.is_subscribed(&id) {
+            let ctx = ctx.clone();
+            return vec![MenuAction::new("Unsubscribe", context_menu::Section::Remove, move || {
+                ctx.local.set_subscribed(&MediaItem { kind: ItemKind::Artist, id: id.clone(), title: title.clone(), ..MediaItem::default() }, false);
+                ctx.nav.refresh_library();
+            })];
+        }
         return Vec::new();
     }
     if is_upload_album(item) {

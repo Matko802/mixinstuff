@@ -13,7 +13,9 @@ pub mod explore;
 pub mod history;
 pub mod home;
 pub mod items;
+pub mod local_feed;
 pub mod library;
+pub mod links;
 pub mod online;
 pub mod player_endpoint;
 pub mod playlists;
@@ -46,7 +48,7 @@ pub struct NetHandle {
 impl NetHandle {
     pub fn new(rt: tokio::runtime::Handle, paths: &Paths) -> anyhow::Result<Self> {
         let client = YtMusic::new(paths)?;
-        let tokens = Arc::new(potoken::PoTokens::new());
+        let tokens = Arc::new(potoken::PoTokens::new(paths));
         // The player endpoint answers in a fraction of a second. yt-dlp stays behind it for what it declines.
         let ytdlp: Arc<dyn StreamResolver> = Arc::new(YtDlpResolver::new(paths, tokens.clone()));
         let native = Arc::new(player_endpoint::PlayerEndpointResolver::new(paths, ytdlp));

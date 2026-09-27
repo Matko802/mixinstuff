@@ -26,6 +26,8 @@ webkit6 = { version = "0.6", features = ["v2_44"] }
 
 # Async runtime for the network layer. GTK keeps its own loop; tokio never touches widgets.
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process", "io-util", "net"] }
+# BotGuard in an embedded V8, for the PO tokens uploaded songs need. It was a separate program.
+rustypipe-botguard = "0.1.2"
 # InnerTube transport. rustls keeps the Flatpak build free of OpenSSL headers.
 # Do not add "brotli" or set Accept-Encoding by hand: reqwest negotiates gzip itself.
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "json", "form", "query", "gzip", "charset", "system-proxy"] }

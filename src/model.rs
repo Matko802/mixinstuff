@@ -323,6 +323,23 @@ impl MediaItem {
         }
     }
 
+    /// A queue entry back as a row or tile: a song, or a video when YouTube says so.
+    pub fn from_track(track: &Track) -> Self {
+        MediaItem {
+            kind: if track.video_type.as_deref().is_some_and(|t| t != "MUSIC_VIDEO_TYPE_ATV") { ItemKind::Video } else { ItemKind::Song },
+            id: track.video_id.0.clone(),
+            title: track.title.clone(),
+            artists: track.artists.clone(),
+            album: track.album.clone(),
+            thumb: track.thumb.clone(),
+            duration_seconds: track.duration_seconds,
+            explicit: track.is_explicit,
+            is_live: track.is_live,
+            like_status: Some(track.like_status),
+            ..MediaItem::default()
+        }
+    }
+
     /// Queue entry for songs and videos, None for collections.
     pub fn to_track(&self) -> Option<Track> {
         if !self.kind.is_playable() || self.id.is_empty() {

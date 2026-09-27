@@ -99,6 +99,8 @@ pub struct Player {
     history_mode: RefCell<String>,
     /// The video this session has already recorded, so it records once.
     history_recorded: RefCell<Option<String>>,
+    /// The video already written to the play log on this device.
+    local_logged: RefCell<Option<String>>,
     /// Videos already looked up for an audio twin, so the lookup is paid once.
     swap_checked: RefCell<std::collections::HashSet<String>>,
     /// Told when a play starts or its metadata is corrected. See `on_play`.
@@ -131,6 +133,7 @@ impl Player {
             stamp: Cell::new(0),
             history_mode: RefCell::new(paths.read_prefs().get("history_mode").and_then(|v| v.as_str()).unwrap_or(HISTORY_IMMEDIATE).to_owned()),
             history_recorded: RefCell::new(None),
+            local_logged: RefCell::new(None),
             swap_checked: RefCell::new(std::collections::HashSet::new()),
             play_listeners: RefCell::new(Vec::new()),
             swapping: Cell::new(false),
@@ -934,6 +937,9 @@ impl Player {
                 {
                     self.record_play(&self.state.video_id());
                 }
+                if self.state.status() == PlaybackStatus::Playing {
+                    self.log_local_play(position, duration.unwrap_or(self.state.duration()));
+                }
                 if let Some(d) = duration {
                     if (self.state.duration() - d).abs() > 0.1 {
                         self.state.set_duration(d);
@@ -993,6 +999,9 @@ impl Player {
         // A new track is a fresh gate, whichever way it started playing.
         if track.map(|t| t.video_id.0.as_str()) != self.history_recorded.borrow().as_deref() {
             self.history_recorded.replace(None);
+        }
+        if track.map(|t| t.video_id.0.as_str()) != self.local_logged.borrow().as_deref() {
+            self.local_logged.replace(None);
         }
         if let Some(t) = track.filter(|_| self.history_mode.borrow().as_str() == HISTORY_IMMEDIATE) {
             self.record_play(&t.video_id.0);
@@ -1061,6 +1070,9 @@ impl Player {
         // This is the same play under a new id: the history entry the load
         // already recorded stands, so mark it before the metadata goes out.
         self.history_recorded.replace(Some(swapped.video_id.0.clone()));
+        if self.local_logged.borrow().as_deref() == Some(previous.video_id.as_str()) {
+            self.local_logged.replace(Some(swapped.video_id.0.clone()));
+        }
         self.sync_queue_model();
         // Rows on the page the listener came from still hold the video's id.
         self.state.set_source_video_id(previous.video_id.0.clone());
@@ -1224,6 +1236,25 @@ impl Player {
         });
     }
 
+    /// Without an account, a listen goes to the play log on this device, which
+    /// the local shelves on Home are built from. Once per track, after 30
+    /// seconds or half the song, and never when history is switched off.
+    fn log_local_play(&self, position: f64, duration: f64) {
+        let threshold = if duration > 0.0 { HISTORY_THRESHOLD_SECS.min(duration / 2.0) } else { HISTORY_THRESHOLD_SECS };
+        if position < threshold || self.history_mode.borrow().as_str() == HISTORY_NEVER {
+            return;
+        }
+        if self.net.client().is_authenticated() {
+            return;
+        }
+        let Some(track) = self.current_track() else { return };
+        if self.local_logged.borrow().as_deref() == Some(track.video_id.as_str()) {
+            return;
+        }
+        self.local_logged.replace(Some(track.video_id.0.clone()));
+        self.local.log_play(&track);
+    }
+
     /// Port of Player.extend_queue: append at the end. Under shuffle the new
     /// tracks mix into the upcoming part, never into history or the current song.
     pub fn extend_queue(&self, tracks: Vec<Track>) {
@@ -1287,6 +1318,32 @@ impl Player {
 
     /// Port of Player.start_radio: fetch a mix for a song or playlist on the
     /// runtime and play it as an infinite queue sourced from the radio id.
+    /// A song from a link: the queue YouTube Music would play for it, which is
+    /// the linked playlist from that song on, or the song's own radio.
+    pub fn play_link(self: &Rc<Self>, video_id: String, playlist_id: Option<String>) {
+        let api = self.net.client().api();
+        let (vid, list) = (video_id.clone(), playlist_id.clone());
+        let handle = self.net.spawn(async move { crate::net::playlists::get_watch_playlist(&api, Some(&vid), list.as_deref(), 50, false).await });
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            match handle.await {
+                Ok(Ok(watch)) => {
+                    let tracks: Vec<Track> = watch.tracks.into_iter().map(|t| t.track).collect();
+                    let Some(player) = weak.upgrade() else { return };
+                    let Some(index) = tracks.iter().position(|t| t.video_id.as_str() == video_id).or((!tracks.is_empty()).then_some(0)) else {
+                        tracing::warn!(video_id, "link: no tracks returned");
+                        return;
+                    };
+                    // A linked playlist ends where it ends. A lone song keeps going as its radio.
+                    let infinite = playlist_id.is_none();
+                    player.play_tracks(tracks, index, false, watch.playlist_id.or(playlist_id), infinite);
+                }
+                Ok(Err(err)) => tracing::warn!(%err, video_id, "link playback failed"),
+                Err(_) => {}
+            }
+        });
+    }
+
     pub fn start_radio(self: &Rc<Self>, video_id: Option<String>, playlist_id: Option<String>) {
         let api = self.net.client().api();
         let handle = self.net.spawn(async move {
