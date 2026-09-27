@@ -44,18 +44,17 @@ cp -r "$PREFIX/share/icons/Adwaita" "$PREFIX/share/icons/hicolor" "$OUT/share/ic
 
 echo "DLL dependencies"
 # ntldd -R walks import tables recursively. Anything outside the MSYS2 prefix
-# is a Windows system DLL and stays out.
+# is a Windows system DLL and stays out. One ntldd and one cygpath run for the
+# whole tree: a process per line took over half an hour on the CI runner.
 prefix_bin=$(cygpath -u "$PREFIX/bin" | tr '[:upper:]' '[:lower:]')
-find "$OUT" -iname '*.exe' -o -iname '*.dll' | while read -r module; do
-    ntldd -R "$module" | sed -n 's/.* => \(.*\) (0x[0-9a-fA-F]*)$/\1/p'
-done | while read -r dep; do
-    unix=$(cygpath -u "$dep")
-    case "$(dirname "$unix" | tr '[:upper:]' '[:lower:]')" in
-        "$prefix_bin") echo "$unix" ;;
-    esac
-done | sort -u | while read -r dll; do
-    [ -e "$OUT/bin/$(basename "$dll")" ] || cp "$dll" "$OUT/bin/"
-done
+find "$OUT" \( -iname '*.exe' -o -iname '*.dll' \) -print0 \
+    | xargs -0 ntldd -R \
+    | sed -n 's/.* => \(.*\) (0x[0-9a-fA-F]*)$/\1/p' \
+    | sort -u \
+    | cygpath -u -f - \
+    | awk -v bin="$prefix_bin/" 'index(tolower($0), bin) == 1 && index(substr($0, length(bin) + 1), "/") == 0' \
+    | sort -u \
+    | xargs -r -d '\n' cp -t "$OUT/bin/"
 
 # The loaders cache should hold paths relative to the install. Printed so a
 # broken one shows up in the CI log.
