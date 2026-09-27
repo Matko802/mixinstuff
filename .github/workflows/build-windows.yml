@@ -6,8 +6,10 @@ name: Build Windows (Experimental)
 # job is its only check until someone runs the build on a Windows machine.
 
 on:
+  # A branch with an open pull request is built through the pull_request
+  # event. Listening to its pushes as well ran the same commit twice.
   push:
-    branches: [main, rust]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
