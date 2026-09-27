@@ -4,6 +4,8 @@ name: Build Windows (Experimental)
 # runs the test suite. The Windows-only code (named-pipe Discord, the bundled
 # botguard program, the sign-in placeholder) is compiled nowhere else, so this
 # job is its only check until someone runs the build on a Windows machine.
+# windows/bundle.sh then collects the DLLs, plugins and helper programs into
+# a portable folder, and Inno Setup wraps that into an installer.
 
 on:
   # A branch with an open pull request is built through the pull_request
@@ -65,9 +67,38 @@ jobs:
         # Network tests are #[ignore]d, as on Linux.
         run: cargo test --locked --release
 
-      - name: Upload binary
+      - name: Bundle
+        # Installed after the tests, which skip their ffmpeg cases when it is missing.
+        run: |
+          pacman -S --noconfirm --needed \
+            mingw-w64-ucrt-x86_64-ntldd \
+            mingw-w64-ucrt-x86_64-nodejs \
+            mingw-w64-ucrt-x86_64-ffmpeg \
+            mingw-w64-ucrt-x86_64-glib-networking \
+            mingw-w64-ucrt-x86_64-gst-plugins-ugly \
+            unzip
+          bash windows/bundle.sh
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          & $iscc /DSourcePath="$((Resolve-Path 'dist/mixtapes').Path)" windows/installer.iss
+          Get-ChildItem windows/Output/MixtapesSetup.exe
+
+      - name: Upload portable build
         uses: actions/upload-artifact@v4
         with:
-          name: mixtapes-windows-exe
-          path: target/release/mixtapes.exe
+          name: mixtapes-windows-x86_64-portable
+          path: dist/mixtapes/
+          if-no-files-found: error
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: mixtapes-windows-x86_64-setup
+          path: windows/Output/MixtapesSetup.exe
           if-no-files-found: error

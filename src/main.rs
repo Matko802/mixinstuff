@@ -6,6 +6,9 @@
 //! 3. GStreamer init, the tokio runtime and the audio thread,
 //! 4. the libadwaita application, which owns the GTK main loop.
 
+// Release builds on Windows open no console window next to the app.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod audio;
 mod bootstrap;
 mod demo;
@@ -68,6 +71,7 @@ pub struct App {
 fn main() -> glib::ExitCode {
     bootstrap::cap_malloc_arenas();
     bootstrap::raise_fd_limit();
+    bootstrap::prefer_bundled_programs();
 
     let paths = Paths::discover();
     bootstrap::init_logging(&paths);

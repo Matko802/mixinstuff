@@ -47,6 +47,23 @@ pub fn raise_fd_limit() {
     }
 }
 
+/// Put the install's own folder first on PATH on Windows.
+/// yt-dlp looks up node.exe and ffmpeg.exe on PATH, and the installer puts them beside mixtapes.exe.
+pub fn prefer_bundled_programs() {
+    #[cfg(windows)]
+    {
+        let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(std::path::Path::to_path_buf)) else {
+            return;
+        };
+        let rest = std::env::var_os("PATH").unwrap_or_default();
+        let Ok(joined) = std::env::join_paths(std::iter::once(dir).chain(std::env::split_paths(&rest))) else {
+            return;
+        };
+        // SAFETY: called from main before any other thread exists.
+        unsafe { std::env::set_var("PATH", joined) };
+    }
+}
+
 /// Honor the user's GSK renderer choice from prefs.json before GTK loads.
 /// An explicit GSK_RENDERER in the environment wins.
 pub fn apply_gsk_renderer_pref(paths: &Paths) {

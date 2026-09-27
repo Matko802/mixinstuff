@@ -20,11 +20,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 
 use crate::model::{HttpAuth, Track};
 use crate::net::NetHandle;
-use crate::net::stream::{find_executable, write_netscape_cookies};
+use crate::net::stream::{find_executable, helper_command, write_netscape_cookies};
 use crate::paths::Paths;
 
 use naming::{codec_for, disambiguated_name, download_dir, file_name, preferred_format};
@@ -420,7 +419,7 @@ impl Downloads {
     }
 
     async fn run_ytdlp(&self, scratch: &Path, video_id: &str, run: &Run) -> Result<(), String> {
-        let mut command = Command::new(&self.binary);
+        let mut command = helper_command(&self.binary);
         // Same token the resolver needs: an uploaded song is served to the
         // web_music client alone, and that client is gated behind one.
         if let Some(token) = self.net.tokens().for_video(video_id).await {

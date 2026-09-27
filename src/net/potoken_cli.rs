@@ -15,9 +15,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tokio::process::Command;
 
-use super::stream::find_executable;
+use super::stream::{find_executable, helper_command};
 use crate::paths::Paths;
 
 /// Dropped this long before the stated expiry, so a token never goes stale
@@ -50,7 +49,7 @@ impl PoTokens {
             return Some(token);
         }
         let binary = self.binary.as_ref()?;
-        let output = Command::new(binary).arg(video_id).output().await.ok()?;
+        let output = helper_command(binary).arg(video_id).output().await.ok()?;
         if !output.status.success() {
             tracing::warn!(video_id, "po token minting failed");
             return None;

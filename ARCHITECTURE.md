@@ -558,11 +558,16 @@ Rich Presence, cover theming and the lyrics view landed on 2026-09-18, see
   `\\.\pipe\discord-ipc-N` named pipe, bundled SQLite, `.exe` helpers found
   beside the app, and PO tokens from the bundled `rustypipe-botguard.exe`
   (`net/potoken_cli.rs`), since V8 has no prebuilt library for windows-gnu.
-  Still to do: System Media Transport Controls in `smtc.rs` (a stub keeping
-  the two calls main.rs makes), the sign-in window in WebView2 (`login.rs`
-  shows a placeholder on Windows), a tray icon, the `mixtapes://` registry
-  entry, exe metadata, and packaging the DLLs and GStreamer plugins with the
-  installer in `windows/installer.iss`.
+  `windows/bundle.sh` lays the release build out like an MSYS2 prefix
+  (`bin/` with the DLLs `ntldd` finds, plus yt-dlp, node, ffmpeg and
+  botguard; `lib/` plugins and modules; `share/` schemas and icons), and
+  `windows/installer.iss` wraps it. `build.rs` embeds the icon and file
+  details from `windows/mixtapes.rc`. Release builds use the windows
+  subsystem, so helpers start through `stream::helper_command`, which keeps
+  them from opening consoles. Still to do: System Media Transport Controls
+  in `smtc.rs` (a stub keeping the two calls main.rs makes), the sign-in
+  window in WebView2 (`login.rs` shows a placeholder on Windows), a tray
+  icon and the `mixtapes://` registry entry.
 
 Dead in the Python tree, deliberately skipped: `ui/pages/mix.py`,
 `ui/pages/mood.py`, `ui/pages/album.py` and `ui/queue.py` are never

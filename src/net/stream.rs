@@ -59,7 +59,7 @@ impl YtDlpResolver {
 
     async fn run(&self, video_id: &VideoId, auth: Option<&HttpAuth>) -> Result<StreamInfo, ResolveError> {
         let url = format!("https://music.youtube.com/watch?v={video_id}");
-        let mut cmd = Command::new(&self.binary);
+        let mut cmd = helper_command(&self.binary);
         cmd.args(["-j", "--no-playlist", "--no-warnings", "-f", YTDLP_FORMAT, "-S", YTDLP_FORMAT_SORT])
             .args(["--extractor-args", YTDLP_PLAYER_CLIENTS])
             .args(["--js-runtimes", "node"]);
@@ -270,6 +270,17 @@ pub async fn write_netscape_cookies(dir: &Path, cookie_header: &str) -> std::io:
     .await
     .map_err(|e| std::io::Error::other(e.to_string()))??;
     Ok(path)
+}
+
+/// A `Command` for a helper program. On Windows it gets no console window,
+/// which a windowless app would otherwise open for every yt-dlp run.
+pub fn helper_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut cmd = Command::new(program);
+    // CREATE_NO_WINDOW
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+    cmd
 }
 
 /// PATH lookup plus the install spots the Python app checked.
