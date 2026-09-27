@@ -36,7 +36,7 @@ pub fn write(paths: &Paths, store: &Store, playlist_id: &str, title: &str, track
         let seconds = track.duration_seconds.or(entry.duration_seconds).unwrap_or(0);
         let song = first_filled(&track.title, &entry.title);
         let artist = first_filled(&track.artist, &entry.artist);
-        body.push_str(&format!("#EXTINF:{seconds},{artist} - {song}\n{}\n", relative.display()));
+        body.push_str(&format!("#EXTINF:{seconds},{artist} - {song}\n{}\n", entry_line(&relative)));
     }
     if let Err(err) = std::fs::write(&path, body) {
         tracing::warn!(%err, path = %path.display(), "playlist mirror");
@@ -95,7 +95,7 @@ pub fn repoint(paths: &Paths, moves: &[(PathBuf, PathBuf)]) {
             let target = (!line.starts_with('#')).then(|| normalize(&dir.join(line)));
             let moved = target.and_then(|old| moves.iter().find(|(from, _)| normalize(from) == old)).and_then(|(_, to)| relative_to(&dir, to));
             match moved {
-                Some(relative) => out.push_str(&relative.to_string_lossy()),
+                Some(relative) => out.push_str(&entry_line(&relative)),
                 None => out.push_str(line),
             }
             out.push('\n');
@@ -106,6 +106,12 @@ pub fn repoint(paths: &Paths, moves: &[(PathBuf, PathBuf)]) {
             }
         }
     }
+}
+
+/// A path as a playlist line: forward slashes on every platform, which every
+/// player reads, so a mirror written on Windows still opens elsewhere.
+fn entry_line(relative: &Path) -> String {
+    relative.to_string_lossy().replace('\\', "/")
 }
 
 /// The first of the two that has something in it.

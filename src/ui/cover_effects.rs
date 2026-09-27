@@ -150,11 +150,13 @@ fn yt_thumb_fallback_urls(url: &str) -> Vec<String> {
 
 /// The path behind a file:// cover or a bare absolute path.
 /// The ?m=<mtime> cache-buster on a local playlist cover comes off first.
-fn local_cover_path(url: &str) -> Option<&str> {
-    if let Some(path) = url.strip_prefix("file://") {
-        return Some(path.rfind('?').map_or(path, |q| &path[..q]));
+/// glib reads the address, so `file:///C:/...` becomes a Windows path.
+fn local_cover_path(url: &str) -> Option<PathBuf> {
+    if url.starts_with("file://") {
+        let bare = url.rfind('?').map_or(url, |q| &url[..q]);
+        return glib::filename_from_uri(bare).ok().map(|(path, _)| path);
     }
-    url.starts_with('/').then_some(url)
+    Path::new(url).is_absolute().then(|| PathBuf::from(url))
 }
 
 /// Clears the in-flight entry and wakes the followers, also when the fetch is aborted.
@@ -177,10 +179,10 @@ async fn ensure_image_bytes(http: &reqwest::Client, cache_dir: &Path, url: &str)
     }
     // Local covers skip the thumb cache: the bytes are already on disk.
     if let Some(path) = local_cover_path(url) {
-        return match tokio::fs::read(path).await {
+        return match tokio::fs::read(&path).await {
             Ok(bytes) => Some(bytes),
             Err(err) => {
-                tracing::debug!(%err, path, "local cover read failed");
+                tracing::debug!(%err, ?path, "local cover read failed");
                 None
             }
         };
@@ -550,8 +552,11 @@ mod tests {
 
     #[test]
     fn local_covers_lose_their_cache_buster() {
-        assert_eq!(local_cover_path("file:///music/Playlists/Mix.jpg?m=1712"), Some("/music/Playlists/Mix.jpg"));
-        assert_eq!(local_cover_path("/music/Playlists/Mix.jpg"), Some("/music/Playlists/Mix.jpg"));
+        // A real path, so the address is valid wherever the tests run.
+        let file = std::env::temp_dir().join("Mix.jpg");
+        let uri = glib::filename_to_uri(&file, None).unwrap();
+        assert_eq!(local_cover_path(&format!("{uri}?m=1712")), Some(file.clone()));
+        assert_eq!(local_cover_path(&file.to_string_lossy()), Some(file));
         assert_eq!(local_cover_path("https://i.ytimg.com/vi/abc/default.jpg"), None);
     }
 
@@ -572,7 +577,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cache = dir.path().join("cache");
         let source = write_png(dir.path(), "cover.png", &smooth(517, 389));
-        let url = format!("file://{}?m=1", source.display());
+        let url = format!("{}?m=1", glib::filename_to_uri(&source, None).unwrap());
 
         let cover = get_blurred_cover(reqwest::Client::new(), cache.clone(), url.clone(), true).await.expect("a blurred cover");
         assert_eq!(cover.path, blur_cache_path(&cache, &url, true));

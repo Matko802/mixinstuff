@@ -6,7 +6,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gtk::{gdk, glib};
@@ -419,10 +419,8 @@ fn local_path(url: &str) -> Option<PathBuf> {
     if url.starts_with("file://") {
         return glib::filename_from_uri(url).ok().map(|(path, _)| path);
     }
-    if url.starts_with('/') {
-        return Some(PathBuf::from(url));
-    }
-    None
+    // An absolute path in the platform's own spelling, a drive letter on Windows.
+    Path::new(url).is_absolute().then(|| PathBuf::from(url))
 }
 
 /// Drop a cached texture, for a file that has been written over.

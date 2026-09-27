@@ -90,8 +90,9 @@ pub fn migrate_legacy_folder(music_dir: &Path) {
 fn rewrite_paths(music_dir: &Path, old_root: &Path) {
     let db_path = music_dir.join(".mixtapes").join("library.db");
     let Ok(db) = Connection::open(&db_path) else { return };
-    let old_prefix = format!("{}/", old_root.to_string_lossy());
-    let new_prefix = format!("{}/", music_dir.to_string_lossy());
+    let sep = std::path::MAIN_SEPARATOR;
+    let old_prefix = format!("{}{sep}", old_root.to_string_lossy());
+    let new_prefix = format!("{}{sep}", music_dir.to_string_lossy());
     for column in ["file_path", "cover_path"] {
         let sql = format!("UPDATE downloads SET {column} = ?1 || substr({column}, ?2) WHERE substr({column}, 1, ?3) = ?4");
         if let Err(err) = db.execute(&sql, rusqlite::params![new_prefix, old_prefix.len() as i64 + 1, old_prefix.len() as i64, old_prefix]) {
