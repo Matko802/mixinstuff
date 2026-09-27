@@ -64,6 +64,28 @@ pub fn prefer_bundled_programs() {
     }
 }
 
+/// Lay text out through fontconfig on Windows, like the Linux build, instead of Pango's win32 backend.
+/// The bundled etc/fonts/fonts.conf adds the install's Adwaita fonts and the Windows font folders.
+/// Both variables are read once when Pango creates its font map, so this runs before GTK loads.
+pub fn use_bundled_fonts() {
+    #[cfg(windows)]
+    {
+        let Some(root) = std::env::current_exe().ok().and_then(|exe| exe.parent()?.parent().map(std::path::Path::to_path_buf)) else {
+            return;
+        };
+        let config = root.join("etc").join("fonts").join("fonts.conf");
+        if !config.is_file() {
+            return;
+        }
+        for (key, value) in [("PANGOCAIRO_BACKEND", std::ffi::OsString::from("fc")), ("FONTCONFIG_FILE", config.into_os_string())] {
+            if std::env::var_os(key).is_none() {
+                // SAFETY: called from main before any other thread exists.
+                unsafe { std::env::set_var(key, value) };
+            }
+        }
+    }
+}
+
 /// Honor the user's GSK renderer choice from prefs.json before GTK loads.
 /// An explicit GSK_RENDERER in the environment wins.
 pub fn apply_gsk_renderer_pref(paths: &Paths) {

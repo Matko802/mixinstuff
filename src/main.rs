@@ -72,6 +72,7 @@ fn main() -> glib::ExitCode {
     bootstrap::cap_malloc_arenas();
     bootstrap::raise_fd_limit();
     bootstrap::prefer_bundled_programs();
+    bootstrap::use_bundled_fonts();
 
     let paths = Paths::discover();
     bootstrap::init_logging(&paths);

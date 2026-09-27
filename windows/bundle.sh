@@ -7,7 +7,8 @@
 #   bin/      mixtapes.exe, every DLL it needs, yt-dlp, node, ffmpeg, botguard
 #   lib/      GStreamer plugins, GIO modules, gdk-pixbuf loaders
 #   libexec/  gst-plugin-scanner
-#   share/    GSettings schemas, Adwaita and hicolor icon themes
+#   share/    GSettings schemas, Adwaita and hicolor icon themes, Adwaita fonts
+#   etc/      fonts.conf
 set -euo pipefail
 
 PREFIX="${MSYSTEM_PREFIX:?run this from an MSYS2 shell}"
@@ -37,6 +38,13 @@ cp "$PREFIX"/lib/gio/modules/*.dll "$OUT/lib/gio/modules/"
 cp -r "$PREFIX/lib/gdk-pixbuf-2.0" "$OUT/lib/"
 # souphttpsrc loads libsoup at run time, so no import table names it.
 cp "$PREFIX/bin/libsoup-3.0-0.dll" "$OUT/bin/"
+
+echo "Fonts"
+# Adwaita Sans and Mono, which style.css asks for. fonts.conf points
+# fontconfig at them and at the Windows font folders.
+mkdir -p "$OUT/share/fonts" "$OUT/etc/fonts"
+cp fonts/*.ttf fonts/LICENSE.adwaita-fonts "$OUT/share/fonts/"
+cp windows/fonts.conf "$OUT/etc/fonts/fonts.conf"
 
 echo "Schemas and icons"
 cp "$PREFIX/share/glib-2.0/schemas/gschemas.compiled" "$OUT/share/glib-2.0/schemas/"
