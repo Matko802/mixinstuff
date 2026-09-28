@@ -125,6 +125,9 @@ struct Shared {
     http_auth: Mutex<Option<HttpAuth>>,
     /// The playing URI is a live HLS stream. Its about-to-finish fires per fragment and means nothing.
     live: std::sync::atomic::AtomicBool,
+    /// Set from a load until `restore_levels` has run. The new sink reports
+    /// its own defaults first, and passing those on flicked the slider to full.
+    levels_settling: std::sync::atomic::AtomicBool,
 }
 
 /// A live HLS playlist, by its address. The queue's track may not know it is live.
@@ -309,6 +312,7 @@ impl Engine {
             pending_gapless: Mutex::new(None),
             http_auth: Mutex::new(None),
             live: std::sync::atomic::AtomicBool::new(false),
+            levels_settling: std::sync::atomic::AtomicBool::new(false),
         });
 
         // Streaming thread: push cookies and UA onto every HTTP request the source makes.
@@ -351,7 +355,11 @@ impl Engine {
         // Volume changes from the system mixer arrive here on arbitrary threads.
         {
             let control = control.clone();
+            let shared = shared.clone();
             let notify = move |obj: &gst::Element, _: &glib::ParamSpec| {
+                if shared.levels_settling.load(Ordering::Acquire) {
+                    return;
+                }
                 let _ = control.send_blocking(AudioEvent::VolumeChanged { volume: cubic_volume(obj), muted: obj.property::<bool>("mute") });
             };
             playbin.connect_notify(Some("volume"), notify.clone());
@@ -387,6 +395,15 @@ impl Engine {
                 tracing::debug!(volume, "new sink came up with another volume, restoring");
                 sv.set_volume(gst_audio::StreamVolumeFormat::Cubic, volume);
             }
+        }
+        self.release_levels();
+    }
+
+    /// End the hold a load put on volume reports, and send the level that
+    /// stands now, so the slider moves once, to the right place.
+    fn release_levels(&self) {
+        if self.shared.levels_settling.swap(false, Ordering::AcqRel) {
+            self.emit(AudioEvent::VolumeChanged { volume: cubic_volume(&self.playbin), muted: self.playbin.property::<bool>("mute") });
         }
     }
 
@@ -461,12 +478,14 @@ impl Engine {
                 self.loading.set(true);
                 self.last_status.set(PlaybackStatus::Loading);
                 self.emit(AudioEvent::StateChanged { generation, status: PlaybackStatus::Loading });
+                self.shared.levels_settling.store(true, Ordering::Release);
                 // Null flushes the bus, so no message from the old stream survives this point.
                 let _ = self.playbin.set_state(gst::State::Null);
                 self.clear_remembered_device();
                 set_download_buffering(&self.playbin, &uri);
                 self.playbin.set_property("uri", &uri);
                 if let Err(err) = self.playbin.set_state(gst::State::Playing) {
+                    self.release_levels();
                     self.loading.set(false);
                     self.emit(AudioEvent::Error { generation, message: format!("could not start playback: {err}"), debug: None });
                     self.set_status(PlaybackStatus::Stopped);
@@ -492,6 +511,7 @@ impl Engine {
                 *self.shared.pending_gapless.lock().unwrap() = None;
                 self.loading.set(false);
                 let _ = self.playbin.set_state(gst::State::Null);
+                self.release_levels();
                 self.set_status(PlaybackStatus::Stopped);
             }
             AudioCommand::Seek { seconds } => {
@@ -553,6 +573,7 @@ impl Engine {
                 let message = err.error().to_string();
                 let debug = err.debug().map(|d| d.to_string());
                 tracing::warn!(generation, %message, "pipeline error");
+                self.release_levels();
                 self.loading.set(false);
                 let _ = self.playbin.set_state(gst::State::Null);
                 self.emit(AudioEvent::Error { generation, message, debug });

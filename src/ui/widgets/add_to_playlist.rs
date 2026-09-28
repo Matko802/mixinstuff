@@ -145,6 +145,12 @@ impl AddToPlaylistPopover {
             .visible(false)
             .build();
         outer.append(&empty_label);
+        // Always there, so a listener with no playlist yet, or signed out, can still add.
+        let new_button = gtk::Button::builder()
+            .child(&adw::ButtonContent::builder().icon_name("list-add-symbolic").label("New Playlist…").build())
+            .css_classes(["flat"])
+            .build();
+        outer.append(&new_button);
         popover.set_child(Some(&outer));
 
         let filter_text: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
@@ -189,6 +195,16 @@ impl AddToPlaylistPopover {
                     (this.on_select)(pid);
                 }
                 this.popover.popdown();
+            });
+        }
+        {
+            let weak = Rc::downgrade(&this);
+            let parent: gtk::Widget = parent.clone().upcast();
+            new_button.connect_clicked(move |_| {
+                let Some(this) = weak.upgrade() else { return };
+                this.popover.popdown();
+                let on_select = this.on_select.clone();
+                crate::ui::playlist_ops::ask_new_playlist(&this.ctx, &parent, move |id, _title| on_select(id));
             });
         }
         // The popover owns the struct until it closes.

@@ -27,6 +27,7 @@ mod presence;
 mod queue;
 mod scrobbler;
 mod state;
+mod tray;
 mod ui;
 
 use std::cell::RefCell;
@@ -75,6 +76,7 @@ fn main() -> glib::ExitCode {
     bootstrap::use_bundled_fonts();
     bootstrap::enable_gpu_rendering();
     bootstrap::set_app_user_model_id();
+    bootstrap::register_link_scheme();
 
     let paths = Paths::discover();
     bootstrap::init_logging(&paths);
@@ -189,6 +191,7 @@ fn main() -> glib::ExitCode {
             if let Some(mpris) = app_ctx.mpris.borrow_mut().take() {
                 mpris.shutdown();
             }
+            tray::stop();
             app_ctx.scrobbler.stop();
             app_ctx.discord.stop();
             app_ctx.player.shutdown();
@@ -213,6 +216,7 @@ fn on_startup(ctx: &Rc<App>) {
     // Event pumps must attach to the running GTK main context.
     ctx.player.start();
     ctx.mpris.replace(Some(Mpris::start(ctx)));
+    tray::start(ctx);
     presence::wire(ctx);
     tracing::info!(auth = ?ctx.net.client().auth_state(), "core started");
 }

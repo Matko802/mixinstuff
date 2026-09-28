@@ -162,7 +162,7 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
         }
         let to_add: Vec<Track> = if tracks.is_empty() { if vid.is_empty() { Vec::new() } else { vec![track.clone()] } } else { tracks.clone() };
         // A local playlist takes tracks offline and signed out.
-        if !to_add.is_empty() && crate::ui::playlist_ops::can_add_to_playlist(&ctx) && !hidden("add_to_playlist") {
+        if !to_add.is_empty() && !hidden("add_to_playlist") {
             let anchor = anchor.clone();
             let label = if multi { format!("Add {} to Playlist…", to_add.len()) } else { "Add to Playlist…".to_owned() };
             builder.add(Section::Actions, &label, "add-to-playlist", false, Rc::new(move || {

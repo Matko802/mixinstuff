@@ -511,63 +511,18 @@ impl LibraryPage {
         self.ask_new_playlist();
     }
 
-    /// Port of on_new_playlist_clicked: title, description and visibility,
-    /// then create it and open it.
+    /// Create a playlist through the shared dialog, then open it.
     fn ask_new_playlist(self: &Rc<Self>) {
-        let signed_in = self.ctx.net.client().is_authenticated();
-        let dialog = adw::Dialog::builder().title("New Playlist").content_width(500).build();
-        let main_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
-        let header = adw::HeaderBar::builder().css_classes(["flat"]).build();
-        let create_btn = gtk::Button::builder().label("Create").css_classes(["suggested-action"]).build();
-        header.pack_start(&create_btn);
-        main_box.append(&header);
-
-        let prefs_page = adw::PreferencesPage::new();
-        let group = adw::PreferencesGroup::builder().title("Playlist Details").margin_start(12).margin_end(12).margin_top(12).margin_bottom(12).build();
-        let title_row = adw::EntryRow::builder().title("Title").activates_default(true).build();
-        let desc_row = adw::EntryRow::builder().title("Description").build();
-        let privacy_row = adw::ComboRow::builder().title("Visibility").model(&gtk::StringList::new(&["Public", "Private", "Unlisted"])).selected(1).build();
-        // Signed out, the only place is this device. Signed in, the account is the default.
-        let where_row = adw::ComboRow::builder().title("Save To").model(&gtk::StringList::new(&["YouTube Music", "This device"])).selected(if signed_in { 0 } else { 1 }).visible(signed_in).build();
-        {
-            let privacy_row = privacy_row.clone();
-            where_row.connect_selected_notify(move |row| privacy_row.set_visible(row.selected() == 0));
-        }
-        privacy_row.set_visible(signed_in);
-        group.add(&title_row);
-        group.add(&desc_row);
-        group.add(&where_row);
-        group.add(&privacy_row);
-        prefs_page.add(&group);
-        main_box.append(&prefs_page);
-        dialog.set_child(Some(&main_box));
-
-        let page = self.clone();
-        let dialog_c = dialog.clone();
-        let (title_c, desc_c, privacy_c, where_c) = (title_row.clone(), desc_row.clone(), privacy_row.clone(), where_row.clone());
-        create_btn.connect_clicked(move |_| {
-            let title = title_c.text().trim().to_owned();
-            if title.is_empty() {
-                return;
-            }
-            let description = desc_c.text().trim().to_owned();
-            if where_c.selected() == 1 {
-                page.create_local_playlist(title, description);
+        let weak = Rc::downgrade(self);
+        crate::ui::playlist_ops::ask_new_playlist(&self.ctx, &self.root, move |id, title| {
+            let Some(page) = weak.upgrade() else { return };
+            if crate::local_library::is_local(&id) {
+                page.refresh_local_items();
             } else {
-                let privacy = ["PUBLIC", "PRIVATE", "UNLISTED"][privacy_c.selected().min(2) as usize];
-                page.create_playlist(title, description, privacy);
+                page.load_library(true);
             }
-            dialog_c.close();
+            page.ctx.nav.go(NavRequest::Playlist { id, title, thumb: None });
         });
-        dialog.present(Some(&self.root));
-        title_row.grab_focus();
-    }
-
-    fn create_local_playlist(self: &Rc<Self>, title: String, description: String) {
-        let id = self.ctx.local.create(&title, &description);
-        tracing::info!(id, title, "local playlist created");
-        self.refresh_local_items();
-        self.ctx.nav.go(NavRequest::Playlist { id, title, thumb: None });
     }
 
     /// Re-read the local playlists into the Playlists section without a network round trip.
@@ -585,32 +540,6 @@ impl LibraryPage {
     }
 
     /// Create it on the runtime, then refresh the library and open the page.
-    fn create_playlist(self: &Rc<Self>, title: String, description: String, privacy: &'static str) {
-        let api = self.ctx.net.client().api();
-        let title_c = title.clone();
-        let handle = self.ctx.net.spawn(async move {
-            let id = crate::net::playlists::create_playlist(&api, &title_c, &description, privacy).await?;
-            // The browse endpoint needs a moment before it will serve it.
-            crate::net::playlists::await_playlist(&api, &id).await;
-            Ok::<String, crate::net::ytmusic::NetError>(id)
-        });
-        let weak = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(page) = weak.upgrade() else { return };
-            match handle.await {
-                Ok(Ok(playlist_id)) => {
-                    tracing::info!(playlist_id, title, "playlist created");
-                    page.load_library(true);
-                    page.ctx.nav.go(NavRequest::Playlist { id: playlist_id, title, thumb: None });
-                }
-                Ok(Err(err)) => {
-                    tracing::warn!(%err, "playlist creation failed");
-                    toast(&page.root, "Could not create the playlist");
-                }
-                Err(_) => {}
-            }
-        });
-    }
 
     fn bind_section(self: &Rc<Self>, section: &Rc<Section>) {
         let ctx = self.ctx.clone();

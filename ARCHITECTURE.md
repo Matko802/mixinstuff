@@ -578,8 +578,11 @@ Rich Presence, cover theming and the lyrics view landed on 2026-09-18, see
   a native child window over an empty area of the GTK dialog (`login.rs`);
   `bundle.sh` ships `WebView2Loader.dll`, and `gdbus.exe`, which GLib runs
   as the session bus: without it GApplication finds no running instance and
-  every launch opens another window. Still to do: a tray icon and the
-  `mixtapes://` registry entry.
+  every launch opens another window. `tray.rs` keeps a notification-area
+  icon, the way back to a window hidden for background playback.
+  `bootstrap::register_link_scheme` registers `mixtapes://` for the current
+  user at every start (the installer does too), and GApplication's open
+  hands a link to the running window as on Linux.
 
 Dead in the Python tree, deliberately skipped: `ui/pages/mix.py`,
 `ui/pages/mood.py`, `ui/pages/album.py` and `ui/queue.py` are never

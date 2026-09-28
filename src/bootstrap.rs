@@ -58,6 +58,48 @@ pub fn set_app_user_model_id() {
     }
 }
 
+/// Make mixtapes:// links open this exe on Windows, for the current user. The
+/// installer registers the same keys; doing it here too covers the portable
+/// build and a moved install. The link reaches the running window through
+/// GApplication's open, as on Linux.
+pub fn register_link_scheme() {
+    #[cfg(windows)]
+    {
+        let Ok(exe) = std::env::current_exe() else { return };
+        let exe = exe.display().to_string();
+        let command = format!("\"{exe}\" \"%1\"");
+        let values: [(&str, Option<&str>, &str); 4] = [
+            (r"Software\Classes\mixtapes", None, "URL:Mixtapes link"),
+            (r"Software\Classes\mixtapes", Some("URL Protocol"), ""),
+            (r"Software\Classes\mixtapes\DefaultIcon", None, &exe),
+            (r"Software\Classes\mixtapes\shell\open\command", None, &command),
+        ];
+        for (key, name, value) in values {
+            if let Err(err) = set_registry_string(key, name, value) {
+                tracing::warn!(%err, key, "mixtapes:// link registration failed");
+                return;
+            }
+        }
+    }
+}
+
+/// Write one string value under HKEY_CURRENT_USER, creating the key.
+#[cfg(windows)]
+fn set_registry_string(key: &str, name: Option<&str>, value: &str) -> windows::core::Result<()> {
+    use windows::Win32::System::Registry::{HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey, RegCreateKeyExW, RegSetValueExW};
+    use windows::core::{HSTRING, PCWSTR};
+    let mut handle = HKEY::default();
+    // SAFETY: NUL-terminated strings that outlive each call; the key is closed below.
+    unsafe {
+        RegCreateKeyExW(HKEY_CURRENT_USER, &HSTRING::from(key), None, None, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, None, &mut handle, None).ok()?;
+        let data: Vec<u8> = value.encode_utf16().chain(std::iter::once(0)).flat_map(u16::to_le_bytes).collect();
+        let name = name.map(HSTRING::from);
+        let result = RegSetValueExW(handle, name.as_ref().map_or(PCWSTR::null(), |n| PCWSTR(n.as_ptr())), None, REG_SZ, Some(&data)).ok();
+        let _ = RegCloseKey(handle);
+        result
+    }
+}
+
 /// Put the install's own folder first on PATH on Windows.
 /// yt-dlp looks up node.exe and ffmpeg.exe on PATH, and the installer puts them beside mixtapes.exe.
 pub fn prefer_bundled_programs() {

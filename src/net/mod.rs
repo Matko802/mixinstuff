@@ -63,7 +63,19 @@ impl NetHandle {
             async move { native.warm().await }
         });
         let resolver: Arc<dyn StreamResolver> = native;
-        Ok(Self { rt, client, resolver, caches: Arc::new(Caches::new(paths)), tokens })
+        let caches = Arc::new(Caches::new(paths));
+        // Signed out, the account's playlists must not be offered as targets any more.
+        rt.spawn({
+            let (caches, mut auth) = (caches.clone(), client.subscribe_auth());
+            async move {
+                while auth.changed().await.is_ok() {
+                    if matches!(*auth.borrow_and_update(), ytmusic::AuthState::Anonymous) {
+                        caches.set_library_playlists(Vec::new());
+                    }
+                }
+            }
+        });
+        Ok(Self { rt, client, resolver, caches, tokens })
     }
 
     /// Run a future on the tokio runtime. Await the returned handle from the GTK thread.

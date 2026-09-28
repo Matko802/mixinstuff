@@ -169,14 +169,6 @@ impl QueuePanel {
             });
             group.add_action(&action);
             panel.root.insert_action_group("queue", Some(&group));
-            // Checked as the menu opens: a playlist made or a sign-in since the
-            // panel appeared counts at once.
-            let ctx = panel.ctx.clone();
-            panel.more_btn.connect_active_notify(move |btn| {
-                if btn.is_active() {
-                    action.set_enabled(crate::ui::playlist_ops::can_add_to_playlist(&ctx));
-                }
-            });
         }
 
         {

@@ -103,8 +103,11 @@ Both `x86_64` and `aarch64` builds are available.
 
 ### Windows
 
-Not available yet. The Windows build belonged to the Python app. A native port
-of the Rust app is planned, and `fonts/` is kept for it.
+Experimental. Get the installer from the
+[latest Windows build](https://nightly.link/m-obeid/Mixtapes/workflows/build-windows/main/mixtapes-windows-x86_64-setup.zip),
+or the portable folder from the same CI run. The installer adds the Microsoft
+Edge WebView2 Runtime, which the sign-in page needs, where Windows lacks it
+(Windows 10 LTSC, for one).
 
 ### AUR (Arch Linux)
 
@@ -276,7 +279,7 @@ Your desktop sends every `https://` link to the browser and has no way to hand o
 |   ✅️   | **Scrobbling**               | Submit plays to Last.fm and ListenBrainz<br>✅️ Now Playing<br>✅️ Offline backlog with retries                                                                                                                                                                                                |
 |   ✅️   | **Discord RPC**              | Show your current track on Discord<br>✅️ Linux<br>✅️ Windows                                                                                                                                                                                                                                 |
 |   ✅️   | **Lyrics**                   | Synchronized lyrics using a bunch of providers (Apple Music, BetterLyrics, BiniLyrics, NetEase, LRCLIB, native YT Music)<br>✅️ Reorderable provider search queue<br>✅️ Second line: romanization, translation or background vocals<br>✅️ Word-level karaoke timing with duration-aware fades |
-|   🚧   | **Windows**                  | Shipped with the Python app. A native port of the Rust app is planned.                                                                                                                                                                                                                    |
+|   🚧   | **Windows**                  | Experimental CI builds: an installer and a portable folder.                                                                                                                                                                                                                               |
 |   🔜   | **macOS**                    | Can build it for macOS, just need to test, there's a PR for auto-builds.                                                                                                                                                                                                                     |
 |   🔜   | **GNOME Circle**             | Still considering it, might not happen                                                                                                                                                                                                                                                       |
 

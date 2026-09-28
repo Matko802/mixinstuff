@@ -1607,9 +1607,7 @@ impl PlaylistPage {
         self.more_menu.append_section(None, &queue_section);
         let authed = self.ctx.net.client().is_authenticated();
         let local = self.playlist_id.borrow().as_deref().is_some_and(crate::local_library::is_local);
-        if crate::ui::playlist_ops::can_add_to_playlist(&self.ctx) {
-            self.more_menu.append(Some("Add all to Playlist…"), Some("page.show_add_all_to_playlist"));
-        }
+        self.more_menu.append(Some("Add all to Playlist…"), Some("page.show_add_all_to_playlist"));
         if self.ctx.online.is_online() && (self.audio_playlist_id.borrow().is_some() || self.playlist_id.borrow().is_some()) {
             self.more_menu.append(Some("Start Radio"), Some("page.start_radio"));
         }
