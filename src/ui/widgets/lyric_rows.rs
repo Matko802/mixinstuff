@@ -34,6 +34,11 @@ const BLUR_START_DISTANCE: i32 = 0;
 const BLUR_PER_LINE: f64 = 0.65;
 const BLUR_MAX: f64 = 3.5;
 const EFFECT_LERP: f64 = 0.16;
+/// Below this a fading blur is invisible, but drawing it still softens the
+/// text, so it snaps to zero rather than easing out the tail.
+const BLUR_SNAP: f64 = 0.15;
+/// The frame length the per-frame easing constants were tuned at.
+const FRAME_MS: f64 = 1000.0 / 60.0;
 /// How often a resting row looks at its colors, in frames.
 const REST_CHECK_FRAMES: u32 = 30;
 
@@ -338,6 +343,13 @@ fn now_ms() -> f64 {
     glib::monotonic_time() as f64 / 1000.0
 }
 
+/// How much of the remaining distance an ease tuned per 60 Hz frame covers in
+/// `delta_ms`. Counting time rather than frames keeps a fade the same length
+/// at any frame rate; a stall moves it at most 100 ms ahead.
+fn eased(per_frame: f64, delta_ms: f64) -> f64 {
+    1.0 - (1.0 - per_frame).powf(delta_ms.clamp(0.0, 100.0) / FRAME_MS)
+}
+
 // -- LyricRow -----------------------------------------------------------------
 
 struct RowState {
@@ -404,8 +416,8 @@ impl RowState {
     }
 
     /// Step every alpha toward its target. True when one moved.
-    fn step_alphas(&mut self) -> bool {
-        let lerp = self.lerp;
+    fn step_alphas(&mut self, delta_ms: f64) -> bool {
+        let lerp = eased(self.lerp, delta_ms);
         let sung = self.cursor_ms >= 0 && self.effects != Effects::Off;
         let internal = self.internal_cursor_ms;
         let step = |parts: &[Part], alphas: &mut [f64], targets: &[f64]| {
@@ -925,17 +937,20 @@ impl LyricRow {
             changed = true;
         }
 
-        if s.step_alphas() || s.dirty {
+        if s.step_alphas(delta) || s.dirty {
             s.dirty = false;
             s.render_markup();
         }
-        let ease = EFFECT_LERP * 0.6;
+        let ease = eased(EFFECT_LERP * 0.6, delta);
         if (s.scale - s.scale_target).abs() > 0.001 {
             s.scale += (s.scale_target - s.scale) * ease;
             changed = true;
         }
         if (s.blur - s.blur_target).abs() > 0.001 {
             s.blur += (s.blur_target - s.blur) * ease;
+            if s.blur_target == 0.0 && s.blur < BLUR_SNAP {
+                s.blur = 0.0;
+            }
             changed = true;
         }
         let active = s.cursor_ms >= 0;

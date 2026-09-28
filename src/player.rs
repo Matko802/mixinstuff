@@ -33,6 +33,9 @@ const HISTORY_NEVER: &str = "never";
 const AUDIO_VIDEO_TYPE: &str = "MUSIC_VIDEO_TYPE_ATV";
 /// How long "after_30s" waits. YT Music counts a play at about this point.
 const HISTORY_THRESHOLD_SECS: f64 = 30.0;
+/// How long after a volume change made here the sink's own reports are taken
+/// as echoes of it. Windows' sink reports late and sometimes the value before.
+const VOLUME_ECHO_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// The track handed to playbin ahead of time, so the switch has no gap.
 #[derive(Clone)]
@@ -77,6 +80,8 @@ pub struct Player {
     counter: Cell<u64>,
     /// Generation of the stream the pipeline should be playing right now.
     current: Cell<u64>,
+    /// When the app last set the volume, so the sink's echo of it is ignored.
+    volume_set_at: Cell<Option<std::time::Instant>>,
     /// The track pre-armed for a gapless switch, if any.
     armed_next: RefCell<Option<Armed>>,
     inflight: RefCell<Option<AbortHandle>>,
@@ -123,6 +128,7 @@ impl Player {
             net,
             counter: Cell::new(0),
             current: Cell::new(0),
+            volume_set_at: Cell::new(None),
             armed_next: RefCell::new(None),
             inflight: RefCell::new(None),
             retries: Cell::new(0),
@@ -556,7 +562,14 @@ impl Player {
         self.state.emit_seeked(target);
     }
 
+    /// The state takes the new level at once; the sink's report of it would
+    /// arrive late and, while dragging, behind the pointer.
     pub fn set_volume(&self, volume: f64) {
+        let volume = volume.clamp(0.0, 1.0);
+        self.volume_set_at.set(Some(std::time::Instant::now()));
+        if (self.state.volume() - volume).abs() > 1e-3 {
+            self.state.set_volume(volume);
+        }
         self.audio.send(AudioCommand::SetVolume(volume));
     }
 
@@ -828,7 +841,9 @@ impl Player {
     fn on_audio_event(&self, event: AudioEvent) {
         match event {
             AudioEvent::VolumeChanged { volume, muted } => {
-                if (self.state.volume() - volume).abs() > 1e-3 {
+                // A change from outside (the system mixer, another app) still lands.
+                let echo = self.volume_set_at.get().is_some_and(|at| at.elapsed() < VOLUME_ECHO_WINDOW);
+                if !echo && (self.state.volume() - volume).abs() > 1e-3 {
                     self.state.set_volume(volume);
                 }
                 if self.state.muted() != muted {

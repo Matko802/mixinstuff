@@ -25,3 +25,5 @@ __pycache__/
 
 # Generated next to the Windows bridge sources.
 *.manifest
+# Downloaded by the Windows CI job for the installer.
+windows/MicrosoftEdgeWebview2Setup.exe

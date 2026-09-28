@@ -72,8 +72,22 @@ rustypipe-botguard = "0.1.2"
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-# pango_font_map_add_font_file (1.56) loads the bundled Adwaita fonts into GTK's font map.
-pango = { version = "0.22", features = ["v1_56"] }
+# The sign-in page in WebView2 (ui/login.rs), where Linux uses WebKitGTK.
+wry = { version = "0.57", default-features = false, features = ["os-webview"] }
+# System Media Transport Controls (smtc.rs), the AppUserModelID and the
+# Discord pipe's read timeout.
+windows = { version = "0.62", features = [
+    "Foundation",
+    "Media",
+    "Storage_Streams",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Pipes",
+    "Win32_System_WinRT",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 # SQLite is not a system library on Windows. The Linux builds link the system one.
 rusqlite = { version = "0.40", features = ["bundled"] }
 

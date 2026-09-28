@@ -564,10 +564,22 @@ Rich Presence, cover theming and the lyrics view landed on 2026-09-18, see
   `windows/installer.iss` wraps it. `build.rs` embeds the icon and file
   details from `windows/mixtapes.rc`. Release builds use the windows
   subsystem, so helpers start through `stream::helper_command`, which keeps
-  them from opening consoles. Still to do: System Media Transport Controls
-  in `smtc.rs` (a stub keeping the two calls main.rs makes), the sign-in
-  window in WebView2 (`login.rs` shows a placeholder on Windows), a tray
-  icon and the `mixtapes://` registry entry.
+  them from opening consoles. `smtc.rs` drives the System Media Transport
+  Controls from a hidden window of its own. `bootstrap.rs` sets the Windows
+  specifics before GTK loads: the AppUserModelID, fontconfig for Pango (in
+  the C runtime's environment, which `set_var` does not reach), and
+  `GDK_DEBUG=dcomp`, without which GTK 4.24 falls back to the CPU renderer.
+  Volume is wasapi2sink's, which is the app's slider in the Windows mixer;
+  it reports every change back late, so `Player` ignores reports for half a
+  second after setting the volume itself. Release builds log to
+  `mixtapes.log` in the data folder (%LOCALAPPDATA%\muse). GSK defaults to
+  Vulkan there: the GL renderer paints the window shadow black under
+  DirectComposition. Sign-in runs Google's page in WebView2 through wry, as
+  a native child window over an empty area of the GTK dialog (`login.rs`);
+  `bundle.sh` ships `WebView2Loader.dll`, and `gdbus.exe`, which GLib runs
+  as the session bus: without it GApplication finds no running instance and
+  every launch opens another window. Still to do: a tray icon and the
+  `mixtapes://` registry entry.
 
 Dead in the Python tree, deliberately skipped: `ui/pages/mix.py`,
 `ui/pages/mood.py`, `ui/pages/album.py` and `ui/queue.py` are never

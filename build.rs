@@ -20,7 +20,8 @@ fn main() {
             format!("VERSION_PATCH={}", version("CARGO_PKG_VERSION_PATCH")),
         ];
         // windres runs from the crate root and llvm-rc from windows/, so the icon is found through the include dir.
+        // Required: a Windows build that found no resource compiler would ship without its icon.
         let windows_dir = std::path::Path::new(&version("CARGO_MANIFEST_DIR")).join("windows");
-        embed_resource::compile("windows/mixtapes.rc", embed_resource::ParamsMacrosAndIncludeDirs(&macros, [windows_dir])).manifest_optional().unwrap();
+        embed_resource::compile("windows/mixtapes.rc", embed_resource::ParamsMacrosAndIncludeDirs(&macros, [windows_dir])).manifest_required().unwrap();
     }
 }

@@ -19,7 +19,6 @@ const DISCORD_APP_ID: &str = "1492500060087255231";
 const RECONNECT_BACKOFF: [u64; 5] = [3, 5, 10, 15, 30];
 /// Below Discord's limit of about five updates per 20 seconds.
 const MIN_UPDATE_INTERVAL: Duration = Duration::from_millis(400);
-#[cfg(unix)]
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const MIXTAPES_LOGO: &str = "https://raw.githubusercontent.com/m-obeid/Mixtapes/main/screenshots/omori-mixtape.png";
 
@@ -141,10 +140,39 @@ fn open_ipc(path: &std::path::Path) -> std::io::Result<IpcStream> {
     Ok(stream)
 }
 
-/// A pipe has no timeouts to set. Discord answers the handshake at once, or not at all.
+/// A pipe has no timeouts to set, so `wait_for_reply` bounds each read instead.
 #[cfg(windows)]
 fn open_ipc(path: &std::path::Path) -> std::io::Result<IpcStream> {
     std::fs::OpenOptions::new().read(true).write(true).open(path)
+}
+
+/// Wait until a whole frame header sits in the pipe, or give up after
+/// IO_TIMEOUT. A blocking read on a pipe never times out, and one reply that
+/// never came used to stall the worker for the rest of the session.
+#[cfg(windows)]
+fn wait_for_reply(stream: &IpcStream) -> std::io::Result<()> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Pipes::PeekNamedPipe;
+    let deadline = Instant::now() + IO_TIMEOUT;
+    loop {
+        let mut available = 0u32;
+        // SAFETY: the handle belongs to `stream`, which outlives the call; only the count is written.
+        unsafe { PeekNamedPipe(HANDLE(stream.as_raw_handle()), None, 0, None, Some(&mut available), None) }.map_err(std::io::Error::other)?;
+        if available >= 8 {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "discord did not answer"));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The socket's own read timeout covers this on Unix.
+#[cfg(unix)]
+fn wait_for_reply(_stream: &IpcStream) -> std::io::Result<()> {
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -346,10 +374,18 @@ impl Connection {
         self.schedule_reconnect();
     }
 
+    /// Discord answers a good handshake with a READY event. Anything else,
+    /// usually a CLOSE frame carrying a code and message, is a failure.
     fn handshake(&self, path: &std::path::Path) -> std::io::Result<IpcStream> {
         let mut stream = open_ipc(path)?;
         send_frame(&mut stream, OP_HANDSHAKE, &json!({"v": 1, "client_id": DISCORD_APP_ID}))?;
-        recv_frame(&mut stream)?;
+        wait_for_reply(&stream)?;
+        let (op, reply) = recv_frame(&mut stream)?;
+        let evt = reply.as_ref().and_then(|r| r.get("evt")).and_then(Value::as_str);
+        if op != OP_FRAME || evt != Some("READY") {
+            let message = reply.as_ref().and_then(|r| r.get("message").or_else(|| r.pointer("/data/message"))).and_then(Value::as_str).unwrap_or("no READY event");
+            return Err(std::io::Error::other(format!("handshake refused (op {op}): {message}")));
+        }
         Ok(stream)
     }
 
@@ -369,12 +405,17 @@ impl Connection {
             "args": {"pid": std::process::id(), "activity": self.latest},
             "nonce": glib::uuid_string_random().as_str(),
         });
-        let sent = send_frame(stream, OP_FRAME, &frame).and_then(|()| recv_frame(stream));
+        let sent = send_frame(stream, OP_FRAME, &frame).and_then(|()| wait_for_reply(stream)).and_then(|()| recv_frame(stream));
         self.last_update = Some(Instant::now());
         match sent {
+            // Discord refuses a bad activity with an ERROR event, not a closed pipe.
+            Ok((_, Some(reply))) if reply.get("evt").and_then(Value::as_str) == Some("ERROR") => {
+                let message = reply.pointer("/data/message").and_then(Value::as_str).unwrap_or("no message");
+                tracing::warn!(message, "discord rejected the activity");
+            }
             Ok(reply) => tracing::debug!(?reply, "discord activity set"),
             Err(err) => {
-                tracing::debug!(%err, "discord update failed");
+                tracing::info!(%err, "discord update failed, reconnecting");
                 self.teardown();
                 self.schedule_reconnect();
             }

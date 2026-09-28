@@ -82,6 +82,8 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
+          # Microsoft's WebView2 bootstrapper, run by the installer only where the runtime is missing.
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile windows/MicrosoftEdgeWebview2Setup.exe
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) {
             choco install innosetup -y --no-progress

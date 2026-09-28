@@ -39,6 +39,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 ; dist/mixtapes from windows/bundle.sh: bin, lib, libexec and share
 Source: "{#SourcePath}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+; The sign-in page needs the WebView2 runtime, which Windows 10 LTSC and older
+; Windows 10 builds lack. CI downloads Microsoft's bootstrapper next to this file.
+Source: "MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; AppUserModelID: "{#MyAppId}"
@@ -51,7 +54,27 @@ Root: HKCU; Subkey: "Software\Classes\AppUserModelId\{#MyAppId}"; ValueType: str
 Root: HKCU; Subkey: "Software\Classes\AppUserModelId\{#MyAppId}"; ValueType: string; ValueName: "IconUri"; ValueData: "{app}\bin\mixtapes.ico"; Flags: uninsdeletekey
 
 [Run]
+Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing the Microsoft Edge WebView2 Runtime..."; Flags: waituntilterminated; Check: NeedsWebView2
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{localappdata}\muse"
+
+[Code]
+const
+  WebView2Client = 'Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+
+{ Installed per machine or per user, the runtime records its version as pv. }
+function HasWebView2Version(Root: Integer; Key: String): Boolean;
+var
+  Version: String;
+begin
+  Result := RegQueryStringValue(Root, Key, 'pv', Version) and (Version <> '') and (Version <> '0.0.0.0');
+end;
+
+function NeedsWebView2: Boolean;
+begin
+  Result := not (HasWebView2Version(HKLM, 'SOFTWARE\WOW6432Node\' + WebView2Client)
+    or HasWebView2Version(HKLM, 'SOFTWARE\' + WebView2Client)
+    or HasWebView2Version(HKCU, 'Software\' + WebView2Client));
+end;

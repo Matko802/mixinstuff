@@ -142,6 +142,11 @@ struct Engine {
     loading: Cell<bool>,
     last_status: Cell<PlaybackStatus>,
     main_loop: glib::MainLoop,
+    /// The last mute and volume asked for. Every load builds a new sink, and
+    /// a new wasapi2sink opens unmuted and carries that into the Windows
+    /// mixer, so these are applied again once the new stream is ready.
+    wanted_mute: Cell<Option<bool>>,
+    wanted_volume: Cell<Option<f64>>,
 }
 
 fn run_loop(
@@ -362,7 +367,27 @@ impl Engine {
             loading: Cell::new(false),
             last_status: Cell::new(PlaybackStatus::Stopped),
             main_loop,
+            wanted_mute: Cell::new(None),
+            wanted_volume: Cell::new(None),
         })
+    }
+
+    /// Put back the mute and volume the listener chose, where the sink a load
+    /// just built came up with its own. Only a difference is written, so a
+    /// sink that kept them sees nothing.
+    fn restore_levels(&self) {
+        if let Some(muted) = self.wanted_mute.get() {
+            if self.playbin.property::<bool>("mute") != muted {
+                tracing::debug!(muted, "new sink came up with another mute, restoring");
+                self.playbin.set_property("mute", muted);
+            }
+        }
+        if let (Some(volume), Some(sv)) = (self.wanted_volume.get(), self.playbin.dynamic_cast_ref::<gst_audio::StreamVolume>()) {
+            if (sv.volume(gst_audio::StreamVolumeFormat::Cubic) - volume).abs() > 1e-3 {
+                tracing::debug!(volume, "new sink came up with another volume, restoring");
+                sv.set_volume(gst_audio::StreamVolumeFormat::Cubic, volume);
+            }
+        }
     }
 
     fn generation(&self) -> u64 {
@@ -483,11 +508,14 @@ impl Engine {
                 let _ = reply.send_blocking(self.describe());
             }
             AudioCommand::SetVolume(v) => {
+                let v = v.clamp(0.0, 1.0);
+                self.wanted_volume.set(Some(v));
                 if let Some(sv) = self.playbin.dynamic_cast_ref::<gst_audio::StreamVolume>() {
-                    sv.set_volume(gst_audio::StreamVolumeFormat::Cubic, v.clamp(0.0, 1.0));
+                    sv.set_volume(gst_audio::StreamVolumeFormat::Cubic, v);
                 }
             }
             AudioCommand::SetMute(m) => {
+                self.wanted_mute.set(Some(m));
                 self.playbin.set_property("mute", m);
             }
             AudioCommand::Shutdown => return glib::ControlFlow::Break,
@@ -510,6 +538,7 @@ impl Engine {
                 }
             }
             MessageView::AsyncDone(_) => {
+                self.restore_levels();
                 self.emit(AudioEvent::Prerolled { generation: self.generation() });
             }
             MessageView::Eos(_) => {
@@ -531,6 +560,7 @@ impl Engine {
             }
             MessageView::StateChanged(s) if from_playbin => match s.current() {
                 gst::State::Playing => {
+                    self.restore_levels();
                     self.loading.set(false);
                     self.set_status(PlaybackStatus::Playing);
                 }

@@ -8,9 +8,6 @@ use std::rc::Rc;
 use gtk::{gdk, gio, glib, prelude::*};
 
 use crate::model::RepeatMode;
-use crate::net::library;
-use crate::net::playlists::editable_playlists;
-use crate::net::ytmusic::AuthState;
 use crate::player::Player;
 use crate::state::QueueEntry;
 use crate::ui::context::UiContext;
@@ -23,7 +20,6 @@ pub struct QueuePanel {
     list: gtk::ListView,
     player: Rc<Player>,
     more_btn: gtk::MenuButton,
-    more_menu: gio::Menu,
     ctx: Rc<UiContext>,
 }
 
@@ -127,6 +123,7 @@ impl QueuePanel {
             .tooltip_text("More Options")
             .build();
         let more_menu = gio::Menu::new();
+        more_menu.append(Some("Add all to Playlist…"), Some("queue.show_add_all_to_playlist"));
         more_btn.set_menu_model(Some(&more_menu));
         header_bar.pack_end(&more_btn);
 
@@ -155,7 +152,6 @@ impl QueuePanel {
             list,
             player: player.clone(),
             more_btn,
-            more_menu,
             ctx,
         });
         {
@@ -173,10 +169,12 @@ impl QueuePanel {
             });
             group.add_action(&action);
             panel.root.insert_action_group("queue", Some(&group));
-            let weak = Rc::downgrade(&panel);
-            panel.root.connect_map(move |_| {
-                if let Some(panel) = weak.upgrade() {
-                    panel.refresh_playlists_menu();
+            // Checked as the menu opens: a playlist made or a sign-in since the
+            // panel appeared counts at once.
+            let ctx = panel.ctx.clone();
+            panel.more_btn.connect_active_notify(move |btn| {
+                if btn.is_active() {
+                    action.set_enabled(crate::ui::playlist_ops::can_add_to_playlist(&ctx));
                 }
             });
         }
@@ -461,60 +459,6 @@ impl QueuePanel {
 }
 
 impl QueuePanel {
-    /// Port of _refresh_playlists_menu: the menu offers Add all to Playlist…
-    /// only online and only when there is an editable playlist to add to.
-    fn refresh_playlists_menu(self: &Rc<Self>) {
-        self.more_menu.remove_all();
-        if !self.ctx.local.playlist_items().is_empty() {
-            self.more_menu.append(Some("Add all to Playlist…"), Some("queue.show_add_all_to_playlist"));
-            return;
-        }
-        if !self.ctx.online.is_online() {
-            return;
-        }
-        let account = match self.ctx.net.client().auth_state() {
-            AuthState::Authenticated(info) => Some(info.name),
-            _ => None,
-        };
-        let cached = self.ctx.net.caches().library_playlists();
-        if !cached.is_empty() {
-            if !editable_playlists(&cached, account.as_deref()).is_empty() {
-                self.more_menu.append(
-                    Some("Add all to Playlist…"),
-                    Some("queue.show_add_all_to_playlist"),
-                );
-            }
-            return;
-        }
-        if !self.ctx.net.client().is_authenticated() {
-            return;
-        }
-        let handle = self
-            .ctx
-            .net
-            .spawn(library::library_playlists(self.ctx.net.client().api()));
-        let weak = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Ok(Ok(playlists)) = handle.await else {
-                return;
-            };
-            let Some(panel) = weak.upgrade() else { return };
-            panel
-                .ctx
-                .net
-                .caches()
-                .set_library_playlists(playlists.clone());
-            if !editable_playlists(&playlists, account.as_deref()).is_empty()
-                && panel.more_menu.n_items() == 0
-            {
-                panel.more_menu.append(
-                    Some("Add all to Playlist…"),
-                    Some("queue.show_add_all_to_playlist"),
-                );
-            }
-        });
-    }
-
     /// Port of _do_add_all_to_playlist: every queued track into the chosen playlist.
     fn add_all_to_playlist(self: &Rc<Self>, playlist_id: &str) {
         crate::ui::playlist_ops::add_tracks(&self.ctx, self.root.upcast_ref(), playlist_id.to_owned(), self.player.queue_tracks());

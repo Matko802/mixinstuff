@@ -73,6 +73,8 @@ fn main() -> glib::ExitCode {
     bootstrap::raise_fd_limit();
     bootstrap::prefer_bundled_programs();
     bootstrap::use_bundled_fonts();
+    bootstrap::enable_gpu_rendering();
+    bootstrap::set_app_user_model_id();
 
     let paths = Paths::discover();
     bootstrap::init_logging(&paths);

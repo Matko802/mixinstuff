@@ -24,6 +24,12 @@ cp windows/mixtapes.ico "$OUT/bin/"
 cp "$PREFIX/bin/node.exe" "$PREFIX/bin/ffmpeg.exe" "$PREFIX/bin/ffprobe.exe" "$OUT/bin/"
 # The official build bundles yt-dlp-ejs, the YouTube challenge solver node runs.
 curl -fsSL --retry 5 -o "$OUT/bin/yt-dlp.exe" https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
+# GLib starts its own session bus with this. GApplication needs the bus to
+# find a running Mixtapes, so a second launch hands over instead of opening
+# another window.
+cp "$PREFIX/bin/gdbus.exe" "$OUT/bin/"
+# WebView2's loader for the sign-in page, from the webview2-com-sys build.
+cp "$(ls -t target/release/build/webview2-com-sys-*/out/x64/WebView2Loader.dll | head -n 1)" "$OUT/bin/"
 # Vendored, since Codeberg's bot filter rejects CI downloads.
 BG_ZIP=vendor/rustypipe-botguard/rustypipe-botguard-v0.1.2-x86_64-pc-windows-msvc.zip
 echo "edb9e482ca77e3e4ecd4a2d3270f58c9169f03770db1568b3429cc8cf4c4b279  $BG_ZIP" | sha256sum -c -

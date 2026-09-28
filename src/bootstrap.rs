@@ -47,6 +47,17 @@ pub fn raise_fd_limit() {
     }
 }
 
+/// Give the process the AppUserModelID the installer registers, before GTK
+/// opens a window. Windows uses it to group the taskbar entry with the Start
+/// menu shortcut and to name the app in the media flyout.
+pub fn set_app_user_model_id() {
+    #[cfg(windows)]
+    // SAFETY: a static NUL-terminated string, set before any window exists.
+    if let Err(err) = unsafe { windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(windows::core::w!("com.pocoguy.Muse")) } {
+        tracing::warn!(%err, "AppUserModelID not set");
+    }
+}
+
 /// Put the install's own folder first on PATH on Windows.
 /// yt-dlp looks up node.exe and ffmpeg.exe on PATH, and the installer puts them beside mixtapes.exe.
 pub fn prefer_bundled_programs() {
@@ -79,10 +90,43 @@ pub fn use_bundled_fonts() {
         }
         for (key, value) in [("PANGOCAIRO_BACKEND", std::ffi::OsString::from("fc")), ("FONTCONFIG_FILE", config.into_os_string())] {
             if std::env::var_os(key).is_none() {
-                // SAFETY: called from main before any other thread exists.
-                unsafe { std::env::set_var(key, value) };
+                set_crt_env(key, &value);
             }
         }
+    }
+}
+
+/// Let GTK render on the GPU on Windows. GTK 4.24's OpenGL and Vulkan renderers
+/// need DirectComposition there, which is opt-in through GDK_DEBUG, so without
+/// it every window falls back to the CPU renderer and animations crawl.
+pub fn enable_gpu_rendering() {
+    #[cfg(windows)]
+    {
+        let current = std::env::var("GDK_DEBUG").unwrap_or_default();
+        if current.split([',', ':', ' ']).any(|flag| flag == "dcomp") {
+            return;
+        }
+        let value = if current.is_empty() { "dcomp".to_owned() } else { format!("{current},dcomp") };
+        set_crt_env("GDK_DEBUG", std::ffi::OsStr::new(&value));
+    }
+}
+
+/// Sets a variable in both environments a Windows process has. Pango and
+/// fontconfig read the C runtime's copy through getenv, which set_var
+/// (SetEnvironmentVariableW) leaves untouched.
+#[cfg(windows)]
+fn set_crt_env(key: &str, value: &std::ffi::OsStr) {
+    use std::os::windows::ffi::OsStrExt;
+    unsafe extern "C" {
+        fn _wputenv_s(name: *const u16, value: *const u16) -> i32;
+    }
+    let wide = |text: &std::ffi::OsStr| text.encode_wide().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let (key_wide, value_wide) = (wide(std::ffi::OsStr::new(key)), wide(value));
+    // SAFETY: called from main before any other thread exists; both buffers are
+    // NUL-terminated and outlive the call.
+    unsafe {
+        std::env::set_var(key, value);
+        _wputenv_s(key_wide.as_ptr(), value_wide.as_ptr());
     }
 }
 
@@ -93,10 +137,15 @@ pub fn apply_gsk_renderer_pref(paths: &Paths) {
         return;
     }
     let prefs = paths.read_prefs();
-    let Some(value) = prefs.get("gsk_renderer").and_then(|v| v.as_str()) else {
-        return;
-    };
+    let value = prefs.get("gsk_renderer").and_then(|v| v.as_str()).unwrap_or_default();
     if value.is_empty() || value == "default" {
+        // Windows: GTK's GL renderer paints the shadow margin around the
+        // window black under DirectComposition. Vulkan keeps it transparent.
+        #[cfg(windows)]
+        // SAFETY: called from main before any other thread exists.
+        unsafe {
+            std::env::set_var("GSK_RENDERER", "vulkan")
+        };
         return;
     }
     // SAFETY: called from main before any other thread exists.
@@ -114,7 +163,32 @@ pub fn init_logging(paths: &Paths) {
     tracing_subscriber::registry()
         .with(filter)
         .with(tracing_subscriber::fmt::layer().with_target(false).compact())
+        .with(log_file_layer(paths))
         .init();
+}
+
+/// Windows release builds have no console, so the log also goes to
+/// %LOCALAPPDATA%\muse\mixtapes.log. Appended to, not recreated: a second
+/// launch runs this before handing over to the first, and truncating would
+/// cut the running instance's log. It starts over past LOG_FILE_LIMIT.
+#[cfg(windows)]
+fn log_file_layer<S>(paths: &Paths) -> Option<impl tracing_subscriber::Layer<S>>
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    const LOG_FILE_LIMIT: u64 = 5 * 1024 * 1024;
+    // The data folder, not the cache: GLib puts that in INetCache on Windows.
+    let path = paths.data_dir.join("mixtapes.log");
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > LOG_FILE_LIMIT) {
+        let _ = std::fs::remove_file(&path);
+    }
+    let file = std::fs::OpenOptions::new().create(true).append(true).open(&path).ok()?;
+    Some(tracing_subscriber::fmt::layer().with_target(false).with_ansi(false).compact().with_writer(std::sync::Mutex::new(file)))
+}
+
+#[cfg(not(windows))]
+fn log_file_layer(_paths: &Paths) -> Option<tracing_subscriber::layer::Identity> {
+    None
 }
 
 type FilterHandle = tracing_subscriber::reload::Handle<EnvFilter, tracing_subscriber::Registry>;
