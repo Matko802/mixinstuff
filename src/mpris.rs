@@ -362,6 +362,10 @@ pub struct Mpris {
     player: Rc<Player>,
     /// Track whose art file is written or being written.
     art_video_id: RefCell<Option<String>>,
+    /// Handed to each server, which forwards what the shell asks for.
+    commands: async_channel::Sender<Command>,
+    /// Whether the bus name is held or being taken.
+    published: Cell<bool>,
 }
 
 impl Mpris {
@@ -378,28 +382,70 @@ impl Mpris {
             paths: ctx.paths.clone(),
             player: ctx.player.clone(),
             art_video_id: RefCell::new(None),
+            commands: tx,
+            published: Cell::new(false),
         });
         this.refresh_all();
 
-        let imp = Imp { shared, commands: tx };
-        let handle = ctx.net.spawn(async move { Server::new(BUS_SUFFIX, imp).await });
+        // Published on the first play, as the Python app did, and withdrawn
+        // when the queue empties: an idle shell player reads "Unknown title".
+        this.sync_published();
         let weak = Rc::downgrade(&this);
-        glib::spawn_future_local(async move {
-            match handle.await {
-                Ok(Ok(server)) => {
-                    if let Some(this) = weak.upgrade() {
-                        tracing::info!(bus = %server.bus_name(), "mpris published");
-                        this.server.replace(Some(Arc::new(server)));
-                    }
-                }
-                Ok(Err(err)) => tracing::warn!(%err, "mpris server failed to start"),
-                Err(_) => {}
+        ctx.player.state().connect_notify_local(Some("status"), move |_, _| {
+            if let Some(this) = weak.upgrade() {
+                this.sync_published();
+            }
+        });
+        let weak = Rc::downgrade(&this);
+        ctx.player.state().connect_notify_local(Some("video-id"), move |_, _| {
+            if let Some(this) = weak.upgrade() {
+                this.sync_published();
             }
         });
 
         this.pump_commands(ctx, rx);
         this.watch_state(ctx.player.state());
         this
+    }
+
+    /// Hold the bus name while there is a track to show, and only then.
+    fn sync_published(self: &Rc<Self>) {
+        let state = self.player.state();
+        let active = matches!(state.status(), PlaybackStatus::Playing | PlaybackStatus::Loading | PlaybackStatus::Paused);
+        let wanted = match self.published.get() {
+            false => matches!(state.status(), PlaybackStatus::Playing | PlaybackStatus::Loading),
+            true => active || !state.video_id().is_empty(),
+        };
+        if wanted == self.published.get() {
+            return;
+        }
+        self.published.set(wanted);
+        if !wanted {
+            self.shutdown();
+            return;
+        }
+        self.refresh_all();
+        let imp = Imp { shared: self.shared.clone(), commands: self.commands.clone() };
+        let handle = self.net.spawn(async move { Server::new(BUS_SUFFIX, imp).await });
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            match handle.await {
+                Ok(Ok(server)) => {
+                    let Some(this) = weak.upgrade() else { return };
+                    // Withdrawn again while the name was being taken.
+                    if !this.published.get() {
+                        this.net.spawn(async move {
+                            let _ = server.release_bus_name().await;
+                        });
+                        return;
+                    }
+                    tracing::info!(bus = %server.bus_name(), "mpris published");
+                    this.server.replace(Some(Arc::new(server)));
+                }
+                Ok(Err(err)) => tracing::warn!(%err, "mpris server failed to start"),
+                Err(_) => {}
+            }
+        });
     }
 
     /// Apply what the shell sends. Runs on the GTK thread, so it calls the
@@ -588,7 +634,7 @@ impl Mpris {
     /// squared off and written to the cache. The remote address stays in the
     /// metadata until the file lands.
     fn sync_art(self: &Rc<Self>, video_id: String, thumbnail: String) {
-        if video_id.is_empty() || thumbnail.is_empty() {
+        if video_id.is_empty() {
             return;
         }
         if self.art_video_id.borrow().as_deref() == Some(video_id.as_str()) {
@@ -598,12 +644,24 @@ impl Mpris {
         let http = self.net.client().http().clone();
         let auth = self.net.client().media_auth();
         let dir = self.paths.cache_dir.join("mpris");
-        let wanted = video_id.clone();
-        let handle = self.net.spawn(async move { write_art_file(http, auth, dir, wanted, thumbnail).await });
+        let net = self.net.clone();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let Ok(Some(path)) = handle.await else { return };
+            // A downloaded track's own cover first: offline the remote one cannot be fetched.
+            let address = crate::ui::cover::track_cover_address(&net, &video_id, &thumbnail).await;
+            let wanted = video_id.clone();
+            let written = match address.is_empty() {
+                true => None,
+                false => net.spawn(async move { write_art_file(http, auth, dir, wanted, address).await }).await.ok().flatten(),
+            };
             let Some(this) = weak.upgrade() else { return };
+            let Some(path) = written else {
+                // Forgotten, so the next metadata change tries again.
+                if this.art_video_id.borrow().as_deref() == Some(video_id.as_str()) {
+                    this.art_video_id.replace(None);
+                }
+                return;
+            };
             // The track may have moved on while the art was downloading.
             if this.player.state().video_id() != video_id {
                 tracing::debug!(video_id, "mpris art arrived for a track that moved on");

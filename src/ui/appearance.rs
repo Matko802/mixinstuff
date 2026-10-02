@@ -49,6 +49,8 @@ window.cover-bg-active overlaysplitview,
 window.cover-bg-active navigation-view,
 window.cover-bg-active stack,
 window.cover-bg-active listview > row,
+window.cover-bg-active gridview.queue-list > child,
+window.cover-bg-active gridview.playlist-view > child,
 window.cover-bg-active listbox > row {
   background: none;
   background-color: transparent;
@@ -103,7 +105,8 @@ window.cover-bg-active .home-speed-tile:active {
   background-color: alpha(currentColor, 0.25);
 }
 
-window.cover-bg-active listview > row:hover .queue-row {
+window.cover-bg-active listview > row:hover .queue-row,
+window.cover-bg-active gridview.queue-list > child:hover .queue-row {
   background-color: alpha(currentColor, 0.1);
 }
 
@@ -184,6 +187,10 @@ pub struct Appearance {
     /// Typical luminance of the backdrop painted now, measured from the blurred cover.
     blur_backdrop: Cell<Option<f64>>,
     derive_pending: Cell<bool>,
+    /// Window classes to set with the next sheet load. A class change
+    /// restyles the whole window, so it goes out in the same frame as the
+    /// sheet: three restyles per track change cost up to 600 ms each on a phone.
+    classes: RefCell<Vec<(&'static str, bool)>>,
     /// Bumped per request so a slow blur or accent never lands over a newer cover.
     blur_request: Cell<u64>,
     accent_request: Cell<u64>,
@@ -205,6 +212,7 @@ impl Appearance {
             accent_override: Cell::new(None),
             blur_backdrop: Cell::new(None),
             derive_pending: Cell::new(false),
+            classes: RefCell::new(Vec::new()),
             blur_request: Cell::new(0),
             accent_request: Cell::new(0),
         });
@@ -214,7 +222,7 @@ impl Appearance {
         this.refresh_derived_colors();
 
         let state = ctx.player.state().clone();
-        for property in ["thumbnail-url", "queue-length"] {
+        for property in ["thumbnail-url", "video-id", "queue-length"] {
             let weak = Rc::downgrade(&this);
             state.connect_notify_local(Some(property), move |_, _| {
                 if let Some(this) = weak.upgrade() {
@@ -256,14 +264,44 @@ impl Appearance {
         if adw::StyleManager::default().is_high_contrast() { color::WCAG_AAA } else { color::WCAG_AA }
     }
 
+    /// The playing track's cover. A downloaded track's own art comes first:
+    /// offline the remote address cannot be fetched, and the blur and accent
+    /// would never be made for a song first played offline.
     fn current_cover(&self) -> Option<String> {
         let state = self.ctx.player.state();
+        if state.queue_length() == 0 {
+            return None;
+        }
+        if let Some(path) = crate::ui::cover::cached_track_art(&state.video_id()) {
+            return Some(path.to_string_lossy().into_owned());
+        }
         let url = state.thumbnail_url();
-        (!url.is_empty() && state.queue_length() > 0).then_some(url)
+        (!url.is_empty()).then_some(url)
+    }
+
+    /// A downloaded track whose cover was never pulled out of the file: pull
+    /// it out, then run the metadata pass again with it.
+    fn extract_track_art(self: &Rc<Self>) {
+        let video_id = self.ctx.player.state().video_id();
+        if video_id.is_empty() || !self.ctx.downloads.is_downloaded(&video_id) || crate::ui::cover::cached_track_art(&video_id).is_some() {
+            return;
+        }
+        let net = self.ctx.net.clone();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            if crate::ui::cover::track_art(&net, &video_id).await.is_none() {
+                return;
+            }
+            let Some(this) = weak.upgrade() else { return };
+            if this.ctx.player.state().video_id() == video_id {
+                this.on_metadata();
+            }
+        });
     }
 
     /// Port of _on_metadata_for_appearance.
     fn on_metadata(self: &Rc<Self>) {
+        self.extract_track_art();
         // Stopped or cleared: fall back to the normal theme background and accent.
         let Some(url) = self.current_cover() else {
             self.last_cover_url.replace(None);
@@ -277,7 +315,7 @@ impl Appearance {
         if prefs.blurred_background && !same_cover {
             self.activate_cover_bg(&url);
         } else if prefs.blurred_background {
-            self.window.add_css_class("cover-bg-active");
+            self.want_class("cover-bg-active", true);
         }
         if prefs.dynamic_accent && !same_cover {
             self.update_dynamic_accent(&url);
@@ -323,11 +361,20 @@ impl Appearance {
         self.refresh_derived_colors();
     }
 
+    /// Ask for a window class, applied with the next sheet load.
+    fn want_class(self: &Rc<Self>, class: &'static str, on: bool) {
+        let mut classes = self.classes.borrow_mut();
+        classes.retain(|(name, _)| *name != class);
+        classes.push((class, on));
+        drop(classes);
+        self.refresh_derived_colors();
+    }
+
     // -- blurred background ---------------------------------------------------
 
     /// Go translucent at once, before the blur exists. The picture joins when it is ready.
     fn activate_cover_bg(self: &Rc<Self>, url: &str) {
-        self.window.add_css_class("cover-bg-active");
+        self.want_class("cover-bg-active", true);
         if self.bg_part.borrow().is_empty() {
             self.bg_part.replace(BLUR_OVERRIDE_CSS.to_owned());
         }
@@ -336,7 +383,7 @@ impl Appearance {
     }
 
     fn deactivate_cover_bg(self: &Rc<Self>) {
-        self.window.remove_css_class("cover-bg-active");
+        self.want_class("cover-bg-active", false);
         self.blur_backdrop.set(None);
         self.blur_request.set(self.blur_request.get() + 1);
         self.bg_part.replace(String::new());
@@ -431,7 +478,7 @@ impl Appearance {
             color::to_css(standalone),
             color::to_css(accent_fg),
         );
-        self.window.add_css_class("tinted");
+        self.want_class("tinted", true);
         self.accent_part.replace(css);
         self.accent_override.set(Some((solid, standalone, view_bg)));
         self.refresh_derived_colors();
@@ -441,7 +488,7 @@ impl Appearance {
         self.last_dominant.set(None);
         self.accent_request.set(self.accent_request.get() + 1);
         self.accent_part.replace(String::new());
-        self.window.remove_css_class("tinted");
+        self.want_class("tinted", false);
         self.accent_override.set(None);
         self.refresh_derived_colors();
     }
@@ -508,6 +555,13 @@ impl Appearance {
                 }
             }
             this.held_since.set(None);
+            // Classes first: the derived colors read the cascade they produce.
+            for (class, on) in std::mem::take(&mut *this.classes.borrow_mut()) {
+                match on {
+                    true => this.window.add_css_class(class),
+                    false => this.window.remove_css_class(class),
+                }
+            }
             let sheet = format!("{}\n{}\n{}", this.bg_part.borrow(), this.accent_part.borrow(), this.derive_colors());
             if *this.loaded.borrow() != sheet {
                 this.css.load_from_string(&sheet);

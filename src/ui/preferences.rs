@@ -42,7 +42,8 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesDialog {
     appearance.add(&visualizer_group(win, ctx));
     dialog.add(&appearance);
 
-    dialog.add(&crate::ui::preferences_lyrics::build_page(win, ctx));
+    let lyrics = crate::ui::preferences_lyrics::build_page(win, ctx);
+    dialog.add(&lyrics);
 
     let services = adw::PreferencesPage::builder().name("services").title("Services").icon_name("network-workgroup-symbolic").build();
     services.add(&discord_group(ctx));
@@ -55,9 +56,43 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesDialog {
     advanced.add(&reset_group(win, ctx));
     dialog.add(&advanced);
 
+    fit_phone_width(&dialog, &[&general, &appearance, &lyrics, &services, &advanced]);
     dialog.present(Some(win.window()));
     dialog
 }
+
+/// On a phone a drop-down row beside a wrapped description cut its value to
+/// a letter or two ("Im…"). Narrow, the description goes so the value fits,
+/// and the download folder moves up into its group's description.
+fn fit_phone_width(dialog: &adw::PreferencesDialog, pages: &[&adw::PreferencesPage]) {
+    let condition = adw::BreakpointCondition::parse("max-width: 500sp").expect("valid breakpoint");
+    let breakpoint = adw::Breakpoint::new(condition);
+    let mut stack: Vec<gtk::Widget> = pages.iter().map(|p| (*p).clone().upcast()).collect();
+    while let Some(widget) = stack.pop() {
+        if let Some(row) = widget.downcast_ref::<adw::ComboRow>() {
+            // A row that already shows its value as the subtitle is left as it is.
+            if !row.uses_subtitle() && !row.subtitle().is_some_and(|s| s.is_empty()) {
+                breakpoint.add_setter(row, "subtitle", Some(&"".to_value()));
+            }
+        }
+        if let Some(group) = widget.downcast_ref::<adw::PreferencesGroup>() {
+            if let Some(narrow) = unsafe { group.data::<String>(NARROW_DESCRIPTION) } {
+                let narrow = unsafe { narrow.as_ref() }.clone();
+                breakpoint.add_setter(group, "description", Some(&narrow.to_value()));
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(c) = child {
+            child = c.next_sibling();
+            stack.push(c);
+        }
+    }
+    dialog.add_breakpoint(breakpoint);
+    dialog.add_css_class("mx-preferences");
+}
+
+/// Group data key: the description a group takes on a phone.
+const NARROW_DESCRIPTION: &str = "mx-narrow-description";
 
 // -- small builders ---------------------------------------------------------
 
@@ -943,6 +978,8 @@ fn downloads_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup
         });
     }
     group.add(&format_row);
+    // Narrow, the format row shows its value in the subtitle, so the folder is named here.
+    unsafe { group.set_data(NARROW_DESCRIPTION, glib::markup_escape_text(&subtitle).to_string()) };
 
     let current = naming::folder_structure(&ctx.paths);
     let selected = naming::FOLDER_STRUCTURES.iter().position(|name| *name == current).unwrap_or(0);

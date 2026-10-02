@@ -17,6 +17,10 @@ use crate::ui::context::UiContext;
 use crate::ui::high_res_url;
 
 const PLACEHOLDER_ICON: &str = "audio-x-generic-symbolic";
+/// How long a cover must stay wanted before it is fetched.
+const LOAD_SETTLE: std::time::Duration = std::time::Duration::from_millis(90);
+/// Cover downloads at once. More only queue behind each other on a phone link.
+static NET_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(6);
 const CACHE_LIMIT: usize = 64;
 /// Thumbnail size on phones, and the largest base size the swap applies to.
 const COMPACT_SIZE: i32 = 44;
@@ -26,6 +30,60 @@ const COMPACT_MAX_BASE: i32 = 80;
 static DISK_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 /// Files kept in the disk cache. A cover at the size it is shown is about 10 KB.
 const DISK_LIMIT: usize = 4000;
+
+type TrackArtLookup = Box<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+type DownloadedLookup = Box<dyn Fn(&str) -> bool + Send + Sync>;
+/// Find the cover a downloaded track carries: whether there is a download, a
+/// quick look for the copy kept beside the cache, and the slow path that
+/// pulls it out of the file. Set once at startup.
+static TRACK_ART: std::sync::OnceLock<(DownloadedLookup, TrackArtLookup, TrackArtLookup)> = std::sync::OnceLock::new();
+
+/// Install the lookups for a downloaded track's own cover, by video id.
+pub fn set_track_art_lookup(
+    downloaded: impl Fn(&str) -> bool + Send + Sync + 'static,
+    cached: impl Fn(&str) -> Option<PathBuf> + Send + Sync + 'static,
+    extract: impl Fn(&str) -> Option<PathBuf> + Send + Sync + 'static,
+) {
+    let _ = TRACK_ART.set((Box::new(downloaded), Box::new(cached), Box::new(extract)));
+}
+
+/// Whether the track has a downloaded file, and so a cover of its own.
+pub fn is_downloaded(video_id: &str) -> bool {
+    !video_id.is_empty() && TRACK_ART.get().is_some_and(|(downloaded, _, _)| downloaded(video_id))
+}
+
+/// The cover kept with a downloaded track, when it is already on disk. Cheap
+/// enough for the GTK thread.
+pub fn cached_track_art(video_id: &str) -> Option<PathBuf> {
+    if video_id.is_empty() {
+        return None;
+    }
+    if !is_downloaded(video_id) {
+        return None;
+    }
+    TRACK_ART.get().and_then(|(_, cached, _)| cached(video_id))
+}
+
+/// The cover kept with a downloaded track, extracted from the file the first
+/// time. Offline it is the only copy of the art that is sure to be there.
+pub async fn track_art(net: &NetHandle, video_id: &str) -> Option<PathBuf> {
+    if !is_downloaded(video_id) {
+        return None;
+    }
+    if let Some(path) = cached_track_art(video_id) {
+        return Some(path);
+    }
+    let id = video_id.to_owned();
+    net.spawn(async move { tokio::task::spawn_blocking(move || TRACK_ART.get().and_then(|(_, _, extract)| extract(&id))).await.ok().flatten() }).await.ok().flatten()
+}
+
+/// The address to draw for a track: its downloaded cover when there is one, else `url`.
+pub async fn track_cover_address(net: &NetHandle, video_id: &str, url: &str) -> String {
+    match track_art(net, video_id).await {
+        Some(path) => path.to_string_lossy().into_owned(),
+        None => url.to_owned(),
+    }
+}
 
 /// Point the disk cache at `<cache>/covers` and trim it in the background.
 pub fn init_disk_cache(cache_dir: &std::path::Path) {
@@ -53,6 +111,29 @@ pub fn init_disk_cache(cache_dir: &std::path::Path) {
 fn disk_path(url: &str, target: Option<u32>) -> Option<PathBuf> {
     let dir = DISK_DIR.get()?;
     Some(dir.join(format!("{}-{}", address_hash(url), target.unwrap_or(0))))
+}
+
+/// The largest copy of `url` kept on disk at any size but `skip`.
+/// Size 0 is the full picture, so it ranks first.
+fn disk_path_any_size(url: &str, skip: Option<u32>) -> Option<PathBuf> {
+    let dir = DISK_DIR.get()?;
+    let prefix = format!("{}-", address_hash(url));
+    std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let size: u32 = name.strip_prefix(&prefix)?.parse().ok()?;
+            (Some(size) != skip).then(|| (if size == 0 { u32::MAX } else { size }, e.path()))
+        })
+        .max_by_key(|(size, _)| *size)
+        .map(|(_, path)| path)
+}
+
+/// The largest copy of a remote cover the texture cache kept, for when the
+/// network is gone.
+pub fn disk_copy(url: &str) -> Option<PathBuf> {
+    disk_path_any_size(url, None)
 }
 
 /// The cache file name for a cover address. YouTube re-signs `sqp` and `rs` on
@@ -127,6 +208,7 @@ pub async fn load_texture(net: &NetHandle, url: &str, target: Option<u32>) -> Op
     // Fetch and decode on the runtime: GdkTexture is thread-safe, and decoding
     // a cover on the GTK thread is what Python avoided with its worker pool.
     let disk = disk_path(url, target);
+    let url_owned = url.to_owned();
     let handle = net.spawn(async move {
         // The disk copy first. It is what shows offline, and it spares a request online.
         if let Some(path) = &disk {
@@ -138,6 +220,7 @@ pub async fn load_texture(net: &NetHandle, url: &str, target: Option<u32>) -> Op
                 let _ = tokio::fs::remove_file(path).await;
             }
         }
+        let _slot = NET_SLOTS.acquire().await;
         let mut last_err = None;
         for candidate in candidates {
             match http.get(&candidate).send().await.and_then(|r| r.error_for_status()) {
@@ -159,6 +242,14 @@ pub async fn load_texture(net: &NetHandle, url: &str, target: Option<u32>) -> Op
                     Err(err) => last_err = Some(anyhow::Error::from(err)),
                 },
                 Err(err) => last_err = Some(anyhow::Error::from(err)),
+            }
+        }
+        // Offline, a copy kept at another size beats a placeholder.
+        if let Some(path) = disk_path_any_size(&url_owned, Some(target.unwrap_or(0))) {
+            if let Ok(bytes) = tokio::fs::read(&path).await {
+                if let Ok(Ok(texture)) = tokio::task::spawn_blocking(move || decode_bounded(bytes, target)).await {
+                    return Ok(texture);
+                }
             }
         }
         Err(last_err.expect("at least one candidate"))
@@ -262,13 +353,15 @@ pub struct CoverImage {
     net: NetHandle,
     base_size: std::cell::Cell<i32>,
     current: RefCell<Option<String>>,
+    /// Track whose cover was asked for, empty for a plain address.
+    track: RefCell<String>,
 }
 
 impl CoverImage {
     pub fn new(net: NetHandle, size: i32) -> Rc<Self> {
         // Overflow hidden lets the CSS border-radius clip the art, as GtkPicture does by default.
         let image = gtk::Image::builder().pixel_size(size).icon_name(PLACEHOLDER_ICON).overflow(gtk::Overflow::Hidden).build();
-        Rc::new(Self { image, net, base_size: std::cell::Cell::new(size), current: RefCell::new(None) })
+        Rc::new(Self { image, net, base_size: std::cell::Cell::new(size), current: RefCell::new(None), track: RefCell::new(String::new()) })
     }
 
     /// A cover that follows the phone layout: thumbnail-sized art drops to 44 px, larger art stays.
@@ -331,10 +424,39 @@ impl CoverImage {
     pub fn reload(self: &Rc<Self>) {
         let Some(url) = self.current.replace(None) else { return };
         forget_texture(&url);
-        self.load(&url);
+        self.load_address(&url);
+    }
+
+    /// Load a track's cover: the downloaded file's own art when there is
+    /// one, so it shows offline, else `url`.
+    pub fn load_track(self: &Rc<Self>, video_id: &str, url: &str) {
+        self.track.replace(video_id.to_owned());
+        if let Some(path) = cached_track_art(video_id) {
+            self.load_address(&path.to_string_lossy());
+            return;
+        }
+        self.load_address(url);
+        if !is_downloaded(video_id) {
+            return;
+        }
+        // Downloaded before the cover was kept: pull it out of the file, then swap.
+        let (net, id) = (self.net.clone(), video_id.to_owned());
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Some(path) = track_art(&net, &id).await else { return };
+            let Some(this) = weak.upgrade() else { return };
+            if *this.track.borrow() == id {
+                this.load_address(&path.to_string_lossy());
+            }
+        });
     }
 
     pub fn load(self: &Rc<Self>, url: &str) {
+        self.track.replace(String::new());
+        self.load_address(url);
+    }
+
+    fn load_address(self: &Rc<Self>, url: &str) {
         if url.is_empty() {
             self.current.replace(None);
             self.image.set_icon_name(Some(PLACEHOLDER_ICON));
@@ -351,8 +473,18 @@ impl CoverImage {
 
         let net = self.net.clone();
         let size = self.base_size.get().max(1) as u32;
+        if let Some(texture) = TEXTURES.with(|c| c.borrow().get(&cache_key(&url, Some(size))).cloned()) {
+            self.image.set_paintable(Some(&SquarePaintable::new(&texture)));
+            return;
+        }
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
+            // A row dragged past by the scrollbar is rebound within a frame or two.
+            // Waiting a moment keeps it from queueing a fetch nobody will see.
+            glib::timeout_future(LOAD_SETTLE).await;
+            if weak.upgrade().is_none_or(|this| this.current.borrow().as_deref() != Some(url.as_str())) {
+                return;
+            }
             let texture = load_texture(&net, &url, Some(size)).await;
             let Some(this) = weak.upgrade() else { return };
             if this.current.borrow().as_deref() != Some(url.as_str()) {
@@ -374,6 +506,9 @@ impl CoverImage {
 /// Bytes of the first address in the fallback chain that answers. For
 /// consumers outside the texture cache, such as the MPRIS art file.
 pub async fn fetch_cover_bytes(http: &reqwest::Client, auth: Option<&HttpAuth>, url: &str, target: Option<u32>) -> Option<Vec<u8>> {
+    if let Some(path) = local_path(url) {
+        return tokio::fs::read(path).await.ok().filter(|b| !b.is_empty());
+    }
     for candidate in fallback_chain(url, target) {
         let mut request = http.get(&candidate);
         // Private covers on YouTube's hosts need the session cookie.
@@ -388,7 +523,9 @@ pub async fn fetch_cover_bytes(http: &reqwest::Client, auth: Option<&HttpAuth>, 
             Err(_) => continue,
         }
     }
-    None
+    // Offline: whatever copy the texture cache kept.
+    let path = disk_path(url, target).filter(|p| p.is_file()).or_else(|| disk_path_any_size(url, None))?;
+    tokio::fs::read(path).await.ok().filter(|b| !b.is_empty())
 }
 
 /// Addresses to try in order: the upscaled form, the original, then each lower ytimg quality.
@@ -432,7 +569,7 @@ pub fn retry_failed() {
     let failed = FAILED.with(|f| std::mem::take(&mut *f.borrow_mut()));
     for cover in failed.iter().filter_map(std::rc::Weak::upgrade) {
         if let Some(url) = cover.current.replace(None) {
-            cover.load(&url);
+            cover.load_address(&url);
         }
     }
 }

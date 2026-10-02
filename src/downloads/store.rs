@@ -106,14 +106,19 @@ pub struct Store {
     path: PathBuf,
     /// video id to file path, seeded at start and kept in step with writes.
     known: RwLock<HashMap<String, PathBuf>>,
+    /// When each file was last seen on disk.
+    verified: RwLock<HashMap<String, std::time::Instant>>,
 }
+
+/// How long a file seen on disk is trusted to still be there.
+const VERIFY_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl Store {
     /// Open the library, creating the folder and table when they are missing.
     pub fn open(music_dir: &Path) -> Self {
         migrate_legacy_folder(music_dir);
         let path = music_dir.join(".mixtapes").join("library.db");
-        let store = Self { db: Mutex::new(None), path, known: RwLock::new(HashMap::new()) };
+        let store = Self { db: Mutex::new(None), path, known: RwLock::new(HashMap::new()), verified: RwLock::new(HashMap::new()) };
         store.with_db(|db| {
             db.execute_batch(SCHEMA)?;
             let mut stmt = db.prepare("SELECT video_id, file_path FROM downloads WHERE file_path IS NOT NULL")?;
@@ -137,7 +142,13 @@ impl Store {
     pub fn is_downloaded(&self, video_id: &str) -> bool {
         let path = self.known.read().unwrap().get(video_id).cloned();
         let Some(path) = path else { return false };
+        // A row asks several times per bind, so a recent check stands.
+        let recent = self.verified.read().unwrap().get(video_id).is_some_and(|at| at.elapsed() < VERIFY_EVERY);
+        if recent {
+            return true;
+        }
         if path.exists() {
+            self.verified.write().unwrap().insert(video_id.to_owned(), std::time::Instant::now());
             return true;
         }
         self.forget(video_id);
@@ -257,6 +268,7 @@ impl Store {
 
     pub fn forget(&self, video_id: &str) {
         self.known.write().unwrap().remove(video_id);
+        self.verified.write().unwrap().remove(video_id);
         let id = video_id.to_owned();
         self.with_db(move |db| {
             db.execute("DELETE FROM downloads WHERE video_id = ?1", [&id])?;

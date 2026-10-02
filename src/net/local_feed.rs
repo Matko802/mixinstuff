@@ -97,29 +97,15 @@ fn top_artists<'a>(tracks: impl Iterator<Item = (&'a Track, usize)>, limit: usiz
 /// The shelves, in the order Home shows them. Each fetch that fails costs its
 /// shelf only.
 pub async fn build(api: Arc<dyn Browse>, signals: Signals) -> Vec<HomeSection> {
-    let radios = futures_join_all(signals.seeds.iter().map(|seed| {
-        let (api, id) = (api.clone(), seed.video_id.0.clone());
-        async move { crate::net::playlists::get_watch_playlist(&api, Some(&id), None, RADIO_LENGTH, true).await }
-    }));
+    let seed_ids: Vec<String> = signals.seeds.iter().map(|t| t.video_id.0.clone()).collect();
     let artists = futures_join_all(signals.artists.iter().map(|artist| {
         let (api, id) = (api.clone(), artist.id.clone().unwrap_or_default());
         async move { crate::net::artist::get_artist(api, &id).await }
     }));
-    let (radios, artists) = tokio::join!(radios, artists);
+    let (picks, artists) = tokio::join!(quick_picks(api.clone(), seed_ids), artists);
 
     let mut sections = Vec::new();
-    let radios: Vec<Vec<Track>> = radios
-        .into_iter()
-        .filter_map(|radio| radio.inspect_err(|err| tracing::warn!(%err, "local feed radio failed")).ok())
-        .map(|radio| radio.tracks.into_iter().map(|t| t.track).collect())
-        .collect();
-    // Each radio opens with its seed, which Listen again already shows.
-    let seeds: HashSet<&str> = signals.seeds.iter().map(|t| t.video_id.as_str()).collect();
-    let radios = radios.into_iter().map(|radio| radio.into_iter().filter(|t| !seeds.contains(t.video_id.as_str())).collect()).collect();
-    let picks = interleave(radios, QUICK_PICKS, |t| t.video_id.0.clone());
-    if !picks.is_empty() {
-        sections.push(HomeSection { title: QUICK_PICKS_TITLE.to_owned(), items: picks.iter().map(MediaItem::from_track).collect(), strapline_thumb: None, strapline: None });
-    }
+    sections.extend(picks);
     if signals.recent.len() >= LISTEN_AGAIN_MIN {
         sections.push(HomeSection { title: LISTEN_AGAIN_TITLE.to_owned(), items: signals.recent.iter().map(MediaItem::from_track).collect(), strapline_thumb: None, strapline: None });
     }
@@ -149,6 +135,47 @@ pub async fn build(api: Arc<dyn Browse>, signals: Signals) -> Vec<HomeSection> {
         sections.push(HomeSection { title: artist.name.clone(), items, strapline_thumb: artist.thumbnails.first().cloned(), strapline: Some("Similar to".to_owned()) });
     }
     sections
+}
+
+/// Quick picks made the way YouTube made them: a radio per seed song, taken
+/// in turns. YouTube stopped sending its own row in late 2026, so the signed
+/// in feed builds it too, seeded from Listen again.
+pub async fn quick_picks(api: Arc<dyn Browse>, seed_ids: Vec<String>) -> Option<HomeSection> {
+    let radios = futures_join_all(seed_ids.iter().map(|id| {
+        let (api, id) = (api.clone(), id.clone());
+        async move { crate::net::playlists::get_watch_playlist(&api, Some(&id), None, RADIO_LENGTH, true).await }
+    }))
+    .await;
+    let radios: Vec<Vec<Track>> = radios
+        .into_iter()
+        .filter_map(|radio| radio.inspect_err(|err| tracing::warn!(%err, "quick picks radio failed")).ok())
+        .map(|radio| radio.tracks.into_iter().map(|t| t.track).collect())
+        .collect();
+    // Each radio opens with its seed, which Listen again already shows.
+    let seeds: HashSet<&str> = seed_ids.iter().map(String::as_str).collect();
+    let radios = radios.into_iter().map(|radio| radio.into_iter().filter(|t| !seeds.contains(t.video_id.as_str())).collect()).collect();
+    let picks = interleave(radios, QUICK_PICKS, |t| t.video_id.0.clone());
+    (!picks.is_empty()).then(|| HomeSection { title: QUICK_PICKS_TITLE.to_owned(), items: picks.iter().map(MediaItem::from_track).collect(), strapline_thumb: None, strapline: None })
+}
+
+/// Songs to seed quick picks with, from a feed that came without them:
+/// Listen again first, then Forgotten favorites. None when the feed has its own row.
+pub fn quick_pick_seeds(sections: &[HomeSection]) -> Option<Vec<String>> {
+    use crate::net::home::{Bucket, classify_section};
+    if sections.iter().any(|s| s.title.to_lowercase().contains("quick pick")) {
+        return None;
+    }
+    let mut seeds = Vec::new();
+    for bucket in [Bucket::ListenAgain, Bucket::Forgotten] {
+        for section in sections.iter().filter(|s| classify_section(&s.title) == Some(bucket)) {
+            for item in section.items.iter().filter(|i| matches!(i.kind, ItemKind::Song | ItemKind::Video) && is_video_id(&i.id)) {
+                if seeds.len() < SEEDS && !seeds.contains(&item.id) {
+                    seeds.push(item.id.clone());
+                }
+            }
+        }
+    }
+    Some(seeds)
 }
 
 /// One from each list in turn, each entry once.

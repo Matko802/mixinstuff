@@ -5,7 +5,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use gtk::{glib, prelude::*};
+use gtk::{gdk, glib, graphene, gsk, prelude::*, subclass::prelude::*};
 
 use crate::player::Player;
 use crate::ui::context::UiContext;
@@ -25,8 +25,53 @@ const IDLE_ALPHA: f64 = 0.08;
 const ACTIVE_ALPHA_MIN: f64 = 0.15;
 const ACTIVE_ALPHA_MAX: f64 = 0.6;
 
+/// A widget that draws through a callback into the snapshot. The bars are
+/// render nodes the GPU fills; a DrawingArea rasterized them with Cairo on
+/// the CPU and uploaded the result every frame, which took a third of the
+/// GTK thread on a phone while the sheet was open.
+mod area {
+    use super::*;
+
+    type Draw = Box<dyn Fn(&gtk::Widget, &gtk::Snapshot, f32, f32)>;
+
+    #[derive(Default)]
+    pub struct BarsArea {
+        pub draw: std::cell::RefCell<Option<Draw>>,
+        pub height: Cell<i32>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for BarsArea {
+        const NAME: &'static str = "MxVisualizerBars";
+        type Type = super::BarsArea;
+        type ParentType = gtk::Widget;
+    }
+
+    impl ObjectImpl for BarsArea {}
+
+    impl WidgetImpl for BarsArea {
+        fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
+            match orientation {
+                gtk::Orientation::Vertical => (self.height.get(), self.height.get(), -1, -1),
+                _ => (0, 0, -1, -1),
+            }
+        }
+
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            let widget = self.obj();
+            if let Some(draw) = self.draw.borrow().as_ref() {
+                draw(widget.upcast_ref(), snapshot, widget.width() as f32, widget.height() as f32);
+            }
+        }
+    }
+}
+
+glib::wrapper! {
+    pub struct BarsArea(ObjectSubclass<area::BarsArea>) @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
 pub struct Visualizer {
-    area: gtk::DrawingArea,
+    area: BarsArea,
     player: Rc<Player>,
     bars: Cell<usize>,
     smoothing: Cell<f64>,
@@ -47,7 +92,8 @@ impl Visualizer {
         let smoothing = prefs.get("visualizer_smoothing").and_then(|v| v.as_f64()).unwrap_or(MONSTERCAT_DEFAULT).max(1.05);
         let enabled = prefs.get("visualizer_enabled").and_then(|v| v.as_bool()).unwrap_or(true);
 
-        let area = gtk::DrawingArea::builder().content_height(height).visible(enabled).build();
+        let area: BarsArea = glib::Object::builder().property("visible", enabled).build();
+        area.imp().height.set(height);
         let this = Rc::new(Self {
             area,
             player: ctx.player.clone(),
@@ -63,11 +109,11 @@ impl Visualizer {
             tick: RefCell::new(None),
         });
         let weak = Rc::downgrade(&this);
-        this.area.set_draw_func(move |area, cr, w, h| {
+        this.area.imp().draw.replace(Some(Box::new(move |area, snapshot, w, h| {
             if let Some(v) = weak.upgrade() {
-                v.draw(area, cr, w, h);
+                v.draw(area, snapshot, w, h);
             }
-        });
+        })));
         let weak = Rc::downgrade(&this);
         this.area.connect_map(move |_| {
             if let Some(v) = weak.upgrade() {
@@ -83,7 +129,7 @@ impl Visualizer {
         this
     }
 
-    pub fn widget(&self) -> &gtk::DrawingArea {
+    pub fn widget(&self) -> &BarsArea {
         &self.area
     }
 
@@ -271,48 +317,40 @@ impl Visualizer {
         self.area.queue_draw();
     }
 
-    fn draw(&self, _area: &gtk::DrawingArea, cr: &gtk::cairo::Context, width: i32, height: i32) {
-        if width <= 0 || height <= 0 {
+    fn draw(&self, area: &gtk::Widget, snapshot: &gtk::Snapshot, width: f32, height: f32) {
+        if width <= 0.0 || height <= 0.0 {
             return;
         }
         let n = self.bars.get();
         let levels = self.levels.borrow();
-        let (r, g, b) = bar_color(_area);
-        let gap = 2.0;
-        let bar_w = ((width as f64 - gap * (n as f64 - 1.0)) / n as f64).max(1.0);
-        let min_h = 3.0;
+        let (r, g, b) = bar_color(area);
+        let gap = 2.0f32;
+        let bar_w = ((width - gap * (n as f32 - 1.0)) / n as f32).max(1.0);
+        let min_h = 3.0f32;
         for i in 0..n {
             let level = levels.get(i).copied().unwrap_or(0.0);
-            let h = (level * height as f64).max(min_h);
-            let x = i as f64 * (bar_w + gap);
-            let y = height as f64 - h;
+            let h = (level as f32 * height).max(min_h);
+            let x = i as f32 * (bar_w + gap);
             let alpha = if level > 0.0 { ACTIVE_ALPHA_MIN + (ACTIVE_ALPHA_MAX - ACTIVE_ALPHA_MIN) * level.min(1.0).sqrt() } else { IDLE_ALPHA };
-            cr.set_source_rgba(r, g, b, alpha);
-            rounded_rect(cr, x, y, bar_w, h, (bar_w / 2.0).min(3.0));
-            let _ = cr.fill();
+            let rect = graphene::Rect::new(x, height - h, bar_w, h);
+            let color = gdk::RGBA::new(r as f32, g as f32, b as f32, alpha as f32);
+            let radius = (bar_w / 2.0).min(3.0).min(h / 2.0);
+            if radius <= 0.5 {
+                snapshot.append_color(&color, &rect);
+                continue;
+            }
+            let corner = graphene::Size::new(radius, radius);
+            snapshot.push_rounded_clip(&gsk::RoundedRect::new(rect, corner, corner, corner, corner));
+            snapshot.append_color(&color, &rect);
+            snapshot.pop();
         }
     }
-}
-
-fn rounded_rect(cr: &gtk::cairo::Context, x: f64, y: f64, w: f64, h: f64, radius: f64) {
-    let radius = radius.min(w / 2.0).min(h / 2.0).max(0.0);
-    if radius <= 0.5 {
-        cr.rectangle(x, y, w, h);
-        return;
-    }
-    use std::f64::consts::PI;
-    cr.new_sub_path();
-    cr.arc(x + w - radius, y + radius, radius, -PI / 2.0, 0.0);
-    cr.arc(x + w - radius, y + h - radius, radius, 0.0, PI / 2.0);
-    cr.arc(x + radius, y + h - radius, radius, PI / 2.0, PI);
-    cr.arc(x + radius, y + radius, radius, PI, 3.0 * PI / 2.0);
-    cr.close_path();
 }
 
 /// @visualizer_bar when the window has derived one, else the plain accent.
 /// The derived value keeps the tallest bar clear of the labels drawn over it.
 #[allow(deprecated)]
-fn bar_color(area: &gtk::DrawingArea) -> (f64, f64, f64) {
+fn bar_color(area: &gtk::Widget) -> (f64, f64, f64) {
     let ctx = area.style_context();
     ["visualizer_bar", "accent_color"]
         .iter()

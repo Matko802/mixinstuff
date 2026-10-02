@@ -482,7 +482,7 @@ impl DesktopCoverView {
         } else {
             &title
         });
-        self.cover.load(&state.thumbnail_url());
+        self.cover.load_track(&state.video_id(), &state.thumbnail_url());
         while let Some(child) = self.artists_box.first_child() {
             self.artists_box.remove(&child);
         }

@@ -71,7 +71,7 @@ enum Fetched {
 
 pub struct PlaylistPage {
     stack: adw::ViewStack,
-    songs_list: gtk::ListView,
+    songs_list: gtk::GridView,
     header_container: gtk::Box,
     header_info_box: gtk::Box,
     cover_wrapper: gtk::Box,
@@ -238,7 +238,8 @@ impl PlaylistPage {
         let flatten = gtk::FlattenListModel::new(Some(master));
         let selection = gtk::NoSelection::new(Some(flatten.clone()));
         let factory = gtk::SignalListItemFactory::new();
-        let songs_list = gtk::ListView::new(Some(selection), Some(factory.clone()));
+        // One-column grid: a ListView keeps 200 rows alive, a grid about 30.
+        let songs_list = gtk::GridView::builder().model(&selection).factory(&factory).min_columns(1).max_columns(1).build();
         songs_list.add_css_class("playlist-view");
         songs_list.set_margin_start(12);
         songs_list.set_margin_end(12);
@@ -1318,6 +1319,43 @@ impl PlaylistPage {
         }
     }
 
+    /// Bring the rows in line with `tracks`, touching only what differs.
+    /// Emptying the store mid-scroll lost the position and hung for seconds.
+    fn sync_track_store(self: &Rc<Self>, tracks: Vec<Track>) {
+        let old: Vec<String> = (0..self.track_store.n_items()).filter_map(|i| self.track_store.item(i).and_downcast::<TrackObject>()).map(|t| t.track().video_id.0).collect();
+        let new: Vec<String> = tracks.iter().map(|t| t.video_id.0.clone()).collect();
+        let (prefix, suffix) = crate::state::queue_entry::shared_ends(&old, &new);
+        if prefix == old.len() && prefix < new.len() {
+            // A pure append: pumped like the first render, so no frame takes all of it.
+            self.populate_token.set(self.populate_token.get() + 1);
+            let token = self.populate_token.get();
+            let tracks = Rc::new(tracks);
+            let weak = Rc::downgrade(self);
+            glib::idle_add_local_once(move || append_from(weak, tracks, prefix, token));
+            return;
+        }
+        let removed = old.len() - prefix - suffix;
+        let middle: Vec<TrackObject> = tracks[prefix..tracks.len() - suffix].iter().map(|t| TrackObject::new(t.clone())).collect();
+        if removed > 0 || !middle.is_empty() {
+            self.populate_token.set(self.populate_token.get() + 1);
+            self.track_store.splice(prefix as u32, removed as u32, &middle);
+        }
+
+        fn append_from(weak: Weak<PlaylistPage>, tracks: Rc<Vec<Track>>, cursor: usize, token: u64) {
+            const BATCH: usize = 80;
+            let Some(page) = weak.upgrade() else { return };
+            if token != page.populate_token.get() {
+                return;
+            }
+            let end = (cursor + BATCH).min(tracks.len());
+            let chunk: Vec<TrackObject> = tracks[cursor..end].iter().map(|t| TrackObject::new(t.clone())).collect();
+            page.track_store.splice(page.track_store.n_items(), 0, &chunk);
+            if end < tracks.len() {
+                glib::idle_add_local_once(move || append_from(weak, tracks, end, token));
+            }
+        }
+    }
+
     // -- scroll / lazy load -----------------------------------------------
 
     /// Port of load_more: slice from the fetched list when it is complete,
@@ -1413,7 +1451,7 @@ impl PlaylistPage {
             if !new_ids.is_empty() && new_ids != cur_ids.iter().map(String::as_str).collect::<Vec<_>>() && !self.tracks.borrow().filtering() {
                 tracing::info!(cached = cur_ids.len(), live = new_ids.len(), "external edits detected, refreshing");
                 self.tracks.borrow_mut().set_rendered(tracks.clone());
-                self.populate_tracks_chunked(tracks.clone());
+                self.sync_track_store(tracks.clone());
             }
         }
         self.content_spinner.set_visible(false);
@@ -1514,7 +1552,23 @@ impl PlaylistPage {
     /// page, otherwise queue the page's rows with covers filled in.
     fn play_track(self: &Rc<Self>, track: &Track) {
         let video_id = track.video_id.0.clone();
-        if video_id.is_empty() || !self.ctx.online.is_online() {
+        if video_id.is_empty() {
+            return;
+        }
+        // Offline only downloaded songs play. Every tap used to be dropped,
+        // so a downloaded playlist did nothing without a connection. The
+        // offline answer can be a stale probe from a phone waking up, so a
+        // song that needs the network asks again before giving up.
+        if !self.ctx.online.is_online() && !self.ctx.downloads.is_downloaded(&video_id) {
+            let weak = Rc::downgrade(self);
+            let track = track.clone();
+            self.ctx.online.probe_now(Some(Box::new(move |online| {
+                let Some(page) = weak.upgrade() else { return };
+                match online {
+                    true => page.play_track(&track),
+                    false => toast(&page.stack, "This song isn't downloaded"),
+                }
+            })));
             return;
         }
         let pid = self.playlist_id();
@@ -1527,7 +1581,7 @@ impl PlaylistPage {
         }
         let page_cover = self.page_cover_url();
         let mut start_index = None;
-        let queue: Vec<Track> = self.best_queue().into_iter().enumerate().map(|(i, mut t)| {
+        let queue: Vec<Track> = self.offline_filter_queue(self.best_queue()).into_iter().enumerate().map(|(i, mut t)| {
             if t.thumb.is_none() {
                 t.thumb = page_cover.clone();
             }

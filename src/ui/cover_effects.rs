@@ -115,6 +115,12 @@ async fn read_thumb_cache(cache_dir: &Path, url: &str) -> Option<Vec<u8>> {
     tokio::fs::read(thumb_cache_path(cache_dir, url)).await.ok().filter(|bytes| !bytes.is_empty())
 }
 
+/// The copy the texture cache kept of a remote cover, for when it cannot be fetched.
+async fn read_cover_disk_copy(url: &str) -> Option<Vec<u8>> {
+    let path = crate::ui::cover::disk_copy(url)?;
+    tokio::fs::read(path).await.ok().filter(|bytes| !bytes.is_empty())
+}
+
 /// Write to a sibling tmp file then rename, so a partial write is never read as a cover.
 async fn write_thumb_cache(cache_dir: &Path, url: &str, bytes: &[u8]) {
     let path = thumb_cache_path(cache_dir, url);
@@ -215,7 +221,7 @@ async fn ensure_image_bytes(http: &reqwest::Client, cache_dir: &Path, url: &str)
             Ok(response) => response,
             Err(err) => {
                 tracing::debug!(%err, url, "cover fetch failed");
-                return None;
+                return read_cover_disk_copy(url).await;
             }
         };
         // Only a 404 walks to the next fallback. A different URL fixes nothing for a timeout or a DNS failure.

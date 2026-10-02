@@ -34,19 +34,29 @@ mod imp {
                 self.parent_snapshot(snapshot);
                 return;
             }
-            snapshot.push_mask(gsk::MaskMode::Alpha);
+            // Masked in the two bands only. A full-area mask rendered everything offscreen each frame.
+            let content = gtk::Snapshot::new();
+            self.parent_snapshot(&content);
+            let Some(node) = content.to_node() else { return };
+            let middle = graphene::Rect::new(0.0, top, w, h - top - bottom);
+            snapshot.push_clip(&middle);
+            snapshot.append_node(&node);
+            snapshot.pop();
             let opaque = gdk::RGBA::new(0.0, 0.0, 0.0, 1.0);
             let clear = gdk::RGBA::new(0.0, 0.0, 0.0, 0.0);
-            let stops = [
-                gsk::ColorStop::new(0.0, if top > 0.0 { clear } else { opaque }),
-                gsk::ColorStop::new(top / h, opaque),
-                gsk::ColorStop::new(1.0 - bottom / h, opaque),
-                gsk::ColorStop::new(1.0, if bottom > 0.0 { clear } else { opaque }),
-            ];
-            snapshot.append_linear_gradient(&graphene::Rect::new(0.0, 0.0, w, h), &graphene::Point::new(0.0, 0.0), &graphene::Point::new(0.0, h), &stops);
-            snapshot.pop();
-            self.parent_snapshot(snapshot);
-            snapshot.pop();
+            for (band, from, to) in [(graphene::Rect::new(0.0, 0.0, w, top), clear, opaque), (graphene::Rect::new(0.0, h - bottom, w, bottom), opaque, clear)] {
+                if band.height() <= 0.0 {
+                    continue;
+                }
+                snapshot.push_clip(&band);
+                snapshot.push_mask(gsk::MaskMode::Alpha);
+                let stops = [gsk::ColorStop::new(0.0, from), gsk::ColorStop::new(1.0, to)];
+                snapshot.append_linear_gradient(&band, &graphene::Point::new(0.0, band.y()), &graphene::Point::new(0.0, band.y() + band.height()), &stops);
+                snapshot.pop();
+                snapshot.append_node(&node);
+                snapshot.pop();
+                snapshot.pop();
+            }
         }
     }
 

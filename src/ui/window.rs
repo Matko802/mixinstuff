@@ -468,6 +468,11 @@ impl MainWindow {
         self.on_expand_requested();
     }
 
+    /// Demo hook: show a page of the expanded player.
+    pub fn show_sheet_page(&self, name: &str) {
+        self.expanded_player.show_page(name);
+    }
+
     pub fn select_tab(&self, name: &str) {
         self.view_stack.set_visible_child_name(name);
     }
@@ -598,6 +603,8 @@ impl MainWindow {
             self.add_toast("Back online");
             // Covers that failed while offline stay placeholders until asked again.
             crate::ui::cover::retry_failed();
+            // The list keeps its rows across a reload, so the offline grey is lifted here.
+            self.library.apply_offline_state();
             self.library.load_library(false);
             self.explore.load_explore_data(true);
             self.home.refresh();
@@ -797,7 +804,10 @@ impl MainWindow {
         let weak = Rc::downgrade(self);
         self.bottom_sheet.connect_open_notify(move |sheet| {
             if let Some(w) = weak.upgrade() {
-                if !sheet.is_open() {
+                if sheet.is_open() {
+                    // Every open starts on the player, set before the sheet shows.
+                    w.expanded_player.show_player_page();
+                } else {
                     w.player_bar.set_expanded(false);
                 }
             }
@@ -1433,6 +1443,9 @@ impl MainWindow {
         {
             return;
         }
+        if let Some(child) = page.child() {
+            crate::ui::style_only_while_shown(&page, &child);
+        }
         nav.push(&page);
     }
 
@@ -1908,6 +1921,7 @@ fn create_tab_nav(content: &gtk::Widget, title: &str) -> adw::NavigationView {
         .title(title)
         .tag("root")
         .build();
+    crate::ui::style_only_while_shown(&page, content);
     let nav = adw::NavigationView::new();
     nav.add(&page);
     nav

@@ -6,6 +6,12 @@
 //! MIXTAPES_DEMO_AUTOPLAY=1   press play three seconds after the window shows
 //! MIXTAPES_DEMO_SNAPSHOT=p   write p-1.png at 2.5 s and p-2.png at 11 s from inside GTK
 //! MIXTAPES_DEMO_QUEUE=1      open the queue sidebar after staging
+//! MIXTAPES_DEMO_SAMPLE=path,ms[,from]  sample the GTK thread at 1 kHz from `from` ms, write path.samples and path.maps at ms, then quit
+//! MIXTAPES_DEMO_COUNT=ms   log widget counts per subtree that holds 150 or more
+//! MIXTAPES_DEMO_SHEET_PAGE=ms,name  show the expanded player's player, queue or lyrics page
+//! MIXTAPES_DEMO_FLING=ms[,px_per_s[,secs[,class]]]  scroll the biggest visible page (or the one with that class) at a steady speed
+//! MIXTAPES_DEMO_CLEAR_AT=ms  clear the queue after that many ms
+//! MIXTAPES_DEMO_LYRICS_PICKER=ms  switch the lyrics source through the picker and reopen it
 //! MIXTAPES_DEMO_EXPAND=1|ms  open the expanded player, five seconds in by default
 //! MIXTAPES_DEMO_TAB=name     select home, library or search at startup
 //! MIXTAPES_DEMO_SEARCH=text  run a search at startup
@@ -379,6 +385,127 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
                 tracing::info!("demo: new playlist dialog");
                 mw.window().present();
                 mw.new_playlist_dialog();
+            }
+        });
+    }
+
+    #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64")))]
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SAMPLE") {
+        // Sample the GTK thread from now on, write the samples and quit at `ms`.
+        let mut parts = spec.split(',');
+        let path = parts.next().unwrap_or_default().to_owned();
+        let ms = parts.next().unwrap_or("40000");
+        let from = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+        glib::timeout_add_local_once(Duration::from_millis(from), || crate::sampler::start(1000));
+        glib::timeout_add_local_once(Duration::from_millis(ms.parse::<u64>().unwrap_or(40000)), move || {
+            crate::sampler::dump(&path);
+            if let Some(app) = gtk::gio::Application::default() {
+                app.quit();
+            }
+        });
+    }
+
+    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_COUNT") {
+        // Widgets per subtree, to see what a window-wide restyle has to walk.
+        let win = window.clone();
+        glib::timeout_add_local_once(Duration::from_millis(ms.parse::<u64>().unwrap_or(15000)), move || {
+            fn count(w: &gtk::Widget) -> (usize, usize) {
+                let mut total = (1, usize::from(w.is_visible()));
+                let mut child = w.first_child();
+                while let Some(c) = child {
+                    let (t, v) = count(&c);
+                    total.0 += t;
+                    total.1 += if w.is_visible() { v } else { 0 };
+                    child = c.next_sibling();
+                }
+                total
+            }
+            fn walk(w: &gtk::Widget, depth: usize, path: String) {
+                let (total, visible) = count(w);
+                if total < 150 || depth > 24 {
+                    return;
+                }
+                let name = format!("{}{}", w.type_().name(), w.css_classes().first().map(|c| format!(".{c}")).unwrap_or_default());
+                tracing::info!(depth, total, visible, mapped = w.is_mapped(), "demo: widgets {path}/{name}");
+                let mut child = w.first_child();
+                while let Some(c) = child {
+                    walk(&c, depth + 1, format!("{path}/{name}"));
+                    child = c.next_sibling();
+                }
+            }
+            walk(win.upcast_ref(), 0, String::new());
+        });
+    }
+
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SHEET_PAGE") {
+        let ctx_w = ctx.clone();
+        let (ms, name) = spec.split_once(',').unwrap_or((spec.as_str(), "queue"));
+        let (ms, name) = (ms.parse::<u64>().unwrap_or(12000), name.to_owned());
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                tracing::info!(name, "demo: sheet page");
+                mw.show_sheet_page(&name);
+            }
+        });
+    }
+
+    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_FLING") {
+        // Scroll the biggest mapped page at a steady speed for a while, like a long fling.
+        let mut parts = spec.split(',');
+        let ms = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(10000);
+        let speed = parts.next().and_then(|v| v.parse::<f64>().ok()).unwrap_or(3000.0);
+        let secs = parts.next().and_then(|v| v.parse::<f64>().ok()).unwrap_or(5.0);
+        let class = parts.next().map(str::to_owned);
+        let win = window.clone();
+        glib::timeout_add_local_once(Duration::from_millis(ms), move || {
+            let mut scrollers = Vec::new();
+            collect_scrollers(win.upcast_ref(), &mut scrollers);
+            let wanted = |s: &gtk::ScrolledWindow| s.is_mapped() && class.as_deref().is_none_or(|c| s.has_css_class(c));
+            let Some(scroller) = scrollers.into_iter().filter(wanted).max_by(|a, b| a.vadjustment().upper().total_cmp(&b.vadjustment().upper())) else { return };
+            tracing::info!(upper = scroller.vadjustment().upper(), speed, "demo: fling");
+            let start = std::cell::Cell::new(None::<i64>);
+            scroller.add_tick_callback(move |s, clock| {
+                let now = clock.frame_time();
+                let begun = *start.get().get_or_insert(now);
+                start.set(Some(begun));
+                let elapsed = (now - begun) as f64 / 1e6;
+                let adj = s.vadjustment();
+                adj.set_value(elapsed * speed);
+                if s.has_css_class("lyrics-scroller") {
+                    for view in crate::ui::widgets::lyrics_view::live_views() {
+                        view.note_user_scroll_for_demo();
+                    }
+                }
+                if elapsed >= secs || adj.value() >= adj.upper() - adj.page_size() {
+                    tracing::info!(value = adj.value(), "demo: fling done");
+                    return glib::ControlFlow::Break;
+                }
+                glib::ControlFlow::Continue
+            });
+        });
+    }
+
+    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_CLEAR_AT") {
+        let player = ctx.player.clone();
+        glib::timeout_add_local_once(Duration::from_millis(ms.parse::<u64>().unwrap_or(20000)), move || {
+            tracing::info!("demo: clearing the queue");
+            player.clear_queue();
+        });
+    }
+
+    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_LYRICS_PICKER") {
+        let ctx_w = ctx.clone();
+        glib::timeout_add_local_once(Duration::from_millis(ms.parse::<u64>().unwrap_or(10000)), move || {
+            if let Some(mw) = ctx_w.window.borrow().as_ref() {
+                for view in mw.lyrics_views() {
+                    // The expanded player keeps lyrics on a page of its own.
+                    if let Some(stack) = view.widget().ancestor(adw::ViewStack::static_type()).and_downcast::<adw::ViewStack>() {
+                        stack.set_visible_child_name("lyrics");
+                    }
+                    if view.widget().is_mapped() {
+                        view.picker_demo();
+                    }
+                }
             }
         });
     }

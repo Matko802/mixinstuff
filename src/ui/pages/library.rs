@@ -290,20 +290,33 @@ impl LibraryPage {
         self.load_library(true);
     }
 
-    /// Port of _apply_offline_state: grey out list rows that are not cached
-    /// for offline use. Playlists and albums with a cached copy stay live,
-    /// artists never do.
+    /// Port of _apply_offline_state: grey out what is not cached for offline
+    /// use, in the list and the grid alike, library and uploads. Playlists and
+    /// albums with a cached copy stay live, artists never do.
     pub fn apply_offline_state(self: &Rc<Self>) {
+        // Each section, and whether its items can be cached for offline use.
+        let sections: Vec<(Rc<Section>, bool)> = vec![
+            (self.sections[0].clone(), true),
+            (self.sections[1].clone(), true),
+            (self.sections[2].clone(), false),
+            (self.upload_sections[0].clone(), true),
+            (self.upload_sections[1].clone(), false),
+        ];
         if self.ctx.online.is_online() {
-            for section in &self.sections {
+            // Uploading and the full uploads list need the network.
+            self.uploads_actions.set_sensitive(true);
+            for (section, _) in &sections {
                 for row in list_rows(&section.list) {
-                    row.set_sensitive(true);
-                    row.set_opacity(1.0);
+                    set_available(row.upcast_ref(), true);
+                }
+                for card in section.cards.borrow().iter() {
+                    set_available(card.widget().upcast_ref(), true);
                 }
             }
             return;
         }
-        let ids: Vec<String> = self.sections[..2].iter().flat_map(|s| (0..s.store.n_items()).filter_map(|i| s.store.item(i).and_downcast::<MediaObject>().map(|o| o.id())).collect::<Vec<_>>()).collect();
+        self.uploads_actions.set_sensitive(false);
+        let ids: Vec<String> = sections.iter().filter(|(_, cacheable)| *cacheable).flat_map(|(s, _)| (0..s.store.n_items()).filter_map(|i| s.store.item(i).and_downcast::<MediaObject>().map(|o| o.id())).collect::<Vec<_>>()).collect();
         let caches = self.ctx.net.caches().clone();
         let handle = self.ctx.net.spawn(async move {
             tokio::task::spawn_blocking(move || ids.into_iter().filter(|id| caches.disk().has_tracks(id)).collect::<std::collections::HashSet<String>>()).await.unwrap_or_default()
@@ -315,12 +328,16 @@ impl LibraryPage {
             if page.ctx.online.is_online() {
                 return;
             }
-            for (index, section) in page.sections.iter().enumerate() {
+            for (section, cacheable) in &sections {
+                // Downloads and the playlists kept on this device need no network.
+                let available = |id: &str| id == DOWNLOADS_ID || crate::local_library::is_local(id) || (*cacheable && cached.contains(id));
+                // The list shows the filtered model, so its rows follow that order.
                 for (i, row) in list_rows(&section.list).into_iter().enumerate() {
-                    let id = section.store.item(i as u32).and_downcast::<MediaObject>().map(|o| o.id()).unwrap_or_default();
-                    let available = index < 2 && cached.contains(&id);
-                    row.set_sensitive(available);
-                    row.set_opacity(if available { 1.0 } else { 0.4 });
+                    let id = section.filtered.item(i as u32).and_downcast::<MediaObject>().map(|o| o.id()).unwrap_or_default();
+                    set_available(row.upcast_ref(), available(&id));
+                }
+                for card in section.cards.borrow().iter() {
+                    set_available(card.widget().upcast_ref(), available(&card.item().id));
                 }
             }
         });
@@ -396,6 +413,7 @@ impl LibraryPage {
             page.is_loading.set(false);
             page.loaded_at.set(Some(std::time::Instant::now()));
             page.apply_layout();
+            page.apply_offline_state();
             if let Some(done) = page.on_refresh_done.borrow_mut().take() {
                 done();
             }
@@ -589,6 +607,10 @@ impl LibraryPage {
             section.cards.borrow_mut().push(card);
         }
         self.apply_layout();
+        // New cards start live; offline they take the grey like the list rows.
+        if !self.ctx.online.is_online() {
+            self.apply_offline_state();
+        }
     }
 
     /// Port of the grid and list activation handlers.
@@ -688,10 +710,12 @@ fn with_local_items(ctx: &UiContext, remote: Vec<MediaItem>) -> Vec<MediaItem> {
     let mut items = remote;
     let head = items.len().min(1);
     let mut local = vec![downloads_entry()];
-    let signed_in = ctx.net.client().is_authenticated();
+    // Not "authenticated": offline the session cannot be verified, and the
+    // empty local list showed up beside YouTube's own Liked Music.
+    let signed_out = matches!(ctx.net.client().auth_state(), crate::net::ytmusic::AuthState::Anonymous);
     for item in ctx.local.items() {
         // Signed in, YouTube's own likes list is the one that matters. An empty local one stays out of the way.
-        if item.id == crate::local_library::LIKED_ID && signed_in && ctx.local.liked().is_empty() {
+        if item.id == crate::local_library::LIKED_ID && !signed_out && ctx.local.liked().is_empty() {
             continue;
         }
         local.push(item);
@@ -797,6 +821,12 @@ fn overlay_loader(text: &str) -> gtk::Box {
     wrap.append(&spinner);
     wrap.append(&gtk::Label::builder().label(text).css_classes(["caption"]).build());
     wrap
+}
+
+/// Live, or greyed out and inert while offline.
+fn set_available(widget: &gtk::Widget, available: bool) {
+    widget.set_sensitive(available);
+    widget.set_opacity(if available { 1.0 } else { 0.4 });
 }
 
 fn list_rows(list: &gtk::ListBox) -> Vec<gtk::ListBoxRow> {

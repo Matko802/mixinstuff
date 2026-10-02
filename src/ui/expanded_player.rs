@@ -290,6 +290,16 @@ impl ExpandedPlayer {
         self.on_dismiss.replace(Some(Rc::new(f)));
     }
 
+    /// Back to the player page, so the sheet opens on it next time.
+    pub fn show_player_page(&self) {
+        self.show_page("player");
+    }
+
+    /// Show "player", "queue" or "lyrics".
+    pub fn show_page(&self, name: &str) {
+        self.view_stack.set_visible_child_name(name);
+    }
+
     /// Inside the bottom sheet the toggle row shows and the probe is live.
     pub fn set_compact_mode(&self, compact: bool) {
         self.toggle_nav.set_visible(compact);
@@ -324,34 +334,27 @@ impl ExpandedPlayer {
 
     fn connect_carousel(self: &Rc<Self>, cover_frame: &gtk::AspectFrame) {
         // Every part of a gesture counts, not only its start: a slow swipe can
-        // take seconds, and the carousel settles after the finger lifts.
-        let drag = gtk::GestureDrag::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
-        for signal in ["drag-begin", "drag-update", "drag-end"] {
-            let weak = Rc::downgrade(self);
-            let begins = signal == "drag-begin";
-            drag.connect_local(signal, false, move |_| {
-                if let Some(ep) = weak.upgrade() {
-                    ep.note_input(begins);
-                }
-                None
-            });
-        }
-        self.carousel.add_controller(drag);
-
-        let click = gtk::GestureClick::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
+        // take seconds, and the carousel settles after the finger lifts. A raw
+        // controller, because on a touchscreen the carousel's swipe tracker
+        // claims the sequence and a gesture here is cancelled with it, so a
+        // slow touch swipe used to look like no input at all once it settled.
+        let events = gtk::EventControllerLegacy::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
         let weak = Rc::downgrade(self);
-        click.connect_pressed(move |_, _, _, _| {
+        events.connect_event(move |_, event| {
+            use gtk::gdk::EventType;
+            let begins = match event.event_type() {
+                EventType::TouchBegin | EventType::ButtonPress => true,
+                EventType::TouchUpdate | EventType::TouchEnd | EventType::TouchCancel | EventType::ButtonRelease => false,
+                // A mouse drag moves the carousel too, hovering does not.
+                EventType::MotionNotify if event.modifier_state().contains(gtk::gdk::ModifierType::BUTTON1_MASK) => false,
+                _ => return glib::Propagation::Proceed,
+            };
             if let Some(ep) = weak.upgrade() {
-                ep.note_input(true);
+                ep.note_input(begins);
             }
+            glib::Propagation::Proceed
         });
-        let weak = Rc::downgrade(self);
-        click.connect_released(move |_, _, _, _| {
-            if let Some(ep) = weak.upgrade() {
-                ep.note_input(false);
-            }
-        });
-        self.carousel.add_controller(click);
+        self.carousel.add_controller(events);
 
         let scroll = gtk::EventControllerScroll::builder().flags(gtk::EventControllerScrollFlags::BOTH_AXES).propagation_phase(gtk::PropagationPhase::Capture).build();
         let weak = Rc::downgrade(self);
@@ -683,7 +686,8 @@ impl ExpandedPlayer {
         for (i, cover) in covers.iter().enumerate() {
             // The playing track falls back to the artwork the bar is showing:
             // a radio row often carries no thumbnail of its own.
-            let thumb = match tracks.get(offset + i).and_then(|t| t.thumb.clone()) {
+            let track = tracks.get(offset + i);
+            let thumb = match track.and_then(|t| t.thumb.clone()) {
                 Some(thumb) => thumb,
                 None if i == page => self.ctx.player.state().thumbnail_url(),
                 None => String::new(),
@@ -691,7 +695,11 @@ impl ExpandedPlayer {
             // Every cover stays a page, with a placeholder when there is no
             // art. Hiding one would shift every page index after it.
             cover.widget().set_visible(true);
-            cover.load(if i >= lo && i <= hi { thumb.as_str() } else { "" });
+            if i >= lo && i <= hi {
+                cover.load_track(track.map_or("", |t| t.video_id.0.as_str()), &thumb);
+            } else {
+                cover.load("");
+            }
         }
         if let Some(cover) = covers.get(page) {
             self.carousel.scroll_to(cover.widget(), false);

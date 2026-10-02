@@ -151,24 +151,6 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
     }
     match_group.add(&match_row);
 
-    let cache_row = adw::ActionRow::builder().title("Clear Cached Lyrics").subtitle("Queue changes only apply to tracks that aren't cached yet").build();
-    let clear_button = gtk::Button::builder().label("Clear").valign(gtk::Align::Center).build();
-    clear_button.add_css_class("destructive-action");
-    {
-        let ctx = ctx.clone();
-        let win = Rc::downgrade(win);
-        clear_button.connect_clicked(move |_| {
-            let removed = ctx.lyrics.cache().clear_all();
-            let Some(win) = win.upgrade() else { return };
-            win.add_toast(&if removed > 0 { format!("Cleared {removed} cached track(s)") } else { "No cached lyrics to clear".to_owned() });
-            for view in win.lyrics_views() {
-                view.refresh();
-            }
-        });
-    }
-    cache_row.add_suffix(&clear_button);
-    cache_row.set_activatable_widget(Some(&clear_button));
-    match_group.add(&cache_row);
 
     // -- second line ----------------------------------------------------------
     let display_group = adw::PreferencesGroup::builder()
@@ -253,5 +235,26 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
             }
         });
     }
+    // -- cache -------------------------------------------------------------
+    // Styled like Reset Mixtapes: its own group, a destructive button row.
+    let cache_group = adw::PreferencesGroup::builder().description("Queue changes only apply to tracks that aren't cached yet").build();
+    let clear_row = adw::ButtonRow::builder().title("Clear Cached Lyrics").end_icon_name("user-trash-symbolic").build();
+    // The builder would replace the button class the row styles itself with.
+    clear_row.add_css_class("destructive-action");
+    {
+        let ctx = ctx.clone();
+        let win = Rc::downgrade(win);
+        clear_row.connect_activated(move |_| {
+            let removed = ctx.lyrics.cache().clear_all();
+            let Some(win) = win.upgrade() else { return };
+            win.add_toast(&if removed > 0 { format!("Cleared {removed} cached track(s)") } else { "No cached lyrics to clear".to_owned() });
+            for view in win.lyrics_views() {
+                view.refresh();
+            }
+        });
+    }
+    cache_group.add(&clear_row);
+    page.add(&cache_group);
+
     page
 }

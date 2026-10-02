@@ -135,7 +135,15 @@ impl HomePage {
         let signals = if self.ctx.net.client().is_authenticated() { Default::default() } else { local_feed::Signals::read(&self.ctx.local) };
         let handle = self.ctx.net.spawn(async move {
             if signals.is_empty() {
-                return home::get_home(api, FEED_SECTIONS).await;
+                let mut sections = home::get_home(api.clone(), FEED_SECTIONS).await?;
+                // YouTube stopped sending Quick picks; without them the dial
+                // borrowed Listen again and showed two or three tiles.
+                if let Some(seeds) = local_feed::quick_pick_seeds(&sections).filter(|s| !s.is_empty()) {
+                    if let Some(picks) = local_feed::quick_picks(api, seeds).await {
+                        sections.insert(0, picks);
+                    }
+                }
+                return Ok(sections);
             }
             let (remote, local) = tokio::join!(home::get_home(api.clone(), FEED_SECTIONS), local_feed::build(api, signals));
             match remote {

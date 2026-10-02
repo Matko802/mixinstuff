@@ -129,6 +129,8 @@ pub struct LyricsView {
     lit_interlude: RefCell<Option<InterludeRow>>,
     last_pos: Cell<f64>,
     user_scrolled_at: Cell<Option<Instant>>,
+    /// Lines show unblurred while the listener scrolls.
+    unblurred_for_scroll: Cell<bool>,
     suppress_activate: Cell<bool>,
     scroll_target: RefCell<Option<ScrollTarget>>,
     scroll_anim: RefCell<Option<gtk::TickCallbackId>>,
@@ -343,6 +345,7 @@ impl LyricsView {
             lit_interlude: RefCell::new(None),
             last_pos: Cell::new(0.0),
             user_scrolled_at: Cell::new(None),
+            unblurred_for_scroll: Cell::new(false),
             suppress_activate: Cell::new(false),
             scroll_target: RefCell::new(None),
             scroll_anim: RefCell::new(None),
@@ -393,14 +396,32 @@ impl LyricsView {
         let weak = Rc::downgrade(self);
         scroll.connect_scroll(move |_, _, _| {
             if let Some(v) = weak.upgrade() {
-                v.user_scrolled_at.set(Some(Instant::now()));
+                v.note_user_scroll();
             }
             glib::Propagation::Proceed
         });
         self.scroller.add_controller(scroll);
+        // A finger dragging the list. Only a raw controller sees touches the scrolled window claims.
+        let touch = gtk::EventControllerLegacy::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
+        let weak = Rc::downgrade(self);
+        touch.connect_event(move |_, event| {
+            if event.event_type() == gtk::gdk::EventType::TouchUpdate {
+                if let Some(v) = weak.upgrade() {
+                    v.note_user_scroll();
+                }
+            }
+            glib::Propagation::Proceed
+        });
+        self.scroller.add_controller(touch);
 
         self.popover.connect_closed(weak!(|v, _| v.show_picker_page("sources")));
+        // Logged, so a button that stops opening shows whether the tap arrived at all.
+        let taps = gtk::GestureClick::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
+        taps.connect_pressed(|gesture, _, _, _| tracing::debug!(touch = gesture.current_event().is_some_and(|e| e.event_type() == gtk::gdk::EventType::TouchBegin), "lyrics picker pressed"));
+        taps.connect_cancel(|_, _| tracing::debug!("lyrics picker press cancelled"));
+        self.picker_btn.add_controller(taps);
         self.picker_btn.connect_active_notify(weak!(|v, btn| {
+            tracing::debug!(active = btn.is_active(), "lyrics picker toggled");
             if btn.is_active() {
                 v.on_picker_opened();
             }
@@ -749,11 +770,7 @@ impl LyricsView {
         row.set_cursor_ms(cursor_ms);
         self.lit_idx.set(Some(idx));
         // Only the full level blurs by distance, and this walk runs on every line change.
-        if self.display.borrow().effects == "full" {
-            for (i, other) in self.rows.borrow().iter() {
-                other.set_distance(i.abs_diff(idx) as i32);
-            }
-        }
+        self.restore_distances();
         // Selection drives the :selected style and, through row-selected, the autoscroll.
         self.select_quietly(&row);
     }
@@ -779,6 +796,43 @@ impl LyricsView {
     }
 
     // -- autoscroll ----------------------------------------------------------------------------
+
+    /// The listener is scrolling: autoscroll pauses and the distance blur lifts, as in Apple Music.
+    fn note_user_scroll(self: &Rc<Self>) {
+        self.user_scrolled_at.set(Some(Instant::now()));
+        if self.unblurred_for_scroll.replace(true) {
+            return;
+        }
+        for row in self.rows.borrow().values() {
+            row.set_distance(0);
+        }
+        let weak = Rc::downgrade(self);
+        glib::timeout_add_local(Duration::from_millis(500), move || {
+            let Some(view) = weak.upgrade() else { return glib::ControlFlow::Break };
+            if view.user_scrolled_at.get().is_some_and(|at| at.elapsed() < USER_SCROLL_PAUSE) {
+                return glib::ControlFlow::Continue;
+            }
+            view.unblurred_for_scroll.set(false);
+            view.restore_distances();
+            glib::ControlFlow::Break
+        });
+    }
+
+    /// Demo hook: a scripted scroll counts as the listener's.
+    pub fn note_user_scroll_for_demo(self: &Rc<Self>) {
+        self.note_user_scroll();
+    }
+
+    /// Blur by distance from the active line again, when the level asks for it.
+    fn restore_distances(&self) {
+        if self.unblurred_for_scroll.get() || self.display.borrow().effects != "full" {
+            return;
+        }
+        let Some(idx) = self.active_idx.get() else { return };
+        for (i, other) in self.rows.borrow().iter() {
+            other.set_distance(i.abs_diff(idx) as i32);
+        }
+    }
 
     fn scroll_to_row(self: &Rc<Self>, row: &gtk::ListBoxRow) {
         if self.user_scrolled_at.get().is_some_and(|at| at.elapsed() < USER_SCROLL_PAUSE) {
@@ -847,6 +901,19 @@ impl LyricsView {
     }
 
     // -- source picker -------------------------------------------------------------------------------
+
+    /// Close the picker once the event that chose a row is fully handled. A
+    /// row is picked on touch release, and hiding the popup inside that
+    /// handler left the touch sequence half finished, after which taps on
+    /// the button did nothing until the view was rebuilt.
+    fn close_picker(&self) {
+        let button = self.picker_btn.downgrade();
+        glib::idle_add_local_once(move || {
+            if let Some(button) = button.upgrade() {
+                button.set_active(false);
+            }
+        });
+    }
 
     /// The source list is a few short names. A match list has to keep "[A Cappella]" apart from "[Slowed]".
     fn show_picker_page(&self, name: &str) {
@@ -970,7 +1037,7 @@ impl LyricsView {
                 drop(actions);
                 self.lyrics.cache().clear_user_choice(&video_id);
                 self.refresh_for_current_track();
-                self.picker_btn.set_active(false);
+                self.close_picker();
             }
             Some(SourceAction::Switch(source)) => {
                 let source = source.clone();
@@ -980,10 +1047,51 @@ impl LyricsView {
                 if let Some((_, result)) = self.cached_alternatives().into_iter().find(|(name, _)| *name == source) {
                     self.show_result(&source, result, true);
                 }
-                self.picker_btn.set_active(false);
+                self.close_picker();
             }
             Some(SourceAction::Nothing) | None => {}
         }
+    }
+
+    /// Demo hook: open the source picker, switch to another source, then
+    /// open it again and log whether the popover shows.
+    pub fn picker_demo(self: &Rc<Self>) {
+        let log = |view: &LyricsView, step: &str| {
+            tracing::info!(step, mapped = view.picker_btn.is_mapped(), visible = view.picker_btn.is_visible(), sensitive = view.picker_btn.is_sensitive(), active = view.picker_btn.is_active(), popover = view.popover.is_visible(), page = ?view.picker_stack.visible_child_name(), "demo: lyrics picker");
+        };
+        let this = self.clone();
+        let step = std::cell::Cell::new(0u32);
+        glib::timeout_add_local(std::time::Duration::from_millis(1500), move || {
+            let n = step.replace(step.get() + 1);
+            match n {
+                0 => {
+                    log(&this, "before open");
+                    this.picker_btn.set_active(true);
+                }
+                1 | 2 => log(&this, "opened"),
+                3 => {
+                    let actions = this.source_actions.borrow();
+                    let active = this.source.borrow().clone();
+                    let index = actions.iter().position(|a| matches!(a, SourceAction::Switch(name) if Some(name) != active.as_ref()));
+                    drop(actions);
+                    tracing::info!(?index, ?active, "demo: switching source");
+                    if let Some(row) = index.and_then(|i| this.source_list.row_at_index(i as i32)) {
+                        row.emit_activate();
+                    }
+                }
+                4 => {
+                    log(&this, "after switch");
+                    this.picker_btn.set_active(true);
+                }
+                5 | 6 => log(&this, "reopened"),
+                _ => {
+                    this.picker_btn.set_active(false);
+                    log(&this, "closed");
+                    return glib::ControlFlow::Break;
+                }
+            }
+            glib::ControlFlow::Continue
+        });
     }
 
     fn refresh_second_line_rows(&self) {
@@ -1010,7 +1118,7 @@ impl LyricsView {
                 view.apply_display_prefs();
             }
         }
-        self.picker_btn.set_active(false);
+        self.close_picker();
     }
 
     // -- other matches and manual search -------------------------------------------------------------------
@@ -1094,7 +1202,7 @@ impl LyricsView {
         let Some(found) = usize::try_from(index).ok().and_then(|i| rows.borrow().get(i).cloned()) else { return };
         let Some(source) = found.source.clone().or_else(|| self.matches_source.borrow().clone()) else { return };
         let Some(query) = self.track_query() else { return };
-        self.picker_btn.set_active(false);
+        self.close_picker();
 
         // Stored as this provider's result and pinned, so the choice survives the next play.
         let request = self.fetch_gen.get();

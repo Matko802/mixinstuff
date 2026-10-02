@@ -25,6 +25,8 @@ mod paths;
 mod player;
 mod presence;
 mod queue;
+#[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64")))]
+mod sampler;
 mod scrobbler;
 mod state;
 mod tray;
@@ -212,6 +214,8 @@ fn on_startup(ctx: &Rc<App>) {
     gtk::Window::set_default_icon_name(APP_ID);
     ui::load_css();
     ui::cover::init_disk_cache(&ctx.paths.cache_dir);
+    let (downloaded, cached, extract) = (ctx.downloads.clone(), ctx.downloads.clone(), ctx.downloads.clone());
+    ui::cover::set_track_art_lookup(move |id| downloaded.is_downloaded(id), move |id| cached.cached_cover(id), move |id| extract.extract_cover(id));
 
     // Event pumps must attach to the running GTK main context.
     ctx.player.start();

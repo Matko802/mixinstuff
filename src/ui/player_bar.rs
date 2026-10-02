@@ -494,7 +494,7 @@ impl PlayerBar {
             }
         }
 
-        self.cover.load(&state.thumbnail_url());
+        self.cover.load_track(&state.video_id(), &state.thumbnail_url());
 
         let video_id = state.video_id();
         if video_id.is_empty() {

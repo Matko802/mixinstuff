@@ -17,7 +17,9 @@ use crate::paths::Paths;
 const PROBE_INTERVAL: Duration = Duration::from_secs(15);
 /// The force_offline pref is read from disk at most this often.
 const FORCE_OFFLINE_TTL: Duration = Duration::from_secs(10);
-const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Mobile data waking from sleep can take a few seconds to connect, and a
+/// false "offline" drops taps on songs that need the network.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const PROBE_HOST: (&str, u16) = ("music.youtube.com", 443);
 
 type Listener = Rc<dyn Fn(bool)>;

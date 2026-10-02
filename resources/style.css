@@ -135,7 +135,12 @@ listview.playlist-view > row,
 listview.playlist-view > row:hover,
 listview.playlist-view > row:selected,
 listview.playlist-view > row:focus,
-listview.playlist-view > row:focus:selected {
+listview.playlist-view > row:focus:selected,
+gridview.playlist-view > child,
+gridview.playlist-view > child:hover,
+gridview.playlist-view > child:selected,
+gridview.playlist-view > child:focus,
+gridview.playlist-view > child:focus:selected {
   background-color: transparent;
   background: none;
   border: none;
@@ -181,6 +186,8 @@ listview.playlist-view > row:focus:selected {
 
 listview.playlist-view,
 listview.playlist-view > row,
+gridview.playlist-view,
+gridview.playlist-view > child,
 .list-item-bin {
   background: transparent;
   background-color: transparent;
@@ -189,6 +196,7 @@ listview.playlist-view > row,
 }
 
 listview.playlist-view > row > listboxrow,
+gridview.playlist-view > child > listboxrow,
 listboxrow.song-row-wrapper {
   background: transparent;
   background-color: transparent;
@@ -218,6 +226,7 @@ box.song-row, .song-row-button {
    .playing/.selected keep their persistent tint. Child controls (like button,
    menu) get the same treatment so their Adwaita hover doesn't repaint either. */
 .is-scrolling listview.playlist-view box.song-row:hover:not(.playing):not(.selected),
+.is-scrolling gridview.playlist-view box.song-row:hover:not(.playing):not(.selected),
 .is-scrolling list > row:hover:not(.playing) box.song-row,
 .is-scrolling .artist-horizontal-item:hover,
 .is-scrolling box.song-row button:hover,
@@ -293,7 +302,8 @@ bottom-sheet .queue-panel:not(.sidebar) {
 bottom-sheet .queue-panel toolbarview,
 bottom-sheet .queue-panel headerbar,
 bottom-sheet .queue-panel scrolledwindow,
-bottom-sheet .queue-panel listview {
+bottom-sheet .queue-panel listview,
+bottom-sheet .queue-panel gridview {
   background-color: transparent;
 }
 
@@ -382,7 +392,8 @@ picture.song-img, .song-img, label.song-index {
   font-size: 0.95em;
 }
 
-listview.playlist-view > row:disabled {
+listview.playlist-view > row:disabled,
+gridview.playlist-view > child:disabled {
   opacity: 1;
 }
 
@@ -535,7 +546,8 @@ flowboxchild:focus-visible {
   border-radius: 6px;
 }
 
-.playlist-view row {
+.playlist-view row,
+gridview.playlist-view > child {
     border-radius: 12px;
 }
 
@@ -619,7 +631,8 @@ window > windowhandle,
 }
 
 /* Ensure queue panel within sidebar fits well */
-.sidebar listview {
+.sidebar listview,
+.sidebar gridview {
   background-color: transparent;
 }
 
@@ -839,3 +852,19 @@ window > windowhandle,
   background-color: alpha(white, 0.3);
 }
 
+
+/* One-column grids standing in for lists: drop Adwaita's grid cell padding and corners. */
+gridview.playlist-view > child,
+gridview.queue-list > child {
+  padding: 2px;
+  border-radius: 0;
+}
+
+/* Five tabs on a phone: Adwaita's gaps cut "Appearance" short. */
+.mx-preferences viewswitcher {
+  border-spacing: 0;
+}
+.mx-preferences viewswitcher button.toggle > stack > box.narrow > label {
+  padding-left: 0;
+  padding-right: 0;
+}

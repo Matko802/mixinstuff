@@ -17,7 +17,8 @@ use crate::ui::widgets::add_to_playlist::AddToPlaylistPopover;
 pub struct QueuePanel {
     root: gtk::Box,
     pub header_bar: adw::HeaderBar,
-    list: gtk::ListView,
+    list: gtk::GridView,
+    selection: gtk::NoSelection,
     player: Rc<Player>,
     more_btn: gtk::MenuButton,
     ctx: Rc<UiContext>,
@@ -134,10 +135,16 @@ impl QueuePanel {
         // -- list --------------------------------------------------------
         let factory = gtk::SignalListItemFactory::new();
         let selection = gtk::NoSelection::new(Some(state.queue_model()));
-        let list = gtk::ListView::builder()
-            .model(&selection)
+        // The model is attached while the panel is on screen only. A list that
+        // was never allocated builds up to 150 rows on every queue change, and
+        // both panels did that inside the click that started playback.
+        // One column of a grid keeps about 30 rows alive where a ListView keeps 200.
+        let list = gtk::GridView::builder()
             .factory(&factory)
+            .min_columns(1)
+            .max_columns(1)
             .build();
+        list.add_css_class("queue-list");
         let scrolled = gtk::ScrolledWindow::builder()
             .vexpand(true)
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -145,11 +152,14 @@ impl QueuePanel {
             .build();
         crate::ui::suppress_hover_while_scrolling(&scrolled);
         root.append(&scrolled);
+        // Off screen the list still held about 150 rows, restyled with every track change.
+        crate::ui::style_only_while_shown(&root, &scrolled);
 
         let panel = Rc::new(Self {
             root,
             header_bar,
             list,
+            selection,
             player: player.clone(),
             more_btn,
             ctx,
@@ -216,8 +226,20 @@ impl QueuePanel {
             let weak = Rc::downgrade(&panel);
             panel.root.connect_map(move |_| {
                 if let Some(panel) = weak.upgrade() {
+                    if panel.list.model().is_none() {
+                        panel.list.set_model(Some(&panel.selection));
+                    }
                     panel.scroll_to_current_later();
                 }
+            });
+            let weak = Rc::downgrade(&panel);
+            panel.root.connect_unmap(move |_| {
+                let weak = weak.clone();
+                glib::idle_add_local_once(move || {
+                    if let Some(panel) = weak.upgrade().filter(|p| !p.root.is_mapped()) {
+                        panel.list.set_model(None::<&gtk::SelectionModel>);
+                    }
+                });
             });
         }
 

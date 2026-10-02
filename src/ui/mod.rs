@@ -238,6 +238,38 @@ pub fn suppress_hover_while_scrolling(scrolled: &gtk::ScrolledWindow) {
     scrolled.vadjustment().connect_value_changed(on_scroll);
 }
 
+/// Keep `content` out of window-wide restyles while `host` is off screen.
+///
+/// A new stylesheet or window class restyles every visible widget, mapped or
+/// not. The appearance code does that on each track change, and with the home
+/// feed under a pushed page, the other tabs and two queue lists that was about
+/// 9,500 widgets and 500 ms per restyle on a Pixel 3a. Invisible widgets are
+/// skipped and catch up once, when they are shown again.
+pub fn style_only_while_shown(host: &impl IsA<gtk::Widget>, content: &impl IsA<gtk::Widget>) {
+    // A page built off screen, such as a tab never opened, gets no unmap to start from.
+    if !host.is_mapped() {
+        content.set_visible(false);
+    }
+    let content = content.upcast_ref::<gtk::Widget>().downgrade();
+    let shown = content.clone();
+    host.connect_map(move |_| {
+        if let Some(content) = shown.upgrade() {
+            content.set_visible(true);
+        }
+    });
+    host.connect_unmap(move |host| {
+        // Not inside unmap: hiding a child while GTK walks the tree is not allowed.
+        let (host, content) = (host.downgrade(), content.clone());
+        glib::idle_add_local_once(move || {
+            if let (Some(host), Some(content)) = (host.upgrade(), content.upgrade()) {
+                if !host.is_mapped() {
+                    content.set_visible(false);
+                }
+            }
+        });
+    });
+}
+
 pub fn copy_to_clipboard(text: &str) {
     if let Some(display) = gdk::Display::default() {
         display.clipboard().set_text(text);

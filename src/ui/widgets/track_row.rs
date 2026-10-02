@@ -416,6 +416,7 @@ impl TrackRow {
             self.like.widget().set_visible(!multi);
         } else {
             self.like.set_data(None, Some(track.like_status));
+            self.like.widget().set_visible(false);
         }
         self.show_download_state(&video_id);
 
@@ -447,23 +448,9 @@ impl TrackRow {
     }
 
     /// Port of _unbind_list_item.
+    /// Only the handlers go: bind sets everything again in the same frame.
     pub fn unbind(&self) {
         self.disconnect_state();
-        self.button.remove_css_class("playing");
-        self.button.add_css_class("flat");
-        self.title.set_label("");
-        self.subtitle.set_label("");
-        self.img.clear();
-        self.duration.set_label("");
-        self.duration.set_visible(false);
-        if let Some(badge) = self.explicit.borrow().as_ref() {
-            badge.set_visible(false);
-        }
-        self.like.widget().set_visible(false);
-        if let Some(check) = self.check.borrow().as_ref() {
-            check.set_visible(false);
-        }
-        self.button.remove_css_class("selected");
         self.disconnect_check();
         self.track.replace(None);
     }

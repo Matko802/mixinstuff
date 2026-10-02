@@ -1025,9 +1025,11 @@ impl Player {
             Some(t) => {
                 self.state.set_title(t.title.clone());
                 self.state.set_artist(t.artist.clone());
+                // The id before the address: covers look the track's own
+                // downloaded art up by id when the address changes.
+                self.state.set_video_id(t.video_id.0.clone());
                 self.state
                     .set_thumbnail_url(t.thumb.clone().unwrap_or_default());
-                self.state.set_video_id(t.video_id.0.clone());
                 self.state
                     .set_like_status(t.like_status.as_str().to_owned());
                 self.state.set_live(t.is_live);
