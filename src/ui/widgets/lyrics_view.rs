@@ -85,6 +85,9 @@ enum SourceAction {
     Nothing,
 }
 
+/// Track, cached sources, the source shown, the pinned one, and the spinner.
+type SourceRowsKey = (Option<String>, Vec<String>, Option<String>, Option<String>, bool);
+
 #[derive(Clone, PartialEq)]
 struct DisplayPrefs {
     second_line_mode: String,
@@ -104,6 +107,7 @@ pub struct LyricsView {
     picker_btn: gtk::MenuButton,
     popover: gtk::Popover,
     picker_stack: gtk::Stack,
+    picker_scroller: gtk::ScrolledWindow,
     source_list: gtk::ListBox,
     spinner_row: gtk::ListBoxRow,
     second_line_section: gtk::Box,
@@ -136,6 +140,8 @@ pub struct LyricsView {
     scroll_anim: RefCell<Option<gtk::TickCallbackId>>,
     seek_pending: Cell<Option<(f64, Instant)>>,
     source_actions: RefCell<Vec<SourceAction>>,
+    /// What the source rows were last built from.
+    source_rows_key: RefCell<Option<SourceRowsKey>>,
     second_line_keys: RefCell<Vec<&'static str>>,
     /// Results behind the rows of the matches and search lists.
     match_rows: RefCell<Vec<LyricsMatch>>,
@@ -308,7 +314,10 @@ impl LyricsView {
         picker_stack.add_named(&sources_page, Some("sources"));
         picker_stack.add_named(&matches_page, Some("matches"));
         picker_stack.add_named(&search_page, Some("search"));
-        popover.set_child(Some(&picker_stack));
+        // Scrolls when it would not fit: a popup taller than the space under
+        // the button is closed by GNOME Shell the moment it opens.
+        let picker_scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).propagate_natural_width(true).child(&picker_stack).build();
+        popover.set_child(Some(&picker_scroller));
         picker_btn.set_popover(Some(&popover));
         // Over the whole stack, so it stays reachable when a track has no lyrics.
         stack_overlay.add_overlay(&picker_btn);
@@ -324,6 +333,7 @@ impl LyricsView {
             picker_btn,
             popover,
             picker_stack,
+            picker_scroller,
             source_list,
             spinner_row,
             second_line_section,
@@ -351,6 +361,7 @@ impl LyricsView {
             scroll_anim: RefCell::new(None),
             seek_pending: Cell::new(None),
             source_actions: RefCell::new(Vec::new()),
+            source_rows_key: RefCell::new(None),
             second_line_keys: RefCell::new(Vec::new()),
             match_rows: RefCell::new(Vec::new()),
             search_rows: RefCell::new(Vec::new()),
@@ -415,13 +426,28 @@ impl LyricsView {
         self.scroller.add_controller(touch);
 
         self.popover.connect_closed(weak!(|v, _| v.show_picker_page("sources")));
-        // Logged, so a button that stops opening shows whether the tap arrived at all.
-        let taps = gtk::GestureClick::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
-        taps.connect_pressed(|gesture, _, _, _| tracing::debug!(touch = gesture.current_event().is_some_and(|e| e.event_type() == gtk::gdk::EventType::TouchBegin), "lyrics picker pressed"));
-        taps.connect_cancel(|_, _| tracing::debug!("lyrics picker press cancelled"));
+        // Logged, so a button that stops opening shows whether the tap arrived at
+        // all. A passive controller: a gesture here could change how the tap is handled.
+        let taps = gtk::EventControllerLegacy::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
+        taps.connect_event(|_, event| {
+            use gtk::gdk::EventType;
+            if matches!(event.event_type(), EventType::TouchBegin | EventType::TouchEnd | EventType::TouchCancel | EventType::ButtonPress | EventType::ButtonRelease) {
+                tracing::debug!(kind = ?event.event_type(), "lyrics picker input");
+            }
+            glib::Propagation::Proceed
+        });
         self.picker_btn.add_controller(taps);
+        self.popover.connect_show(|_| tracing::debug!("lyrics picker popover shown"));
+        self.popover.connect_hide(|_| tracing::debug!("lyrics picker popover hidden"));
+        self.popover.connect_closed(|_| tracing::debug!("lyrics picker popover closed"));
+        let weak = Rc::downgrade(self);
+        self.picker_btn.set_create_popup_func(move |_| {
+            if let Some(v) = weak.upgrade() {
+                v.prepare_picker();
+            }
+        });
         self.picker_btn.connect_active_notify(weak!(|v, btn| {
-            tracing::debug!(active = btn.is_active(), "lyrics picker toggled");
+            tracing::debug!(active = btn.is_active(), popover_visible = v.popover.is_visible(), "lyrics picker toggled");
             if btn.is_active() {
                 v.on_picker_opened();
             }
@@ -921,10 +947,23 @@ impl LyricsView {
         self.picker_stack.set_visible_child_name(name);
     }
 
-    fn on_picker_opened(self: &Rc<Self>) {
-        // Rebuilt on every open so the rows reflect the cache as it stands.
-        self.refresh_source_rows(true);
+    /// Fill the picker before it shows. A popup that changes size in its
+    /// first moments is dismissed by GNOME Shell on a touchscreen, so the rows
+    /// are in place before the popup exists.
+    fn prepare_picker(self: &Rc<Self>) {
+        // What fits between the button and the bottom of the window, less the popover's own margins.
+        let root = self.picker_btn.root();
+        if let Some((root, top)) = root.and_then(|root| self.picker_btn.compute_point(&root, &gtk::graphene::Point::zero()).map(|top| (root, top))) {
+            let below = root.height() - top.y() as i32 - self.picker_btn.height() - 48;
+            self.picker_scroller.set_max_content_height(below.max(160));
+        }
+        let cached = self.cached_alternatives();
+        let all_cached = Lyrics::provider_names().iter().all(|name| cached.iter().any(|(s, _)| s == name));
+        self.refresh_source_rows(!all_cached);
         self.refresh_second_line_rows();
+    }
+
+    fn on_picker_opened(self: &Rc<Self>) {
         let Some(query) = self.track_query() else { return };
         // Providers with nothing cached yet run in the background and report as they finish.
         let (tx, rx) = async_channel::unbounded::<Alternative>();
@@ -956,6 +995,13 @@ impl LyricsView {
     }
 
     fn refresh_source_rows(self: &Rc<Self>, include_spinner: bool) {
+        // Only rebuilt when the rows would differ: cached sources report again
+        // right after the popup opens, and resizing it then closed it at once.
+        let key = (self.video_id.borrow().clone(), self.cached_alternatives().into_iter().map(|(name, _)| name).collect::<Vec<_>>(), self.source.borrow().clone(), self.video_id.borrow().as_deref().and_then(|id| self.lyrics.cache().get_preferred(id)), include_spinner);
+        if self.source_rows_key.borrow().as_ref() == Some(&key) {
+            return;
+        }
+        self.source_rows_key.replace(Some(key));
         clear_list(&self.source_list);
         let mut actions = Vec::new();
         let Some(video_id) = self.video_id.borrow().clone() else {
@@ -1002,7 +1048,10 @@ impl LyricsView {
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         let text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).valign(gtk::Align::Center).build();
         text.append(&gtk::Label::builder().label(source).halign(gtk::Align::Start).ellipsize(pango::EllipsizeMode::End).build());
-        text.append(&gtk::Label::builder().label(timing_words(result, true)).halign(gtk::Align::Start).css_classes(["dim-label", "caption"]).build());
+        // "Pinned" is written out, not a tooltip: on a touchscreen a tooltip is
+        // a second popup, and GNOME Shell then closed this one the moment it opened.
+        let detail = if is_preferred { format!("{} • Pinned", timing_words(result, true)) } else { timing_words(result, true).to_owned() };
+        text.append(&gtk::Label::builder().label(detail).halign(gtk::Align::Start).css_classes(["dim-label", "caption"]).build());
         content.append(&text);
         // Always present, transparent when inactive, so switching never shifts the other rows.
         content.append(&gtk::Image::builder().icon_name("object-select-symbolic").valign(gtk::Align::Center).opacity(if is_active { 1.0 } else { 0.0 }).build());
@@ -1019,9 +1068,6 @@ impl LyricsView {
             content.append(&more);
         }
         let row = gtk::ListBoxRow::builder().activatable(true).child(&content).build();
-        if is_preferred {
-            row.set_tooltip_text(Some(&format!("Pinned to {source} for this track")));
-        }
         row
     }
 
@@ -1069,6 +1115,7 @@ impl LyricsView {
                     this.picker_btn.set_active(true);
                 }
                 1 | 2 => log(&this, "opened"),
+                3 if std::env::var("MIXTAPES_DEMO_LYRICS_PICKER_KEEP").is_ok() => log(&this, "kept"),
                 3 => {
                     let actions = this.source_actions.borrow();
                     let active = this.source.borrow().clone();

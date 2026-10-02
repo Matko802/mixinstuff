@@ -72,6 +72,13 @@ impl CoverPicture {
             return;
         }
         self.current.replace(Some(url.clone()));
+        // In memory already: shown in this frame. The carousel hands every page a
+        // new cover when it recentres after a swipe, and waiting a main-loop turn
+        // left the old cover on screen for a frame.
+        if let Some(texture) = cover::cached_texture(&url, None) {
+            self.picture.set_paintable(Some(&texture));
+            return;
+        }
         let net = self.net.clone();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {

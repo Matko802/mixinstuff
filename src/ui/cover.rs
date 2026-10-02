@@ -166,6 +166,8 @@ thread_local! {
     /// Covers whose load failed, retried when the network returns.
     static FAILED: RefCell<Vec<std::rc::Weak<CoverImage>>> = const { RefCell::new(Vec::new()) };
     static TEXTURES: RefCell<HashMap<String, gdk::Texture>> = RefCell::new(HashMap::new());
+    /// Keys in the order they went in, so the oldest goes first when full.
+    static TEXTURE_ORDER: RefCell<std::collections::VecDeque<String>> = RefCell::new(std::collections::VecDeque::new());
 }
 
 /// Texture for a URL or local path, from cache, disk, or the network. Must run on the GTK thread.
@@ -587,6 +589,12 @@ pub fn forget_texture(url: &str) {
     TEXTURES.with(|cache| cache.borrow_mut().retain(|key, _| key.split_once('\n').map_or(key.as_str(), |(u, _)| u) != url));
 }
 
+/// A texture already in memory, for a widget that must not show a frame of
+/// stale art while an async load comes back with it.
+pub fn cached_texture(url: &str, target: Option<u32>) -> Option<gdk::Texture> {
+    TEXTURES.with(|c| c.borrow().get(&cache_key(url, target)).cloned())
+}
+
 fn cache_key(url: &str, target: Option<u32>) -> String {
     format!("{url}\n{}", target.unwrap_or(0))
 }
@@ -627,12 +635,22 @@ fn decode_for_disk(bytes: Vec<u8>, target: Option<u32>) -> Result<(gdk::Texture,
 }
 
 fn remember(url: &str, texture: &gdk::Texture) {
+    // The oldest goes, not everything: emptying the cache when full also threw
+    // out the covers the player carousel had just preloaded.
     TEXTURES.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if cache.len() >= CACHE_LIMIT {
-            cache.clear();
-        }
-        cache.insert(url.to_owned(), texture.clone());
+        TEXTURE_ORDER.with(|order| {
+            let (mut cache, mut order) = (cache.borrow_mut(), order.borrow_mut());
+            while cache.len() >= CACHE_LIMIT {
+                let Some(oldest) = order.pop_front() else {
+                    cache.clear();
+                    break;
+                };
+                cache.remove(&oldest);
+            }
+            if cache.insert(url.to_owned(), texture.clone()).is_none() {
+                order.push_back(url.to_owned());
+            }
+        });
     });
 }
 

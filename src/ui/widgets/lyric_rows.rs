@@ -451,9 +451,29 @@ impl RowState {
         if parts.is_empty() {
             return color_to_markup(&lerp_color(&resting, &active, alphas[0].clamp(0.0, 1.0)), text);
         }
+        let color_of = |i: usize| lerp_color(&resting, &active, alphas[i].clamp(0.0, 1.0));
+        // Cut from the line itself, so the label shows exactly `text`. Joining the
+        // parts with ' ' turned a full-width space into a narrow one, and every
+        // byte offset after it then pointed the sweep at the wrong character.
+        if parts.iter().all(|p| p.byte_start >= 0 && p.byte_end as usize <= text.len()) {
+            let mut out = String::new();
+            let mut cursor = 0usize;
+            for (i, part) in parts.iter().enumerate() {
+                let (start, end) = (part.byte_start as usize, part.byte_end as usize);
+                if start > cursor {
+                    out.push_str(&color_to_markup(&resting, &text[cursor..start]));
+                }
+                out.push_str(&color_to_markup(&color_of(i), &text[start..end]));
+                cursor = end;
+            }
+            if cursor < text.len() {
+                out.push_str(&color_to_markup(&resting, &text[cursor..]));
+            }
+            return out;
+        }
         let mut out = String::new();
         for (i, part) in parts.iter().enumerate() {
-            out.push_str(&color_to_markup(&lerp_color(&resting, &active, alphas[i].clamp(0.0, 1.0)), &part.text));
+            out.push_str(&color_to_markup(&color_of(i), &part.text));
             if part.space_after && i + 1 < parts.len() {
                 out.push(' ');
             }
@@ -567,8 +587,9 @@ mod imp {
             };
             let base_layout = new_layout();
 
-            let clip_top = f64::from(alloc.y()) - 60.0;
-            let clip_bottom = f64::from(alloc.height()) + 120.0;
+            // In row coordinates: a second line under a long first one sits well below its own height.
+            let clip_top = base_y - 60.0;
+            let clip_bottom = base_y + f64::from(alloc.height()) + 120.0;
             let origin = graphene::Point::new(x_offset as f32, y_offset as f32);
             let draw_base = |x: f64, y: f64, w: f64, h: f64, color: &gdk::RGBA| {
                 if w <= 0.0 || h <= 0.0 {
