@@ -103,7 +103,7 @@ Both `x86_64` and `aarch64` builds are available.
 
 ### Windows
 
-Experimental. Get the installer from the
+Get the installer from the
 [latest Windows build](https://nightly.link/m-obeid/Mixtapes/workflows/build-windows/main/mixtapes-windows-x86_64-setup.zip),
 or the portable folder from the same CI run. The installer adds the Microsoft
 Edge WebView2 Runtime, which the sign-in page needs, where Windows lacks it
@@ -286,7 +286,7 @@ Your desktop sends every `https://` link to the browser and has no way to hand o
 |   ✅️   | **AUR**                      | Available as `mixtapes-git`                                                                                                                                                                                                                                                                  |
 |   ☑️   | **Flatpak**                  | ✅️ Flatpak build (x86_64 and aarch64)<br>✅️ App icon<br>🔜 Flathub release                                                                                                                                                                                                                    |
 |   ☑️   | **Nix**                      | Flake builds; not extensively tested                                                                                                                                                                                                                                                         |
-|   ☑️   | **Windows**                  | Installer and portable builds from CI, with media controls, tray and sign-in; still experimental                                                                                                                                                                                             |
+|   ✅️   | **Windows**                  | Installer and portable builds from CI, with media controls, tray and sign-in                                                                                                                                                                                                                 |
 |   🔜   | **macOS**                    | Can build it for macOS, just need to test, there's a PR for auto-builds.                                                                                                                                                                                                                     |
 |   🔜   | **GNOME Circle**             | Still considering it, might not happen                                                                                                                                                                                                                                                       |
 

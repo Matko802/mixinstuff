@@ -34,10 +34,6 @@
     <control>touch</control>
   </supports>
 
-  <recommends>
-    <display_length compare="ge">360</display_length>
-  </recommends>
-
   <requires>
     <display_length compare="ge">360</display_length>
   </requires>
@@ -93,7 +89,7 @@
 
   <releases>
 
-    <release version="2026-09-22.0" date="2026-09-22">
+    <release version="2026-10-03.0" date="2026-10-03">
       <description>
         <p>Mixtapes is now written in Rust. The whole app was rebuilt from the ground up over the past weeks, with every feature of the Python version carried over, and it is faster, lighter and quicker to start in every way we could measure.</p>
         <ul>
@@ -110,6 +106,9 @@
           <li>Podcasts: a Podcasts page under Explore, shows that open with every episode, and shows, episodes and profiles in search and on Home</li>
           <li>A personal Home without a Google account. Quick picks, Listen again, new releases and similar artists come from what you play, like and subscribe to on this device</li>
           <li>Live stations from the home feed play, marked with an antenna. The player shows LIVE instead of a length</li>
+          <li>Windows is back: an installer and a portable folder, with the media keys and overlay, a tray icon and Google sign-in</li>
+          <li>Much smoother on phones. Long playlists scroll without hanging, lyrics scroll at a steady rate, and starting a song, opening the player or clearing the queue no longer freezes the screen</li>
+          <li>Quick picks are back on Home for signed-in accounts, built from the songs you listen to again, now that YouTube Music no longer sends them</li>
         </ul>
         <ul>
           <li>Switch to a brand account: Preferences, Account lists the channels of the signed-in account</li>
@@ -127,6 +126,17 @@
           <li>Fix: covers cached on disk are used offline and recover once you are back online</li>
           <li>On battery, the audio pipeline no longer wakes a discrete GPU to probe a picture decoder</li>
           <li>The login window uses icons every system ships</li>
+          <li>Preferences fit on a phone: drop-down settings show their whole value, and every tab name fits</li>
+          <li>The player opens on the cover every time, not on the page it was closed on</li>
+          <li>Fix: covers, the blurred background and the media controls art show for downloaded songs played offline</li>
+          <li>Fix: songs in a playlist play when tapped offline, if they are downloaded</li>
+          <li>Fix: no empty "Unknown title" player in the system media controls before anything plays</li>
+          <li>Fix: the lyrics source menu opens on songs with a pinned source</li>
+          <li>Fix: the sung word no longer leaves a gap on lyrics with a wide Japanese space</li>
+          <li>Fix: slow swipes on the cover change the song on touchscreens, without a flash of the previous cover</li>
+          <li>Fix: a long list of artists no longer makes the window wider than a phone screen</li>
+          <li>Fix: library items greyed out while offline come back when the connection does, in the list and the grid</li>
+          <li>Fix: dragging the scrollbar of a long playlist no longer leaves rows without covers</li>
         </ul>
       </description>
     </release>

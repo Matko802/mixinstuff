@@ -167,7 +167,7 @@ thread_local! {
     static FAILED: RefCell<Vec<std::rc::Weak<CoverImage>>> = const { RefCell::new(Vec::new()) };
     static TEXTURES: RefCell<HashMap<String, gdk::Texture>> = RefCell::new(HashMap::new());
     /// Keys in the order they went in, so the oldest goes first when full.
-    static TEXTURE_ORDER: RefCell<std::collections::VecDeque<String>> = RefCell::new(std::collections::VecDeque::new());
+    static TEXTURE_ORDER: RefCell<std::collections::VecDeque<String>> = const { RefCell::new(std::collections::VecDeque::new()) };
 }
 
 /// Texture for a URL or local path, from cache, disk, or the network. Must run on the GTK thread.

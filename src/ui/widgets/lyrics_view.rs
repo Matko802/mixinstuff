@@ -1067,8 +1067,7 @@ impl LyricsView {
             });
             content.append(&more);
         }
-        let row = gtk::ListBoxRow::builder().activatable(true).child(&content).build();
-        row
+        gtk::ListBoxRow::builder().activatable(true).child(&content).build()
     }
 
     fn on_source_row_activated(self: &Rc<Self>, index: i32) {

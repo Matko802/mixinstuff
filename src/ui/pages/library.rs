@@ -557,8 +557,6 @@ impl LibraryPage {
         self.apply_layout();
     }
 
-    /// Create it on the runtime, then refresh the library and open the page.
-
     fn bind_section(self: &Rc<Self>, section: &Rc<Section>) {
         let ctx = self.ctx.clone();
         section.list.bind_model(Some(&section.filtered), move |object| {

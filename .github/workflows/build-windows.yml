@@ -1,4 +1,4 @@
-name: Build Windows (Experimental)
+name: Build Windows
 
 # Builds the Rust app against MSYS2's GTK 4, libadwaita and GStreamer, then
 # runs the test suite. The Windows-only code (named-pipe Discord, the bundled
