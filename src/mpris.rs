@@ -360,8 +360,10 @@ pub struct Mpris {
     net: NetHandle,
     paths: Paths,
     player: Rc<Player>,
-    /// Track whose art file is written or being written.
-    art_video_id: RefCell<Option<String>>,
+    /// Track and cover address whose art file is written or being written.
+    art_key: RefCell<Option<(String, String)>>,
+    art_queued: Cell<bool>,
+    art_task: RefCell<Option<tokio::task::AbortHandle>>,
     /// Handed to each server, which forwards what the shell asks for.
     commands: async_channel::Sender<Command>,
     /// Whether the bus name is held or being taken.
@@ -381,7 +383,9 @@ impl Mpris {
             net: ctx.net.clone(),
             paths: ctx.paths.clone(),
             player: ctx.player.clone(),
-            art_video_id: RefCell::new(None),
+            art_key: RefCell::new(None),
+            art_queued: Cell::new(false),
+            art_task: RefCell::new(None),
             commands: tx,
             published: Cell::new(false),
         });
@@ -626,21 +630,45 @@ impl Mpris {
             snapshot.metadata()
         };
         self.queue(Property::Metadata(metadata));
-        self.sync_art(state.video_id(), state.thumbnail_url());
+        self.sync_art();
     }
 
     /// Port of _sync_mpris_art: shells want a local file, and the address the
     /// app carries is often a dead ytimg quality, so the art is downloaded,
     /// squared off and written to the cache. The remote address stays in the
     /// metadata until the file lands.
-    fn sync_art(self: &Rc<Self>, video_id: String, thumbnail: String) {
+    ///
+    /// Run once the track change has settled: the id moves before the cover
+    /// address, and art taken in between was the previous song's cover saved
+    /// under the new song's name.
+    fn sync_art(self: &Rc<Self>) {
+        if self.art_queued.replace(true) {
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        glib::idle_add_local_once(move || {
+            if let Some(this) = weak.upgrade() {
+                this.art_queued.set(false);
+                this.write_art();
+            }
+        });
+    }
+
+    fn write_art(self: &Rc<Self>) {
+        let state = self.player.state();
+        let (video_id, thumbnail) = (state.video_id(), state.thumbnail_url());
         if video_id.is_empty() {
             return;
         }
-        if self.art_video_id.borrow().as_deref() == Some(video_id.as_str()) {
+        let key = (video_id.clone(), thumbnail.clone());
+        if self.art_key.borrow().as_ref() == Some(&key) {
             return;
         }
-        self.art_video_id.replace(Some(video_id.clone()));
+        self.art_key.replace(Some(key.clone()));
+        // A newer cover supersedes one still downloading, so a slow stale file cannot land last.
+        if let Some(task) = self.art_task.borrow_mut().take() {
+            task.abort();
+        }
         let http = self.net.client().http().clone();
         let auth = self.net.client().media_auth();
         let dir = self.paths.cache_dir.join("mpris");
@@ -649,24 +677,26 @@ impl Mpris {
         glib::spawn_future_local(async move {
             // A downloaded track's own cover first: offline the remote one cannot be fetched.
             let address = crate::ui::cover::track_cover_address(&net, &video_id, &thumbnail).await;
-            let wanted = video_id.clone();
-            let written = match address.is_empty() {
-                true => None,
-                false => net.spawn(async move { write_art_file(http, auth, dir, wanted, address).await }).await.ok().flatten(),
-            };
-            let Some(this) = weak.upgrade() else { return };
-            let Some(path) = written else {
-                // Forgotten, so the next metadata change tries again.
-                if this.art_video_id.borrow().as_deref() == Some(video_id.as_str()) {
-                    this.art_video_id.replace(None);
-                }
+            let current = |this: &Rc<Mpris>| this.art_key.borrow().as_ref() == Some(&key);
+            if weak.upgrade().is_none_or(|this| !current(&this)) || address.is_empty() {
                 return;
-            };
-            // The track may have moved on while the art was downloading.
-            if this.player.state().video_id() != video_id {
+            }
+            let wanted = video_id.clone();
+            let handle = net.spawn(async move { write_art_file(http, auth, dir, wanted, address).await });
+            if let Some(this) = weak.upgrade() {
+                this.art_task.replace(Some(handle.abort_handle()));
+            }
+            let written = handle.await.ok().flatten();
+            let Some(this) = weak.upgrade() else { return };
+            if !current(&this) {
                 tracing::debug!(video_id, "mpris art arrived for a track that moved on");
                 return;
             }
+            let Some(path) = written else {
+                // Forgotten, so the next metadata change tries again.
+                this.art_key.replace(None);
+                return;
+            };
             let metadata = {
                 let mut snapshot = this.shared.lock().unwrap();
                 snapshot.art_file = format!("file://{}", path.display());
