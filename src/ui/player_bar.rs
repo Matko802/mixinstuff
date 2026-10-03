@@ -471,9 +471,12 @@ impl PlayerBar {
             };
         let count = artists.len();
         for (i, (id, name)) in artists.into_iter().enumerate() {
+            // Ellipsized like the expanded player's: a long artist list must not
+            // widen the bar, and with it the window, past a phone screen.
             let label = gtk::Label::builder()
                 .label(&name)
                 .css_classes(["caption"])
+                .ellipsize(gtk::pango::EllipsizeMode::End)
                 .build();
             let btn = gtk::Button::builder()
                 .css_classes(["flat", "link-btn"])
