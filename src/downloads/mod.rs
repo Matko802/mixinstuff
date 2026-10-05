@@ -434,7 +434,7 @@ impl Downloads {
             .arg("-x")
             .args(["--audio-format", codec_for(&run.format)])
             .args(["--audio-quality", "0"])
-            .args(["--progress-template", "MIXTAPES %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s"])
+            .args(["--progress-template", "MIXINSTUFF %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s"])
             .arg("-o")
             .arg(scratch.join("audio.%(ext)s"))
             .arg(format!("https://music.youtube.com/watch?v={video_id}"));
@@ -711,7 +711,7 @@ pub(crate) fn timestamp() -> String {
 
 /// yt-dlp progress lines, as asked for by the progress template.
 fn parse_progress(line: &str) -> Option<f64> {
-    let rest = line.strip_prefix("MIXTAPES ")?;
+    let rest = line.strip_prefix("MIXINSTUFF ")?;
     let mut parts = rest.split_whitespace();
     let done: f64 = parts.next()?.parse().ok()?;
     let total = parts.next().and_then(|v| v.parse::<f64>().ok()).filter(|v| *v > 0.0);
@@ -737,10 +737,10 @@ mod tests {
 
     #[test]
     fn progress_lines_become_a_fraction() {
-        assert_eq!(parse_progress("MIXTAPES 50 100 NA"), Some(0.5));
-        assert_eq!(parse_progress("MIXTAPES 25 NA 100"), Some(0.25));
-        assert_eq!(parse_progress("MIXTAPES 200 100 NA"), Some(1.0), "a resumed file cannot exceed the whole");
-        assert_eq!(parse_progress("MIXTAPES 10 NA NA"), None);
+        assert_eq!(parse_progress("MIXINSTUFF 50 100 NA"), Some(0.5));
+        assert_eq!(parse_progress("MIXINSTUFF 25 NA 100"), Some(0.25));
+        assert_eq!(parse_progress("MIXINSTUFF 200 100 NA"), Some(1.0), "a resumed file cannot exceed the whole");
+        assert_eq!(parse_progress("MIXINSTUFF 10 NA NA"), None);
         assert_eq!(parse_progress("[download] 12.3% of 4MiB"), None);
     }
 

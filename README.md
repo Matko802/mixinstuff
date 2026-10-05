@@ -202,8 +202,8 @@ The key and secret live in `EMBEDDED_LASTFM_API_KEY` and `EMBEDDED_LASTFM_API_SE
 To build against your own Last.fm app, register one at [last.fm/api/account/create](https://www.last.fm/api/account/create), then either replace the two constants or set these before launching:
 
 ```bash
-export MIXTAPES_LASTFM_API_KEY=your_key
-export MIXTAPES_LASTFM_API_SECRET=your_secret
+export MIXINSTUFF_LASTFM_API_KEY=your_key
+export MIXINSTUFF_LASTFM_API_SECRET=your_secret
 ```
 
 > [!IMPORTANT]
@@ -227,9 +227,9 @@ Mixinstuff opens YouTube and YouTube Music links. Songs play, and playlists, alb
 
 - Paste a link into the search field.
 - Run `mixinstuff <link>`. A running Mixinstuff takes the link.
-- Open a `mixtapes://open?url=<link>` link. Mixinstuff registers the `mixinstuff://` scheme, so any app or browser hands these over.
+- Open a `mixinstuff://open?url=<link>` link. Mixinstuff registers the `mixinstuff://` scheme, so any app or browser hands these over.
 
-To open YouTube Music pages from your browser, install the [Open in Mixinstuff](https://raw.githubusercontent.com/Matko802/mixinstuff/main/extras/open-in-mixinstuff.user.js) userscript with [Violentmonkey](https://violentmonkey.github.io/) or Tampermonkey. A song, playlist, album or artist page you open in the browser goes straight to Mixinstuff. Browsing within the site stays in the browser, and an "Open in Mixtapes" button hands over the page you are on. The script's menu switches the automatic handover off. The browser asks once before it lets a page open Mixtapes.
+To open YouTube Music pages from your browser, install the [Open in Mixinstuff](https://raw.githubusercontent.com/Matko802/mixinstuff/main/extras/open-in-mixinstuff.user.js) userscript with [Violentmonkey](https://violentmonkey.github.io/) or Tampermonkey. A song, playlist, album or artist page you open in the browser goes straight to Mixinstuff. Browsing within the site stays in the browser, and an "Open in Mixinstuff" button hands over the page you are on. The script's menu switches the automatic handover off. The browser asks once before it lets a page open Mixtapes.
 
 Your desktop sends every `https://` link to the browser and has no way to hand one site to another app, so links clicked outside the browser still open there first.
 
@@ -281,18 +281,18 @@ Contributions are welcome! Feel free to open issues for bug reports or feature r
 
 ## Star History
 
-<a href="https://star-history.dera.page/#m-obeid/Mixtapes&type=date&legend=top-left">
+<a href="https://star-history.dera.page/#Matko802/mixinstuff&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=m-obeid/Mixtapes&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=m-obeid/Mixtapes&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=m-obeid/Mixtapes&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=Matko802/mixinstuff&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=Matko802/mixinstuff&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=Matko802/mixinstuff&type=date&legend=top-left" />
  </picture>
 </a>
 
 ## Contributors
 
-<a href="https://github.com/m-obeid/Mixtapes/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=m-obeid/Mixtapes" width="600"/>
+<a href="https://github.com/Matko802/mixinstuff/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Matko802/mixinstuff" width="600"/>
 </a>
 
 The app icon was sketched by [Jakub Steiner](https://gitlab.gnome.org/jimmac) and rendered by [gnoman](https://gitlab.gnome.org/gnoman).

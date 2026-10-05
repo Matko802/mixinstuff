@@ -20,7 +20,7 @@ const RECONNECT_BACKOFF: [u64; 5] = [3, 5, 10, 15, 30];
 /// Below Discord's limit of about five updates per 20 seconds.
 const MIN_UPDATE_INTERVAL: Duration = Duration::from_millis(400);
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
-const MIXINSTUFF_LOGO: &str = "https://raw.githubusercontent.com/Matko802/mixinstuff/main/screenshots/omori-mixtape.png";
+const MIXINSTUFF_LOGO: &str = "https://raw.githubusercontent.com/Matko802/mixinstuff/main/screenshots/omori-mixinstuff.png";
 
 const OP_HANDSHAKE: u32 = 0;
 const OP_FRAME: u32 = 1;
