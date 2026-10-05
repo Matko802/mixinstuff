@@ -4,9 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     utils.url = "github:numtide/flake-utils";
+    crane.url = "github:ipetkov/crane";
   };
 
-  outputs = { self, nixpkgs, utils }:
+  outputs = { self, nixpkgs, utils, crane }:
     {
         overlays.default = final: _prev: {
           mixinstuff = self.packages.${final.stdenv.hostPlatform.system}.default;
@@ -44,17 +45,32 @@
           }.${system};
         };
 
-        mixinstuff = pkgs.rustPlatform.buildRustPackage {
+        craneLib = crane.mkLib pkgs;
+        # Only cargo sources + the gresource files build.rs compiles.
+        # Anything else (docs, screenshots) no longer invalidates anything.
+        src = pkgs.lib.fileset.toSource {
+          root = ./.;
+          fileset = pkgs.lib.fileset.unions [
+            (craneLib.fileset.commonCargoSources ./.)
+            ./resources
+            ./assets
+            ./io.github.matko802.Mixinstuff.metainfo.xml
+          ];
+        };
+
+        commonArgs = {
+          inherit src;
           pname = "mixinstuff";
           inherit version;
-          src = self;
-          cargoLock.lockFile = ./Cargo.lock;
+          strictDeps = true;
 
           nativeBuildInputs = [
             pkgs.pkg-config
             pkgs.wrapGAppsHook4
             # build.rs runs glib-compile-resources for the stylesheet and icons.
             pkgs.glib
+            # Fast linker for the final binary.
+            pkgs.mold
           ];
 
           buildInputs = [
@@ -68,15 +84,23 @@
           ] ++ gstPlugins;
 
           RUSTY_V8_ARCHIVE = rustyV8Archive;
+          RUSTFLAGS = "-C link-arg=-fuse-ld=mold";
 
           # The tests that matter need the network or a signed-in session.
           doCheck = false;
+        };
+
+        # Dependencies compiled once; source edits only rebuild our crates.
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+        mixinstuff = craneLib.buildPackage (commonArgs // {
+          inherit cargoArtifacts;
 
           postInstall = ''
-            install -Dm644 io.github.matko802.Mixinstuff.desktop $out/share/applications/io.github.matko802.Mixinstuff.desktop
-            install -Dm644 io.github.matko802.Mixinstuff.metainfo.xml $out/share/metainfo/io.github.matko802.Mixinstuff.metainfo.xml
-            install -Dm644 assets/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg $out/share/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg
-            install -Dm644 assets/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg $out/share/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg
+            install -Dm644 ${self}/io.github.matko802.Mixinstuff.desktop $out/share/applications/io.github.matko802.Mixinstuff.desktop
+            install -Dm644 ${self}/io.github.matko802.Mixinstuff.metainfo.xml $out/share/metainfo/io.github.matko802.Mixinstuff.metainfo.xml
+            install -Dm644 ${self}/assets/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg $out/share/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg
+            install -Dm644 ${self}/assets/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg $out/share/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg
           '';
 
           preFixup = ''
@@ -90,7 +114,7 @@
             mainProgram = "mixinstuff";
             platforms = pkgs.lib.platforms.linux;
           };
-        };
+        });
       in {
         packages.default = mixinstuff;
 
