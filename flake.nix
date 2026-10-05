@@ -7,7 +7,11 @@
   };
 
   outputs = { self, nixpkgs, utils }:
-    utils.lib.eachDefaultSystem (system:
+    {
+      overlays.default = final: _prev: {
+        mixinstuff = self.packages.${final.system}.default;
+      };
+    } // utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
 
@@ -89,10 +93,6 @@
         };
       in {
         packages.default = mixinstuff;
-
-        overlays.default = final: _prev: {
-          mixinstuff = self.packages.${final.system}.default;
-        };
 
         devShells.default = pkgs.mkShell {
           inputsFrom = [ mixinstuff ];
