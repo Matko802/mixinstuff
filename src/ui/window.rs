@@ -35,7 +35,6 @@ use crate::ui::pages::playlist::{InitialData, PlaylistPage};
 use crate::ui::player_bar::{PlayerBar, PlayerBarCallbacks};
 use crate::ui::queue_panel::QueuePanel;
 
-const APP_ID: &str = "io.github.matko802.Musishark";
 const APP_NAME: &str = "Musishark";
 const NETWORK_SETTLE: Duration = Duration::from_millis(1500);
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(600);
@@ -2480,7 +2479,7 @@ fn install_actions(
             Box::new(move || {
                 let Some(win) = win.upgrade() else { return };
                 let dialog = adw::AboutDialog::builder()
-                    .application_icon(APP_ID)
+                    .application_icon(crate::ui::appearance::app_icon_name())
                     .application_name(APP_NAME)
                     .developer_name("Matko802")
                     .developers(["Matko802", "m-obeid (original creator)"])

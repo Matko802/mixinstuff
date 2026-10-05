@@ -10,6 +10,17 @@
 //! once per change, and only after the blur and the accent that are still on
 //! their way have both landed.
 
+/// App icon name matching the current color scheme: the white shark on dark
+/// backgrounds, the black shark on light ones.
+pub fn app_icon_name() -> String {
+    let variant = if adw::StyleManager::default().is_dark() {
+        "dark"
+    } else {
+        "light"
+    };
+    format!("{}-{variant}", crate::APP_ID)
+}
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 

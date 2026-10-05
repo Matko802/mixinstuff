@@ -99,7 +99,9 @@
           postInstall = ''
             install -Dm644 ${self}/io.github.matko802.Musishark.desktop $out/share/applications/io.github.matko802.Musishark.desktop
             install -Dm644 ${self}/io.github.matko802.Musishark.metainfo.xml $out/share/metainfo/io.github.matko802.Musishark.metainfo.xml
-            install -Dm644 ${self}/assets/icons/hicolor/scalable/apps/io.github.matko802.Musishark.svg $out/share/icons/hicolor/scalable/apps/io.github.matko802.Musishark.svg
+            install -Dm644 ${self}/assets/icons/hicolor/512x512/apps/io.github.matko802.Musishark.png $out/share/icons/hicolor/512x512/apps/io.github.matko802.Musishark.png
+            install -Dm644 ${self}/assets/icons/hicolor/512x512/apps/io.github.matko802.Musishark-dark.png $out/share/icons/hicolor/512x512/apps/io.github.matko802.Musishark-dark.png
+            install -Dm644 ${self}/assets/icons/hicolor/512x512/apps/io.github.matko802.Musishark-light.png $out/share/icons/hicolor/512x512/apps/io.github.matko802.Musishark-light.png
             install -Dm644 ${self}/assets/icons/hicolor/symbolic/apps/io.github.matko802.Musishark-symbolic.svg $out/share/icons/hicolor/symbolic/apps/io.github.matko802.Musishark-symbolic.svg
           '';
 

@@ -13,7 +13,9 @@
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/ko-fi-symbolic.svg</file>
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/github-symbolic.svg</file>
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/heart-outline-thick-symbolic.svg</file>
-    <file preprocess="xml-stripblanks">hicolor/scalable/apps/io.github.matko802.Musishark.svg</file>
+    <file>hicolor/512x512/apps/io.github.matko802.Musishark.png</file>
+    <file>hicolor/512x512/apps/io.github.matko802.Musishark-dark.png</file>
+    <file>hicolor/512x512/apps/io.github.matko802.Musishark-light.png</file>
     <file preprocess="xml-stripblanks">hicolor/symbolic/apps/io.github.matko802.Musishark-symbolic.svg</file>
   </gresource>
 </gresources>

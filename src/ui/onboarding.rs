@@ -107,7 +107,7 @@ impl Wizard {
     }
 
     fn welcome_page(self: &Rc<Self>) -> adw::NavigationPage {
-        let status = self.status(crate::APP_ID, "Welcome to Musishark", "");
+        let status = self.status(&crate::ui::appearance::app_icon_name(), "Welcome to Musishark", "");
         let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
         let start = self.pill("Get Started", true);
         let weak = Rc::downgrade(self);

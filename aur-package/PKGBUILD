@@ -47,6 +47,8 @@ package() {
 
   install -Dm644 io.github.matko802.Musishark.desktop "$pkgdir/usr/share/applications/io.github.matko802.Musishark.desktop"
   install -Dm644 io.github.matko802.Musishark.metainfo.xml "$pkgdir/usr/share/metainfo/io.github.matko802.Musishark.metainfo.xml"
-  install -Dm644 assets/icons/hicolor/scalable/apps/io.github.matko802.Musishark.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.matko802.Musishark.svg"
+  install -Dm644 assets/icons/hicolor/512x512/apps/io.github.matko802.Musishark.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/io.github.matko802.Musishark.png"
+  install -Dm644 assets/icons/hicolor/512x512/apps/io.github.matko802.Musishark-dark.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/io.github.matko802.Musishark-dark.png"
+  install -Dm644 assets/icons/hicolor/512x512/apps/io.github.matko802.Musishark-light.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/io.github.matko802.Musishark-light.png"
   install -Dm644 assets/icons/hicolor/symbolic/apps/io.github.matko802.Musishark-symbolic.svg "$pkgdir/usr/share/icons/hicolor/symbolic/apps/io.github.matko802.Musishark-symbolic.svg"
 }
