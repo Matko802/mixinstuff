@@ -89,6 +89,14 @@
 
   <releases>
 
+    <release version="2026-10-05.0" date="2026-10-05">
+      <description>
+        <p>Mixinstuff is a fork of Mixtapes by m-obeid, renamed and maintained by Matko802.</p>
+        <ul>
+          <li>New name and identity across the app, packages and desktop integration</li>
+        </ul>
+      </description>
+    </release>
     <release version="2026-10-03.0" date="2026-10-03">
       <description>
         <p>Mixinstuff is now written in Rust. The whole app was rebuilt from the ground up over the past weeks, with every feature of the Python version carried over, and it is faster, lighter and quicker to start in every way we could measure.</p>
