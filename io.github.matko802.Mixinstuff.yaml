@@ -5,13 +5,13 @@ sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.node24
   - org.freedesktop.Sdk.Extension.rust-stable
-command: muse
+command: mixinstuff
 build-options:
   append-path: /usr/lib/sdk/node24/bin:/usr/lib/sdk/rust-stable/bin
   env:
     NODEJS_DIR: /usr/lib/sdk/node24
     FLATPAK_ENABLE_SDK_EXT: node24,rust-stable
-    CARGO_HOME: /run/build/muse/cargo
+    CARGO_HOME: /run/build/mixinstuff/cargo
   build-args:
     - --share=network
 finish-args:
@@ -47,7 +47,7 @@ modules:
       - pip3 install --prefix=${FLATPAK_DEST} --no-cache-dir "yt-dlp-ejs"
     sources: []
 
-  - name: muse
+  - name: mixinstuff
     buildsystem: simple
     build-commands:
       # The stylesheet and the icons are compiled into the binary by build.rs,
@@ -56,7 +56,6 @@ modules:
       # already allows for this manifest.
       - cargo build --release --locked
       - install -Dm755 target/release/mixinstuff ${FLATPAK_DEST}/bin/mixinstuff
-      - ln -s mixinstuff ${FLATPAK_DEST}/bin/muse
       - install -Dm644 io.github.matko802.Mixinstuff.desktop ${FLATPAK_DEST}/share/applications/io.github.matko802.Mixinstuff.desktop
       - install -Dm644 io.github.matko802.Mixinstuff.metainfo.xml ${FLATPAK_DEST}/share/metainfo/io.github.matko802.Mixinstuff.metainfo.xml
       - install -Dm644 assets/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg

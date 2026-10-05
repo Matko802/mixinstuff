@@ -229,7 +229,7 @@ Mixinstuff opens YouTube and YouTube Music links. Songs play, and playlists, alb
 - Run `mixinstuff <link>`. A running Mixinstuff takes the link.
 - Open a `mixinstuff://open?url=<link>` link. Mixinstuff registers the `mixinstuff://` scheme, so any app or browser hands these over.
 
-To open YouTube Music pages from your browser, install the [Open in Mixinstuff](https://raw.githubusercontent.com/Matko802/mixinstuff/main/extras/open-in-mixinstuff.user.js) userscript with [Violentmonkey](https://violentmonkey.github.io/) or Tampermonkey. A song, playlist, album or artist page you open in the browser goes straight to Mixinstuff. Browsing within the site stays in the browser, and an "Open in Mixinstuff" button hands over the page you are on. The script's menu switches the automatic handover off. The browser asks once before it lets a page open Mixtapes.
+To open YouTube Music pages from your browser, install the [Open in Mixinstuff](https://raw.githubusercontent.com/Matko802/mixinstuff/main/extras/open-in-mixinstuff.user.js) userscript with [Violentmonkey](https://violentmonkey.github.io/) or Tampermonkey. A song, playlist, album or artist page you open in the browser goes straight to Mixinstuff. Browsing within the site stays in the browser, and an "Open in Mixinstuff" button hands over the page you are on. The script's menu switches the automatic handover off. The browser asks once before it lets a page open Mixinstuff.
 
 Your desktop sends every `https://` link to the browser and has no way to hand one site to another app, so links clicked outside the browser still open there first.
 

@@ -145,7 +145,7 @@ Search runs the unfiltered call plus songs, artists, community playlists and alb
 
 ## Stream resolution
 
-`StreamResolver` is the seam that replaces yt-dlp. `YtDlpResolver` shells out with the same format policy and PO-token setup the Python app uses, so playback works from day one. `StreamCache` reads and writes the exact JSON files the Python app left in `~/.cache/muse/streams`.
+`StreamResolver` is the seam that replaces yt-dlp. `YtDlpResolver` shells out with the same format policy and PO-token setup the Python app uses, so playback works from day one. `StreamCache` reads and writes the exact JSON files the Python app left in `~/.cache/mixinstuff/streams`.
 
 `PlayerEndpointResolver` (`net/player_endpoint.rs`) sits in front of it since 2026-09-18. It posts one `player` request as the VISIONOS client, which returns direct opus URLs that need no signature, no PO token and no cookies, and serve open-ended ranges. Measured: 0.26 s to resolve and 0.84 s from click to sound, against about 6 s through yt-dlp (a Python start, seven player clients, player.js under node). It needs a visitor id, read off the music.youtube.com landing page and warmed at startup, and it probes two bytes at offset 200000 before trusting a URL, because a client YouTube gates serves only a 100 KB preview (ANDROID_VR does, tested with and without botguard tokens). Whatever VISIONOS declines, such as uploads and age-gated or private videos, goes to yt-dlp with the session as before. The idea came from limusic, which uses the same client as its first fallback.
 
@@ -881,7 +881,7 @@ metainfo and the app icon. yt-dlp with Node stays a runtime dependency for the f
 downloads. `rustypipe-botguard` is no longer shipped beside the app: it is
 linked in as a crate (see PO tokens below). Its `v8` dependency downloads a
 prebuilt `librusty_v8` of about 28 MB in its build script. The AUR build and
-the Flatpak (whose muse module already has network) fetch it themselves. The
+the Flatpak (whose mixinstuff module already has network) fetch it themselves. The
 Nix sandbox has none, so `flake.nix` pins the archive with `fetchurl` and
 passes it as `RUSTY_V8_ARCHIVE`; its version must follow `v8` in Cargo.lock
 (130.0.7 now) and the two hashes with it. The build script's download has
