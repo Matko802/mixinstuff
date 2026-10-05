@@ -8,9 +8,9 @@
 
   outputs = { self, nixpkgs, utils }:
     {
-      overlays.default = final: _prev: {
-        mixinstuff = self.packages.${final.system}.default;
-      };
+        overlays.default = final: _prev: {
+          mixinstuff = self.packages.${final.stdenv.hostPlatform.system}.default;
+        };
     } // utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
