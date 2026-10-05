@@ -73,8 +73,8 @@ jobs:
             --force-clean \
             --default-branch=master \
             --arch=${{ matrix.arch }} \
-            flatpak_app com.pocoguy.Muse.yaml
-          flatpak build-bundle --arch=${{ matrix.arch }} repo Mixtapes-${{ matrix.arch }}.flatpak com.pocoguy.Muse master
+            flatpak_app com.matko802.Muse.yaml
+          flatpak build-bundle --arch=${{ matrix.arch }} repo Mixtapes-${{ matrix.arch }}.flatpak com.matko802.Muse master
 
           # The build ran as root, so everything it wrote to the cache is
           # root-owned and the unprivileged actions/cache post-step cannot read
@@ -138,7 +138,7 @@ jobs:
           Homepage=https://github.com/${{ github.repository }}
           Comment=A modern, Linux-first YouTube Music player
           Description=A modern, Linux-first YouTube Music player
-          Icon=https://raw.githubusercontent.com/${{ github.repository }}/main/assets/icons/com.pocoguy.Muse.svg
+          Icon=https://raw.githubusercontent.com/${{ github.repository }}/main/assets/icons/com.matko802.Muse.svg
           GPGKey=$(gpg --export ${{ secrets.GPG_KEY_ID }} | base64 | tr -d '\n')
           EOF
 

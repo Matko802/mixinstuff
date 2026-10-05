@@ -1,4 +1,4 @@
-app-id: com.pocoguy.Muse
+app-id: io.github.matko802.Mixinstuff
 runtime: org.gnome.Platform
 runtime-version: "50"
 sdk: org.gnome.Sdk
@@ -55,12 +55,12 @@ modules:
       # under the PO-token minter come over the network, which build-args
       # already allows for this manifest.
       - cargo build --release --locked
-      - install -Dm755 target/release/mixtapes ${FLATPAK_DEST}/bin/mixtapes
-      - ln -s mixtapes ${FLATPAK_DEST}/bin/muse
-      - install -Dm644 com.pocoguy.Muse.desktop ${FLATPAK_DEST}/share/applications/com.pocoguy.Muse.desktop
-      - install -Dm644 com.pocoguy.Muse.metainfo.xml ${FLATPAK_DEST}/share/metainfo/com.pocoguy.Muse.metainfo.xml
-      - install -Dm644 assets/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg
-      - install -Dm644 assets/icons/hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg ${FLATPAK_DEST}/share/icons/hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg
+      - install -Dm755 target/release/mixinstuff ${FLATPAK_DEST}/bin/mixinstuff
+      - ln -s mixinstuff ${FLATPAK_DEST}/bin/muse
+      - install -Dm644 io.github.matko802.Mixinstuff.desktop ${FLATPAK_DEST}/share/applications/io.github.matko802.Mixinstuff.desktop
+      - install -Dm644 io.github.matko802.Mixinstuff.metainfo.xml ${FLATPAK_DEST}/share/metainfo/io.github.matko802.Mixinstuff.metainfo.xml
+      - install -Dm644 assets/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg
+      - install -Dm644 assets/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg ${FLATPAK_DEST}/share/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg
     sources:
       # The checked-out tree, so CI builds the commit it was invoked on.
       - type: dir

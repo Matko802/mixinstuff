@@ -210,7 +210,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn live_continuation() {
-        let auth = ytmusicapi::BrowserAuth::from_file(std::env::var("HOME").unwrap() + "/.local/share/muse/headers_auth.json").unwrap();
+        let auth = ytmusicapi::BrowserAuth::from_file(std::env::var("HOME").unwrap() + "/.local/share/mixinstuff/headers_auth.json").unwrap();
         let api = YTMusicClient::builder().with_browser_auth(auth).build().unwrap();
         let response = api.post("browse", json!({ "browseId": "FEmusic_liked_playlists" })).await.unwrap();
         let grid = crate::net::items::library_sections(&response).first().and_then(|s| s.get("gridRenderer")).unwrap();
@@ -295,7 +295,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn live_library() {
-        let auth = ytmusicapi::BrowserAuth::from_file(std::env::var("HOME").unwrap() + "/.local/share/muse/headers_auth.json").unwrap();
+        let auth = ytmusicapi::BrowserAuth::from_file(std::env::var("HOME").unwrap() + "/.local/share/mixinstuff/headers_auth.json").unwrap();
         let api = Arc::new(YTMusicClient::builder().with_browser_auth(auth).build().unwrap());
         let playlists = library_playlists(api.clone()).await.unwrap();
         for p in playlists.iter().take(4) {

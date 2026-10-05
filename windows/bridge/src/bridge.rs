@@ -1,6 +1,6 @@
-//! MixtapesBridge - Native Windows SMTC bridge
+//! MixinstuffBridge - Native Windows SMTC bridge
 //!
-//! Communicates with the Mixtapes Python app via stdin/stdout JSON messages.
+//! Communicates with the Mixinstuff Python app via stdin/stdout JSON messages.
 //! Uses GetForWindow() with a hidden HWND so Windows resolves the app identity
 //! from this process's exe metadata (set via rcedit).
 //!
@@ -73,11 +73,11 @@ fn setup_smtc() -> windows::core::Result<SystemMediaTransportControls> {
     unsafe {
         // Set AppUserModelID
         windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(
-            windows::core::w!("com.pocoguy.Muse").as_ptr(),
+            windows::core::w!("io.github.matko802.Mixinstuff").as_ptr(),
         );
 
         // Register a minimal window class
-        let class_name = windows::core::w!("MixtapesBridgeClass");
+        let class_name = windows::core::w!("MixinstuffBridgeClass");
         let hinstance = windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(
             std::ptr::null(),
         );
@@ -100,7 +100,7 @@ fn setup_smtc() -> windows::core::Result<SystemMediaTransportControls> {
         let hwnd = windows_sys::Win32::UI::WindowsAndMessaging::CreateWindowExW(
             0,
             class_name.as_ptr(),
-            windows::core::w!("Mixtapes").as_ptr(),
+            windows::core::w!("Mixinstuff").as_ptr(),
             0, // WS_OVERLAPPED but never shown
             0, 0, 0, 0,
             std::ptr::null_mut(), // no parent — top-level

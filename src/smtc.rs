@@ -276,7 +276,7 @@ mod win {
             // SAFETY: forwarding the arguments Windows passed in.
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
         }
-        let class_name = w!("MixtapesMediaControls");
+        let class_name = w!("MixinstuffMediaControls");
         // SAFETY: plain Win32 calls with a static class name; the window is never
         // shown and lives as long as the process.
         unsafe {
@@ -284,7 +284,7 @@ mod win {
             let class = WNDCLASSW { lpfnWndProc: Some(window_proc), hInstance: instance.into(), lpszClassName: class_name, ..Default::default() };
             RegisterClassW(&class);
             // A top-level window, not a message-only one: GetForWindow needs a real window.
-            CreateWindowExW(WINDOW_EX_STYLE(0), class_name, w!("Mixtapes"), WINDOW_STYLE(0), 0, 0, 0, 0, None, None, Some(instance.into()), None)
+            CreateWindowExW(WINDOW_EX_STYLE(0), class_name, w!("Mixinstuff"), WINDOW_STYLE(0), 0, 0, 0, 0, None, None, Some(instance.into()), None)
         }
     }
 }

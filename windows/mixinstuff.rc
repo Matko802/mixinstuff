@@ -1,11 +1,11 @@
-// Icon and file details for mixtapes.exe, compiled in by build.rs on Windows.
+// Icon and file details for mixinstuff.exe, compiled in by build.rs on Windows.
 // Explorer, the taskbar and GTK's window class all take the first icon here.
 
 #define STR2(x) #x
 #define STR(x) STR2(x)
 #define VERSION_STR STR(VERSION_MAJOR.VERSION_MINOR.VERSION_PATCH)
 
-1 ICON "mixtapes.ico"
+1 ICON "mixinstuff.ico"
 
 1 VERSIONINFO
 FILEVERSION VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,0
@@ -15,12 +15,12 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "pocoguy"
-            VALUE "FileDescription", "Mixtapes"
+            VALUE "CompanyName", "matko802"
+            VALUE "FileDescription", "Mixinstuff"
             VALUE "FileVersion", VERSION_STR
-            VALUE "InternalName", "mixtapes"
-            VALUE "OriginalFilename", "mixtapes.exe"
-            VALUE "ProductName", "Mixtapes"
+            VALUE "InternalName", "mixinstuff"
+            VALUE "OriginalFilename", "mixinstuff.exe"
+            VALUE "ProductName", "Mixinstuff"
             VALUE "ProductVersion", VERSION_STR
         END
     END

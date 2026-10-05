@@ -12,7 +12,7 @@ _check_webkitgtk() {
 
 >>> WARNING: webkitgtk-6.0 ($installed_ver) does not match the version in the
 >>> 'extra' repository ($extra_ver). The CachyOS build of webkitgtk-6.0 is
->>> known to malfunction with Mixtapes (buttons unresponsive).
+>>> known to malfunction with Mixinstuff (buttons unresponsive).
 >>>
 >>> If issues arise, reinstall it from the 'extra' repo:
 >>>     sudo pacman -S extra/webkitgtk-6.0

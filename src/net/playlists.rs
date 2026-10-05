@@ -851,7 +851,7 @@ mod tests {
     }
 
     /// How the library card address and image behave after a cover change.
-    /// `MIXTAPES_SCRATCH=<id> cargo test -- --ignored live_cover_propagation --nocapture`
+    /// `MIXINSTUFF_SCRATCH=<id> cargo test -- --ignored live_cover_propagation --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_cover_propagation() {
@@ -859,7 +859,7 @@ mod tests {
         let client = crate::net::ytmusic::YtMusic::new(&paths).unwrap();
         let api: Arc<dyn Browse> = client.api();
         let headers = client.browser_headers().expect("session");
-        let id = std::env::var("MIXTAPES_SCRATCH").expect("MIXTAPES_SCRATCH=<playlist id>");
+        let id = std::env::var("MIXINSTUFF_SCRATCH").expect("MIXINSTUFF_SCRATCH=<playlist id>");
 
         let card_url = |api: Arc<dyn Browse>, id: String| async move {
             let items = crate::net::library::library_playlists(api).await.unwrap_or_default();
@@ -871,7 +871,7 @@ mod tests {
         let before_bytes = client.http().get(&before).send().await.unwrap().bytes().await.unwrap();
         println!("before: {} bytes={:016x}\n  {before}", before_bytes.len(), digest(&before_bytes));
 
-        let image = std::env::temp_dir().join("mixtapes-propagation.png");
+        let image = std::env::temp_dir().join("mixinstuff-propagation.png");
         let pixels: Vec<u8> = (0..256 * 256).flat_map(|_| [20u8, 20u8, 240u8]).collect();
         let mut child = std::process::Command::new("ffmpeg")
             .args(["-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "256x256", "-i", "-"])
@@ -899,18 +899,18 @@ mod tests {
 
     /// Make or remove a playlist to try things on by hand.
     /// `cargo test -- --ignored live_scratch_playlist --nocapture` creates one,
-    /// `MIXTAPES_SCRATCH=<id> cargo test -- --ignored live_scratch_playlist` removes it.
+    /// `MIXINSTUFF_SCRATCH=<id> cargo test -- --ignored live_scratch_playlist` removes it.
     #[tokio::test]
     #[ignore]
     async fn live_scratch_playlist() {
         let api: Arc<dyn Browse> = live_client();
-        match std::env::var("MIXTAPES_SCRATCH") {
+        match std::env::var("MIXINSTUFF_SCRATCH") {
             Ok(id) if !id.is_empty() => {
                 delete_playlist(&api, &id).await.expect("delete");
                 println!("deleted {id}");
             }
             _ => {
-                let id = create_playlist(&api, "Mixtapes scratch", "for a by-hand check", "PRIVATE").await.expect("create");
+                let id = create_playlist(&api, "Mixinstuff scratch", "for a by-hand check", "PRIVATE").await.expect("create");
                 await_playlist(&api, &id).await;
                 println!("scratch playlist {id}");
             }
@@ -926,13 +926,13 @@ mod tests {
         let api: Arc<dyn Browse> = client.api();
         let headers = client.browser_headers().expect("a signed in session");
 
-        let title = format!("Mixtapes cover test {}", std::process::id());
+        let title = format!("Mixinstuff cover test {}", std::process::id());
         let id = create_playlist(&api, &title, "created by a test", "PRIVATE").await.expect("create");
         await_playlist(&api, &id).await;
         let before = get_playlist(&api, &id, Some(1)).await.map(|d| d.thumbnails.last().cloned().unwrap_or_default());
 
         // A plain square, written the way the crop dialog writes its result.
-        let image = std::env::temp_dir().join(format!("mixtapes-cover-test-{}.png", std::process::id()));
+        let image = std::env::temp_dir().join(format!("mixinstuff-cover-test-{}.png", std::process::id()));
         let pixels: Vec<u8> = (0..256 * 256).flat_map(|i| [(i % 256) as u8, 40u8, 160u8]).collect();
         let made = std::process::Command::new("ffmpeg")
             .args(["-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "256x256", "-i", "-"])
@@ -987,7 +987,7 @@ mod tests {
     #[ignore]
     async fn live_create_and_delete_playlist() {
         let api: Arc<dyn Browse> = live_client();
-        let title = format!("Mixtapes round trip {}", std::process::id());
+        let title = format!("Mixinstuff round trip {}", std::process::id());
         let id = create_playlist(&api, &title, "created by a test", "PRIVATE").await.expect("create");
         println!("created {id}");
 

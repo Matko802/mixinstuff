@@ -78,13 +78,13 @@ mod win {
     }
 
     fn create_window() -> windows::core::Result<HWND> {
-        let class_name = w!("MixtapesTray");
+        let class_name = w!("MixinstuffTray");
         // SAFETY: plain Win32 calls with a static class name; the window is never shown.
         unsafe {
             let instance = GetModuleHandleW(None)?;
             let class = WNDCLASSW { lpfnWndProc: Some(window_proc), hInstance: instance.into(), lpszClassName: class_name, ..Default::default() };
             RegisterClassW(&class);
-            CreateWindowExW(WINDOW_EX_STYLE(0), class_name, w!("Mixtapes"), WINDOW_STYLE(0), 0, 0, 0, 0, None, None, Some(instance.into()), None)
+            CreateWindowExW(WINDOW_EX_STYLE(0), class_name, w!("Mixinstuff"), WINDOW_STYLE(0), 0, 0, 0, 0, None, None, Some(instance.into()), None)
         }
     }
 
@@ -96,11 +96,11 @@ mod win {
         let mut data = icon_data(hwnd);
         data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
         data.uCallbackMessage = WM_TRAY;
-        // SAFETY: resource 1 is the app icon build.rs embeds from windows/mixtapes.rc.
+        // SAFETY: resource 1 is the app icon build.rs embeds from windows/mixinstuff.rc.
         if let Ok(icon) = unsafe { GetModuleHandleW(None).and_then(|module| LoadIconW(Some(module.into()), PCWSTR(1 as *const u16))) } {
             data.hIcon = icon;
         }
-        set_tip(&mut data, "Mixtapes");
+        set_tip(&mut data, "Mixinstuff");
         // SAFETY: the data names our own window and outlives the call.
         if !unsafe { Shell_NotifyIconW(NIM_ADD, &data) }.as_bool() {
             tracing::warn!("tray icon was not added");
@@ -115,7 +115,7 @@ mod win {
                 let state = player.state();
                 let (title, artist) = (state.title(), state.artist());
                 let tip = match (title.is_empty(), artist.is_empty()) {
-                    (true, _) => "Mixtapes".to_owned(),
+                    (true, _) => "Mixinstuff".to_owned(),
                     (false, true) => title,
                     (false, false) => format!("{title} - {artist}"),
                 };
@@ -190,7 +190,7 @@ mod win {
             item(MENU_PREVIOUS, w!("Previous"), has_track);
             item(MENU_NEXT, w!("Next"), bounds.can_next);
             let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
-            item(MENU_SHOW, w!("Show Mixtapes"), true);
+            item(MENU_SHOW, w!("Show Mixinstuff"), true);
             item(MENU_QUIT, w!("Quit"), true);
             let mut point = POINT::default();
             let _ = GetCursorPos(&mut point);

@@ -167,15 +167,15 @@ mod tests {
 
     #[test]
     fn two_spellings_of_one_path_normalize_the_same() {
-        let direct = Path::new("/music/Mixtapes/Artist/One.opus");
-        let walked = Path::new("/music/Mixtapes/Playlists/../Artist/./One.opus");
+        let direct = Path::new("/music/Mixinstuff/Artist/One.opus");
+        let walked = Path::new("/music/Mixinstuff/Playlists/../Artist/./One.opus");
         assert_eq!(normalize(direct), normalize(walked));
     }
 
     #[test]
     fn a_path_below_the_playlists_folder_is_written_relative() {
-        let dir = Path::new("/music/Mixtapes/Playlists");
-        let file = Path::new("/music/Mixtapes/Artist/Album/Song.opus");
+        let dir = Path::new("/music/Mixinstuff/Playlists");
+        let file = Path::new("/music/Mixinstuff/Artist/Album/Song.opus");
         assert_eq!(relative_to(dir, file).unwrap(), Path::new("../Artist/Album/Song.opus"));
     }
 

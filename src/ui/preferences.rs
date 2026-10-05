@@ -21,7 +21,7 @@ const RENDERERS: [(&str, &str); 5] = [("default", "Default (recommended)"), ("ng
 const HISTORY_MODES: [(&str, &str); 3] = [("immediate", "Immediately"), ("after_30s", "After 30 seconds"), ("never", "Never")];
 const FORMAT_LABELS: [&str; 5] = ["Opus (smallest)", "MP3 (universal)", "M4A (Apple)", "FLAC (lossless)", "OGG (Vorbis)"];
 const STRUCTURE_LABELS: [&str; 3] = ["Artist / Album / Song", "Artist / Song", "No folders"];
-const DISPLAY_LABELS: [&str; 3] = ["App Name (Mixtapes)", "Artist", "Song Title"];
+const DISPLAY_LABELS: [&str; 3] = ["App Name (Mixinstuff)", "Artist", "Song Title"];
 /// How long the Last.fm approval dialog waits for the browser.
 const LASTFM_APPROVAL_WINDOW: Duration = Duration::from_secs(300);
 const LASTFM_POLL: Duration = Duration::from_secs(2);
@@ -438,7 +438,7 @@ fn reset_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder()
         .description("Sign out, clear settings and caches, and run the setup again. Downloads and playlists kept on this device stay.")
         .build();
-    let reset_row = adw::ButtonRow::builder().title("Reset Mixtapes").end_icon_name("go-next-symbolic").build();
+    let reset_row = adw::ButtonRow::builder().title("Reset Mixinstuff").end_icon_name("go-next-symbolic").build();
     // The builder would replace the button class the row styles itself with.
     reset_row.add_css_class("destructive-action");
     {
@@ -456,7 +456,7 @@ fn reset_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
 /// Ask, then wipe the profile and relaunch into the setup wizard.
 fn confirm_reset(anchor: &gtk::Widget, win: &Rc<MainWindow>, ctx: &Rc<App>) {
     let dialog = adw::AlertDialog::builder()
-        .heading("Reset Mixtapes?")
+        .heading("Reset Mixinstuff?")
         .body("This signs you out, clears your settings and every cache, and restarts into the setup. Downloaded songs and the playlists and likes kept on this device stay.")
         .build();
     dialog.add_response("cancel", "Cancel");
@@ -493,7 +493,7 @@ fn reset_and_restart(win: &Rc<MainWindow>, ctx: &Rc<App>) {
             }
             Err(err) => {
                 tracing::warn!(%err, "relaunch failed");
-                win.add_toast("Reset done. Start Mixtapes again to run the setup.");
+                win.add_toast("Reset done. Start Mixinstuff again to run the setup.");
             }
         }
     });
@@ -804,7 +804,7 @@ impl ScrobblerRows {
     async fn await_lastfm_approval(self: &Rc<Self>, token: String, url: String) {
         let Some(win) = self.win.upgrade() else { return };
         let dialog = adw::AlertDialog::builder()
-            .heading("Authorize Mixtapes")
+            .heading("Authorize Mixinstuff")
             .body("Approve access in the browser tab that just opened. This closes on its own once Last.fm confirms.")
             .close_response("cancel")
             .build();

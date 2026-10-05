@@ -20,7 +20,7 @@ const RECONNECT_BACKOFF: [u64; 5] = [3, 5, 10, 15, 30];
 /// Below Discord's limit of about five updates per 20 seconds.
 const MIN_UPDATE_INTERVAL: Duration = Duration::from_millis(400);
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
-const MIXTAPES_LOGO: &str = "https://raw.githubusercontent.com/m-obeid/Mixtapes/main/screenshots/omori-mixtape.png";
+const MIXINSTUFF_LOGO: &str = "https://raw.githubusercontent.com/Matko802/mixinstuff/main/screenshots/omori-mixtape.png";
 
 const OP_HANDSHAKE: u32 = 0;
 const OP_FRAME: u32 = 1;
@@ -92,10 +92,10 @@ pub fn build_activity(snap: &Snapshot, options: &Options, now_ms: i64) -> Option
     let artist = if snap.artist.is_empty() { "Unknown artist" } else { &snap.artist };
 
     let mut assets = if snap.thumb.starts_with("http") {
-        let text = [snap.album.as_str(), title].into_iter().find(|t| !t.is_empty()).unwrap_or("Mixtapes");
+        let text = [snap.album.as_str(), title].into_iter().find(|t| !t.is_empty()).unwrap_or("Mixinstuff");
         json!({"large_image": snap.thumb, "large_text": text.chars().take(128).collect::<String>()})
     } else {
-        json!({"large_image": MIXTAPES_LOGO, "large_text": "Mixtapes"})
+        json!({"large_image": MIXINSTUFF_LOGO, "large_text": "Mixinstuff"})
     };
     if options.small_icon {
         // The icon mirrors the transport button, like the Python app.
@@ -532,7 +532,7 @@ mod tests {
         let plain = Options { small_icon: false, status_display: "song_title".into(), ..options() };
         let activity = build_activity(&snap, &plain, 0).unwrap();
         assert_eq!(activity["details"], "X ");
-        assert_eq!(activity["assets"]["large_image"], MIXTAPES_LOGO);
+        assert_eq!(activity["assets"]["large_image"], MIXINSTUFF_LOGO);
         assert!(activity["assets"].get("small_image").is_none());
         assert_eq!(activity["status_display_type"], 2);
     }

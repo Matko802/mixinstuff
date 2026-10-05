@@ -1,67 +1,67 @@
 //! Demo queue for verifying the playback path before any page is ported.
 //!
-//! MIXTAPES_DEMO=1            stage a queue at startup (play stays a click away)
-//! MIXTAPES_DEMO_URI=a,b      URIs or paths to use; default: audio files under ~/Music
-//! MIXTAPES_DEMO_VIDEO=a,b    append real YouTube ids so yt-dlp resolution runs too
-//! MIXTAPES_DEMO_AUTOPLAY=1   press play three seconds after the window shows
-//! MIXTAPES_DEMO_SNAPSHOT=p   write p-1.png at 2.5 s and p-2.png at 11 s from inside GTK
-//! MIXTAPES_DEMO_QUEUE=1      open the queue sidebar after staging
-//! MIXTAPES_DEMO_SAMPLE=path,ms[,from]  sample the GTK thread at 1 kHz from `from` ms, write path.samples and path.maps at ms, then quit
-//! MIXTAPES_DEMO_COUNT=ms   log widget counts per subtree that holds 150 or more
-//! MIXTAPES_DEMO_SHEET_PAGE=ms,name  show the expanded player's player, queue or lyrics page
-//! MIXTAPES_DEMO_FLING=ms[,px_per_s[,secs[,class]]]  scroll the biggest visible page (or the one with that class) at a steady speed
-//! MIXTAPES_DEMO_CLEAR_AT=ms  clear the queue after that many ms
-//! MIXTAPES_DEMO_LYRICS_PICKER=ms  switch the lyrics source through the picker and reopen it
-//! MIXTAPES_DEMO_EXPAND=1|ms  open the expanded player, five seconds in by default
-//! MIXTAPES_DEMO_TAB=name     select home, library or search at startup
-//! MIXTAPES_DEMO_SEARCH=text  run a search at startup
-//! MIXTAPES_DEMO_ACTIVATE=1   five seconds in, activate the first playable search result
-//! MIXTAPES_DEMO_HOME_PLAY=ms  play the first playable row of the Home feed
-//! MIXTAPES_DEMO_HISTORY=ms   open the listening history page
-//! MIXTAPES_DEMO_HISTORY_MENU=ms  log what a history row's menu offers
-//! MIXTAPES_DEMO_CHANNEL=ms   open the account's own channel
-//! MIXTAPES_DEMO_WIDTH=px     initial window width, under 500 for the phone layout
-//! MIXTAPES_DEMO_HEIGHT=px    initial window height, for capturing a whole long page
-//! MIXTAPES_DEMO_SCROLL=ms[,px]  scroll the visible page down before the snapshot
-//! MIXTAPES_DEMO_CATEGORY=ms  open the first genre page from Explore
-//! MIXTAPES_DEMO_ALL_MOODS=ms  open the full genre list from Explore
-//! MIXTAPES_DEMO_CHARTS_COUNTRY=code[,ms]  pick a country in the charts menu
-//! MIXTAPES_DEMO_LOGIN=1      open the sign-in dialog and snapshot it as <prefix>-login.png
-//! MIXTAPES_DEMO_SNAPSHOT_AT=ms  delay of the second snapshot, default 11000
-//! MIXTAPES_DEMO_SIFT=text,sort  search and sort the open playlist
-//! MIXTAPES_DEMO_DOWNLOAD=[title|]ids  download video ids, optionally as a playlist
-//! MIXTAPES_DEMO_DOWNLOADS=1   open the Downloads page
-//! MIXTAPES_DEMO_UPLOADS=ms    open the Uploaded Songs page
-//! MIXTAPES_DEMO_UPLOADS_TAB=ms  switch the library to its uploads tab
-//! MIXTAPES_DEMO_UPLOAD_ARTIST=id[,name]  open an uploaded artist's songs
-//! MIXTAPES_DEMO_SET_COVER=path  set the open playlist's cover from an image
-//! MIXTAPES_DEMO_NEW_PLAYLIST=ms  open the new playlist dialog
-//! MIXTAPES_DEMO_SCROLL=ms,px|title  scroll the visible page down by px, or to the heading with that text
-//! MIXTAPES_DEMO_LOCAL=ms[,open]  make a local playlist and a like, show the library, optionally open the list
-//! MIXTAPES_DEMO_CARD_MENUS=ms  log what the library card menus offer
-//! MIXTAPES_DEMO_BACK=ms      press the back button
-//! MIXTAPES_DEMO_TOGGLE=ms    from then on, open or close the player view once a second (for profiling)
-//! MIXTAPES_DEMO_NEXT_EVERY=ms  after ten seconds, skip to the next track at that interval (for profiling)
-//! MIXTAPES_DEMO_ONBOARDING=ms[,page] open the setup wizard (page: account, extras, done), MIXTAPES_DEMO_WHATS_NEW=ms the release notes
-//! MIXTAPES_DEMO_RESIZE=ms    from then on, flip the window between 1040 and 420 px wide once a second
-//! MIXTAPES_DEMO_WATCHDOG=ms  raise SIGUSR2 when the GTK thread has not run for that long, for a gdb backtrace
-//! MIXTAPES_DEMO_PHASES=1     log frame clock phases that take more than 40 ms
-//! MIXTAPES_DEMO_CLASSES=1    with TOGGLE: log every widget's classes and state after each toggle, to diff
-//! MIXTAPES_DEMO_FRAMES=1     log once a second: frames, worst gap, gaps over 25 ms, and time spent inside frames
-//! MIXTAPES_DEMO_PRESENCE=1   let a demo run scrobble and publish Discord presence
-//! MIXTAPES_DEMO_PREFS=ms[,px[,page]]  open Preferences, show the named page, scroll px
-//! MIXTAPES_DEMO_STREAM_INFO=ms  open the expanded player's Stream Info dialog
-//! MIXTAPES_DEMO_SWIPE=ms[,covers]  swipe the carousel over two seconds
-//! MIXTAPES_DEMO_DELETE_DOWNLOAD=id  delete one download
-//! MIXTAPES_DEMO_PLAYLIST=id  open a playlist or album page 1.5 s in
-//! MIXTAPES_DEMO_PLAYLIST_PLAY=1  press Play on that page six seconds in
-//! MIXTAPES_DEMO_DISCOGRAPHY=id  open a discography grid for a browse id 1.5 s in
-//! MIXTAPES_DEMO_SEEK=secs    seek to that position seven seconds in
-//! MIXTAPES_DEMO_NEXT_AT=ms   skip to the next queue entry after that many ms
-//! MIXTAPES_DEMO_EDIT_AT=ms   append a copy of the first track after that many ms
-//! MIXTAPES_DEMO_ARTIST=id    open an artist page 1.5 s in
-//! MIXTAPES_DEMO_CLICK=ms,text[,tab]  click the mapped button with that tooltip or label, then optionally show a tab
-//! MIXTAPES_DEMO_ARTIST_RADIO=1  press the artist page's radio button six seconds in
+//! MIXINSTUFF_DEMO=1            stage a queue at startup (play stays a click away)
+//! MIXINSTUFF_DEMO_URI=a,b      URIs or paths to use; default: audio files under ~/Music
+//! MIXINSTUFF_DEMO_VIDEO=a,b    append real YouTube ids so yt-dlp resolution runs too
+//! MIXINSTUFF_DEMO_AUTOPLAY=1   press play three seconds after the window shows
+//! MIXINSTUFF_DEMO_SNAPSHOT=p   write p-1.png at 2.5 s and p-2.png at 11 s from inside GTK
+//! MIXINSTUFF_DEMO_QUEUE=1      open the queue sidebar after staging
+//! MIXINSTUFF_DEMO_SAMPLE=path,ms[,from]  sample the GTK thread at 1 kHz from `from` ms, write path.samples and path.maps at ms, then quit
+//! MIXINSTUFF_DEMO_COUNT=ms   log widget counts per subtree that holds 150 or more
+//! MIXINSTUFF_DEMO_SHEET_PAGE=ms,name  show the expanded player's player, queue or lyrics page
+//! MIXINSTUFF_DEMO_FLING=ms[,px_per_s[,secs[,class]]]  scroll the biggest visible page (or the one with that class) at a steady speed
+//! MIXINSTUFF_DEMO_CLEAR_AT=ms  clear the queue after that many ms
+//! MIXINSTUFF_DEMO_LYRICS_PICKER=ms  switch the lyrics source through the picker and reopen it
+//! MIXINSTUFF_DEMO_EXPAND=1|ms  open the expanded player, five seconds in by default
+//! MIXINSTUFF_DEMO_TAB=name     select home, library or search at startup
+//! MIXINSTUFF_DEMO_SEARCH=text  run a search at startup
+//! MIXINSTUFF_DEMO_ACTIVATE=1   five seconds in, activate the first playable search result
+//! MIXINSTUFF_DEMO_HOME_PLAY=ms  play the first playable row of the Home feed
+//! MIXINSTUFF_DEMO_HISTORY=ms   open the listening history page
+//! MIXINSTUFF_DEMO_HISTORY_MENU=ms  log what a history row's menu offers
+//! MIXINSTUFF_DEMO_CHANNEL=ms   open the account's own channel
+//! MIXINSTUFF_DEMO_WIDTH=px     initial window width, under 500 for the phone layout
+//! MIXINSTUFF_DEMO_HEIGHT=px    initial window height, for capturing a whole long page
+//! MIXINSTUFF_DEMO_SCROLL=ms[,px]  scroll the visible page down before the snapshot
+//! MIXINSTUFF_DEMO_CATEGORY=ms  open the first genre page from Explore
+//! MIXINSTUFF_DEMO_ALL_MOODS=ms  open the full genre list from Explore
+//! MIXINSTUFF_DEMO_CHARTS_COUNTRY=code[,ms]  pick a country in the charts menu
+//! MIXINSTUFF_DEMO_LOGIN=1      open the sign-in dialog and snapshot it as <prefix>-login.png
+//! MIXINSTUFF_DEMO_SNAPSHOT_AT=ms  delay of the second snapshot, default 11000
+//! MIXINSTUFF_DEMO_SIFT=text,sort  search and sort the open playlist
+//! MIXINSTUFF_DEMO_DOWNLOAD=[title|]ids  download video ids, optionally as a playlist
+//! MIXINSTUFF_DEMO_DOWNLOADS=1   open the Downloads page
+//! MIXINSTUFF_DEMO_UPLOADS=ms    open the Uploaded Songs page
+//! MIXINSTUFF_DEMO_UPLOADS_TAB=ms  switch the library to its uploads tab
+//! MIXINSTUFF_DEMO_UPLOAD_ARTIST=id[,name]  open an uploaded artist's songs
+//! MIXINSTUFF_DEMO_SET_COVER=path  set the open playlist's cover from an image
+//! MIXINSTUFF_DEMO_NEW_PLAYLIST=ms  open the new playlist dialog
+//! MIXINSTUFF_DEMO_SCROLL=ms,px|title  scroll the visible page down by px, or to the heading with that text
+//! MIXINSTUFF_DEMO_LOCAL=ms[,open]  make a local playlist and a like, show the library, optionally open the list
+//! MIXINSTUFF_DEMO_CARD_MENUS=ms  log what the library card menus offer
+//! MIXINSTUFF_DEMO_BACK=ms      press the back button
+//! MIXINSTUFF_DEMO_TOGGLE=ms    from then on, open or close the player view once a second (for profiling)
+//! MIXINSTUFF_DEMO_NEXT_EVERY=ms  after ten seconds, skip to the next track at that interval (for profiling)
+//! MIXINSTUFF_DEMO_ONBOARDING=ms[,page] open the setup wizard (page: account, extras, done), MIXINSTUFF_DEMO_WHATS_NEW=ms the release notes
+//! MIXINSTUFF_DEMO_RESIZE=ms    from then on, flip the window between 1040 and 420 px wide once a second
+//! MIXINSTUFF_DEMO_WATCHDOG=ms  raise SIGUSR2 when the GTK thread has not run for that long, for a gdb backtrace
+//! MIXINSTUFF_DEMO_PHASES=1     log frame clock phases that take more than 40 ms
+//! MIXINSTUFF_DEMO_CLASSES=1    with TOGGLE: log every widget's classes and state after each toggle, to diff
+//! MIXINSTUFF_DEMO_FRAMES=1     log once a second: frames, worst gap, gaps over 25 ms, and time spent inside frames
+//! MIXINSTUFF_DEMO_PRESENCE=1   let a demo run scrobble and publish Discord presence
+//! MIXINSTUFF_DEMO_PREFS=ms[,px[,page]]  open Preferences, show the named page, scroll px
+//! MIXINSTUFF_DEMO_STREAM_INFO=ms  open the expanded player's Stream Info dialog
+//! MIXINSTUFF_DEMO_SWIPE=ms[,covers]  swipe the carousel over two seconds
+//! MIXINSTUFF_DEMO_DELETE_DOWNLOAD=id  delete one download
+//! MIXINSTUFF_DEMO_PLAYLIST=id  open a playlist or album page 1.5 s in
+//! MIXINSTUFF_DEMO_PLAYLIST_PLAY=1  press Play on that page six seconds in
+//! MIXINSTUFF_DEMO_DISCOGRAPHY=id  open a discography grid for a browse id 1.5 s in
+//! MIXINSTUFF_DEMO_SEEK=secs    seek to that position seven seconds in
+//! MIXINSTUFF_DEMO_NEXT_AT=ms   skip to the next queue entry after that many ms
+//! MIXINSTUFF_DEMO_EDIT_AT=ms   append a copy of the first track after that many ms
+//! MIXINSTUFF_DEMO_ARTIST=id    open an artist page 1.5 s in
+//! MIXINSTUFF_DEMO_CLICK=ms,text[,tab]  click the mapped button with that tooltip or label, then optionally show a tab
+//! MIXINSTUFF_DEMO_ARTIST_RADIO=1  press the artist page's radio button six seconds in
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -88,10 +88,10 @@ pub struct Demo {
 }
 
 pub fn from_env() -> Option<Demo> {
-    if std::env::var("MIXTAPES_DEMO").ok().as_deref() != Some("1") {
+    if std::env::var("MIXINSTUFF_DEMO").ok().as_deref() != Some("1") {
         return None;
     }
-    let sources: Vec<String> = match std::env::var("MIXTAPES_DEMO_URI") {
+    let sources: Vec<String> = match std::env::var("MIXINSTUFF_DEMO_URI") {
         Ok(list) => list.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect(),
         Err(_) => {
             let found = local_audio_files(3);
@@ -107,7 +107,7 @@ pub fn from_env() -> Option<Demo> {
         uris.insert(id.clone(), uri);
         tracks.push(Track { video_id: VideoId(id), title, artist, ..Track::default() });
     }
-    if let Ok(list) = std::env::var("MIXTAPES_DEMO_VIDEO") {
+    if let Ok(list) = std::env::var("MIXINSTUFF_DEMO_VIDEO") {
         for video in list.split(',').map(str::trim).filter(|v| !v.is_empty()) {
             tracks.push(Track {
                 video_id: VideoId(video.to_owned()),
@@ -121,8 +121,8 @@ pub fn from_env() -> Option<Demo> {
     Some(Demo {
         tracks,
         uris,
-        autoplay: std::env::var("MIXTAPES_DEMO_AUTOPLAY").ok().as_deref() == Some("1"),
-        snapshot: std::env::var_os("MIXTAPES_DEMO_SNAPSHOT").map(PathBuf::from),
+        autoplay: std::env::var("MIXINSTUFF_DEMO_AUTOPLAY").ok().as_deref() == Some("1"),
+        snapshot: std::env::var_os("MIXINSTUFF_DEMO_SNAPSHOT").map(PathBuf::from),
     })
 }
 
@@ -131,11 +131,11 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     tracing::info!(tracks = demo.tracks.len(), autoplay = demo.autoplay, "demo queue staged");
     ctx.player.stage_tracks(demo.tracks.clone(), 0);
     let window = main_window.window();
-    let height = std::env::var("MIXTAPES_DEMO_HEIGHT").ok().and_then(|h| h.parse::<i32>().ok()).unwrap_or(700);
-    if let Some(width) = std::env::var("MIXTAPES_DEMO_WIDTH").ok().and_then(|w| w.parse::<i32>().ok()) {
+    let height = std::env::var("MIXINSTUFF_DEMO_HEIGHT").ok().and_then(|h| h.parse::<i32>().ok()).unwrap_or(700);
+    if let Some(width) = std::env::var("MIXINSTUFF_DEMO_WIDTH").ok().and_then(|w| w.parse::<i32>().ok()) {
         window.set_default_size(width, height);
     }
-    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_CHARTS_COUNTRY") {
+    if let Ok(spec) = std::env::var("MIXINSTUFF_DEMO_CHARTS_COUNTRY") {
         let (code, ms) = spec.split_once(',').unwrap_or((spec.as_str(), "7000"));
         let (code, delay) = (code.to_owned(), ms.parse::<u64>().unwrap_or(7000));
         let ctx_w = ctx.clone();
@@ -145,7 +145,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    for (var, open) in [("MIXTAPES_DEMO_CATEGORY", true), ("MIXTAPES_DEMO_ALL_MOODS", false)] {
+    for (var, open) in [("MIXINSTUFF_DEMO_CATEGORY", true), ("MIXINSTUFF_DEMO_ALL_MOODS", false)] {
         let Ok(ms) = std::env::var(var) else { continue };
         let ctx_w = ctx.clone();
         let delay = ms.parse::<u64>().unwrap_or(6000);
@@ -156,7 +156,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SCROLL") {
+    if let Ok(spec) = std::env::var("MIXINSTUFF_DEMO_SCROLL") {
         let mut parts = spec.split(',');
         let ms: u64 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(8_000);
         let pixels: f64 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(800.0);
@@ -167,10 +167,10 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if let Ok(tab) = std::env::var("MIXTAPES_DEMO_TAB") {
+    if let Ok(tab) = std::env::var("MIXINSTUFF_DEMO_TAB") {
         main_window.select_tab(&tab);
     }
-    if let Ok(query) = std::env::var("MIXTAPES_DEMO_SEARCH") {
+    if let Ok(query) = std::env::var("MIXINSTUFF_DEMO_SEARCH") {
         let win = window.downgrade();
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(300), move || {
@@ -181,7 +181,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if let Ok(path) = std::env::var("MIXTAPES_DEMO_SET_COVER") {
+    if let Ok(path) = std::env::var("MIXINSTUFF_DEMO_SET_COVER") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(6000), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
@@ -191,7 +191,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_UPLOAD_ARTIST") {
+    if let Ok(spec) = std::env::var("MIXINSTUFF_DEMO_UPLOAD_ARTIST") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(4000), move || {
             let (browse_id, name) = spec.split_once(',').unwrap_or((spec.as_str(), "Uploads"));
@@ -202,7 +202,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_UPLOADS_TAB") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_UPLOADS_TAB") {
         let ctx_w = ctx.clone();
         let delay = ms.parse::<u64>().unwrap_or(4000);
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
@@ -213,7 +213,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_UPLOADS") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_UPLOADS") {
         let ctx_w = ctx.clone();
         let delay = ms.parse::<u64>().unwrap_or(2500);
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
@@ -224,7 +224,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_BACK") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_BACK") {
         let ctx_w = ctx.clone();
         let delay = ms.parse::<u64>().unwrap_or(9000);
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
@@ -235,7 +235,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_NEXT_EVERY") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_NEXT_EVERY") {
         let player = ctx.player.clone();
         let ctx_w = ctx.clone();
         let every = ms.parse::<u64>().unwrap_or(3000);
@@ -243,7 +243,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             let ctx_w = ctx_w.clone();
             glib::timeout_add_local(Duration::from_millis(every), move || {
                 player.next();
-                if std::env::var_os("MIXTAPES_DEMO_CLASSES").is_some() {
+                if std::env::var_os("MIXINSTUFF_DEMO_CLASSES").is_some() {
                     if let Some(mw) = ctx_w.window.borrow().as_ref() {
                         // Once right after the change and once settled, to catch a class that only flickers.
                         for delay in [40, 900] {
@@ -261,7 +261,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    for (var, wizard) in [("MIXTAPES_DEMO_ONBOARDING", true), ("MIXTAPES_DEMO_WHATS_NEW", false)] {
+    for (var, wizard) in [("MIXINSTUFF_DEMO_ONBOARDING", true), ("MIXINSTUFF_DEMO_WHATS_NEW", false)] {
         let Ok(spec) = std::env::var(var) else { continue };
         let (ms, tag) = spec.split_once(',').map(|(ms, tag)| (ms, Some(tag.to_owned()))).unwrap_or((spec.as_str(), None));
         let ctx_w = ctx.clone();
@@ -276,7 +276,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_RESIZE") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_RESIZE") {
         let win = window.clone();
         let delay = ms.parse::<u64>().unwrap_or(8000);
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
@@ -284,7 +284,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             glib::timeout_add_local(Duration::from_millis(1000), move || {
                 narrow.set(!narrow.get());
                 win.set_default_size(if narrow.get() { 420 } else { 1040 }, 700);
-                if std::env::var_os("MIXTAPES_DEMO_CLASSES").is_some() {
+                if std::env::var_os("MIXINSTUFF_DEMO_CLASSES").is_some() {
                     let win = win.clone();
                     glib::timeout_add_local_once(Duration::from_millis(600), move || {
                         let mut lines = Vec::new();
@@ -297,7 +297,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_TOGGLE") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_TOGGLE") {
         let ctx_w = ctx.clone();
         let delay = ms.parse::<u64>().unwrap_or(8000);
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
@@ -305,7 +305,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
                 if let Some(mw) = ctx_w.window.borrow().as_ref() {
                     mw.window().present();
                     mw.expand_player();
-                    if std::env::var_os("MIXTAPES_DEMO_CLASSES").is_some() {
+                    if std::env::var_os("MIXINSTUFF_DEMO_CLASSES").is_some() {
                         let win = mw.window().clone();
                         glib::timeout_add_local_once(Duration::from_millis(600), move || {
                             let mut lines = Vec::new();
@@ -319,7 +319,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_CARD_MENUS") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_CARD_MENUS") {
         let ctx_w = ctx.clone();
         let delay = ms.parse::<u64>().unwrap_or(6000);
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
@@ -329,7 +329,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SCROLL") {
+    if let Ok(spec) = std::env::var("MIXINSTUFF_DEMO_SCROLL") {
         // Scroll the visible page by px, or to the heading with that text, for a snapshot further down.
         let (ms, target) = spec.split_once(',').map(|(ms, t)| (ms.parse::<u64>().unwrap_or(3000), t.to_owned())).unwrap_or((3000, "600".to_owned()));
         let win = window.clone();
@@ -351,7 +351,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_LOCAL") {
+    if let Ok(spec) = std::env::var("MIXINSTUFF_DEMO_LOCAL") {
         // A local playlist of the staged tracks and a like, then the library tab. ",open" opens the list.
         let (ms, open) = spec.split_once(',').map(|(ms, rest)| (ms, rest == "open")).unwrap_or((spec.as_str(), false));
         let ctx_w = ctx.clone();
@@ -377,7 +377,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_NEW_PLAYLIST") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_NEW_PLAYLIST") {
         let ctx_w = ctx.clone();
         let delay = ms.parse::<u64>().unwrap_or(3000);
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
@@ -390,7 +390,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     }
 
     #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64")))]
-    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SAMPLE") {
+    if let Ok(spec) = std::env::var("MIXINSTUFF_DEMO_SAMPLE") {
         // Sample the GTK thread from now on, write the samples and quit at `ms`.
         let mut parts = spec.split(',');
         let path = parts.next().unwrap_or_default().to_owned();
@@ -405,7 +405,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_COUNT") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_COUNT") {
         // Widgets per subtree, to see what a window-wide restyle has to walk.
         let win = window.clone();
         glib::timeout_add_local_once(Duration::from_millis(ms.parse::<u64>().unwrap_or(15000)), move || {
@@ -437,7 +437,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SHEET_PAGE") {
+    if let Ok(spec) = std::env::var("MIXINSTUFF_DEMO_SHEET_PAGE") {
         let ctx_w = ctx.clone();
         let (ms, name) = spec.split_once(',').unwrap_or((spec.as_str(), "queue"));
         let (ms, name) = (ms.parse::<u64>().unwrap_or(12000), name.to_owned());
@@ -449,7 +449,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_FLING") {
+    if let Ok(spec) = std::env::var("MIXINSTUFF_DEMO_FLING") {
         // Scroll the biggest mapped page at a steady speed for a while, like a long fling.
         let mut parts = spec.split(',');
         let ms = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(10000);
@@ -485,7 +485,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_CLEAR_AT") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_CLEAR_AT") {
         let player = ctx.player.clone();
         glib::timeout_add_local_once(Duration::from_millis(ms.parse::<u64>().unwrap_or(20000)), move || {
             tracing::info!("demo: clearing the queue");
@@ -493,7 +493,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_LYRICS_PICKER") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_LYRICS_PICKER") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(ms.parse::<u64>().unwrap_or(10000)), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
@@ -510,7 +510,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SWIPE") {
+    if let Ok(spec) = std::env::var("MIXINSTUFF_DEMO_SWIPE") {
         let ctx_w = ctx.clone();
         let (ms, covers) = spec.split_once(',').unwrap_or((spec.as_str(), "1"));
         let delay = ms.parse::<u64>().unwrap_or(8000);
@@ -523,7 +523,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if std::env::var("MIXTAPES_DEMO_FRAMES").is_ok() {
+    if std::env::var("MIXINSTUFF_DEMO_FRAMES").is_ok() {
         // (last frame time, window start, frames, worst gap, slow frames), all in microseconds.
         let stats = std::cell::Cell::new((0i64, 0i64, 0u32, 0i64, 0u32));
         window.add_tick_callback(move |_, clock| {
@@ -578,7 +578,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_WATCHDOG") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_WATCHDOG") {
         // A stall that burns no CPU never shows in a sampling profile. Run under
         // gdb with `handle SIGUSR2 stop print nopass` and ask for `bt` on thread 1:
         // the signal lands while the GTK thread is still stuck.
@@ -611,7 +611,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if std::env::var("MIXTAPES_DEMO_PHASES").is_ok() {
+    if std::env::var("MIXINSTUFF_DEMO_PHASES").is_ok() {
         // Time between consecutive frame clock signals, which is what the phase
         // in between cost. Logged when one takes more than 40 ms.
         let win = window.clone();
@@ -633,7 +633,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_PREFS") {
+    if let Ok(spec) = std::env::var("MIXINSTUFF_DEMO_PREFS") {
         let mut parts = spec.split(',');
         let delay = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(3000);
         let pixels = parts.next().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
@@ -657,7 +657,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_STREAM_INFO") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_STREAM_INFO") {
         let ctx_w = ctx.clone();
         let delay = ms.parse::<u64>().unwrap_or(9000);
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
@@ -670,7 +670,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if std::env::var("MIXTAPES_DEMO_DOWNLOADS").is_ok() {
+    if std::env::var("MIXINSTUFF_DEMO_DOWNLOADS").is_ok() {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(1500), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
@@ -679,7 +679,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_DL_POPOVER").ok().map(|v| v.parse::<u64>().unwrap_or(6000)).map(Ok::<u64, ()>).unwrap_or(Err(())) {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_DL_POPOVER").ok().map(|v| v.parse::<u64>().unwrap_or(6000)).map(Ok::<u64, ()>).unwrap_or(Err(())) {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(ms), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
@@ -688,7 +688,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(video_id) = std::env::var("MIXTAPES_DEMO_DELETE_DOWNLOAD") {
+    if let Ok(video_id) = std::env::var("MIXINSTUFF_DEMO_DELETE_DOWNLOAD") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(4000), move || {
             let removed = ctx_w.downloads.delete(&video_id);
@@ -696,7 +696,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(video_id) = std::env::var("MIXTAPES_DEMO_DOWNLOAD") {
+    if let Ok(video_id) = std::env::var("MIXINSTUFF_DEMO_DOWNLOAD") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(2500), move || {
             let Some(mw) = ctx_w.window.borrow().as_ref().cloned() else { return };
@@ -707,7 +707,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_SIFT") {
+    if let Ok(spec) = std::env::var("MIXINSTUFF_DEMO_SIFT") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(9000), move || {
             let (text, sort) = spec.split_once(',').unwrap_or((spec.as_str(), ""));
@@ -720,7 +720,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         });
     }
 
-    if let Ok(id) = std::env::var("MIXTAPES_DEMO_PLAYLIST") {
+    if let Ok(id) = std::env::var("MIXINSTUFF_DEMO_PLAYLIST") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(1500), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
@@ -728,7 +728,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if std::env::var("MIXTAPES_DEMO_PLAYLIST_PLAY").ok().as_deref() == Some("1") {
+    if std::env::var("MIXINSTUFF_DEMO_PLAYLIST_PLAY").ok().as_deref() == Some("1") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(6000), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
@@ -736,7 +736,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if let Ok(id) = std::env::var("MIXTAPES_DEMO_DISCOGRAPHY") {
+    if let Ok(id) = std::env::var("MIXINSTUFF_DEMO_DISCOGRAPHY") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(1500), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
@@ -744,7 +744,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if let Ok(spec) = std::env::var("MIXTAPES_DEMO_CLICK") {
+    if let Ok(spec) = std::env::var("MIXINSTUFF_DEMO_CLICK") {
         let mut parts = spec.splitn(3, ',');
         let ms = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(6000);
         let (tooltip, tab) = (parts.next().unwrap_or_default().to_owned(), parts.next().map(str::to_owned));
@@ -760,7 +760,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if let Ok(id) = std::env::var("MIXTAPES_DEMO_ARTIST") {
+    if let Ok(id) = std::env::var("MIXINSTUFF_DEMO_ARTIST") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(1500), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
@@ -768,7 +768,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if std::env::var("MIXTAPES_DEMO_ARTIST_RADIO").ok().as_deref() == Some("1") {
+    if std::env::var("MIXINSTUFF_DEMO_ARTIST_RADIO").ok().as_deref() == Some("1") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(6000), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
@@ -776,7 +776,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if let Some(ms) = std::env::var("MIXTAPES_DEMO_EDIT_AT").ok().and_then(|v| v.parse::<u64>().ok()) {
+    if let Some(ms) = std::env::var("MIXINSTUFF_DEMO_EDIT_AT").ok().and_then(|v| v.parse::<u64>().ok()) {
         let player = ctx.player.clone();
         glib::timeout_add_local_once(Duration::from_millis(ms), move || {
             let extra: Vec<Track> = player.queue_tracks().first().cloned().into_iter().collect();
@@ -784,21 +784,21 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             player.add_to_queue(extra, false);
         });
     }
-    if let Some(ms) = std::env::var("MIXTAPES_DEMO_NEXT_AT").ok().and_then(|v| v.parse::<u64>().ok()) {
+    if let Some(ms) = std::env::var("MIXINSTUFF_DEMO_NEXT_AT").ok().and_then(|v| v.parse::<u64>().ok()) {
         let player = ctx.player.clone();
         glib::timeout_add_local_once(Duration::from_millis(ms), move || {
             tracing::info!(status = ?player.state().status(), "demo: next");
             player.next();
         });
     }
-    if let Some(secs) = std::env::var("MIXTAPES_DEMO_SEEK").ok().and_then(|v| v.parse::<f64>().ok()) {
+    if let Some(secs) = std::env::var("MIXINSTUFF_DEMO_SEEK").ok().and_then(|v| v.parse::<f64>().ok()) {
         let player = ctx.player.clone();
         glib::timeout_add_local_once(Duration::from_millis(7000), move || {
             tracing::info!(secs, before = player.state().position(), "demo: seek");
             player.seek(secs);
         });
     }
-    if std::env::var("MIXTAPES_DEMO_LOGIN").ok().as_deref() == Some("1") {
+    if std::env::var("MIXINSTUFF_DEMO_LOGIN").ok().as_deref() == Some("1") {
         let ctx_w = ctx.clone();
         let prefix = demo.snapshot.clone();
         glib::timeout_add_local_once(Duration::from_millis(1500), move || {
@@ -816,7 +816,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if std::env::var("MIXTAPES_DEMO_ACTIVATE").ok().as_deref() == Some("1") {
+    if std::env::var("MIXINSTUFF_DEMO_ACTIVATE").ok().as_deref() == Some("1") {
         let ctx_w = ctx.clone();
         glib::timeout_add_local_once(Duration::from_millis(5000), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
@@ -826,7 +826,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_HISTORY_MENU") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_HISTORY_MENU") {
         let ctx_w = ctx.clone();
         let delay = ms.parse::<u64>().unwrap_or(9000);
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
@@ -835,7 +835,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    for (var, history) in [("MIXTAPES_DEMO_HISTORY", true), ("MIXTAPES_DEMO_CHANNEL", false)] {
+    for (var, history) in [("MIXINSTUFF_DEMO_HISTORY", true), ("MIXINSTUFF_DEMO_CHANNEL", false)] {
         let Ok(ms) = std::env::var(var) else { continue };
         let ctx_w = ctx.clone();
         let delay = ms.parse::<u64>().unwrap_or(4000);
@@ -846,7 +846,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if let Ok(ms) = std::env::var("MIXTAPES_DEMO_HOME_PLAY") {
+    if let Ok(ms) = std::env::var("MIXINSTUFF_DEMO_HOME_PLAY") {
         let ctx_w = ctx.clone();
         let delay = ms.parse::<u64>().unwrap_or(8000);
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
@@ -855,7 +855,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if let Ok(value) = std::env::var("MIXTAPES_DEMO_EXPAND") {
+    if let Ok(value) = std::env::var("MIXINSTUFF_DEMO_EXPAND") {
         let ctx_w = ctx.clone();
         let delay = value.parse::<u64>().ok().filter(|ms| *ms > 1).unwrap_or(5000);
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
@@ -868,7 +868,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
         });
     }
-    if std::env::var("MIXTAPES_DEMO_QUEUE").ok().as_deref() == Some("1") {
+    if std::env::var("MIXINSTUFF_DEMO_QUEUE").ok().as_deref() == Some("1") {
         // Open after the first layout pass, like a user click would.
         let win = window.downgrade();
         glib::timeout_add_local_once(Duration::from_millis(600), move || {
@@ -898,7 +898,7 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     if let Some(prefix) = demo.snapshot.clone() {
         let win = window.downgrade();
         let player = ctx.player.clone();
-        let second_ms = std::env::var("MIXTAPES_DEMO_SNAPSHOT_AT").ok().and_then(|v| v.parse().ok()).unwrap_or(SECOND_SNAPSHOT_MS);
+        let second_ms = std::env::var("MIXINSTUFF_DEMO_SNAPSHOT_AT").ok().and_then(|v| v.parse().ok()).unwrap_or(SECOND_SNAPSHOT_MS);
         glib::timeout_add_local_once(Duration::from_millis(second_ms), move || {
             let state = player.state();
             tracing::info!(status = ?state.status(), position = state.position(), duration = state.duration(), queue_length = state.queue_length(), "demo: state at snapshot");

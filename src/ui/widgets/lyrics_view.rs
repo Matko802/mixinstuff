@@ -1114,7 +1114,7 @@ impl LyricsView {
                     this.picker_btn.set_active(true);
                 }
                 1 | 2 => log(&this, "opened"),
-                3 if std::env::var("MIXTAPES_DEMO_LYRICS_PICKER_KEEP").is_ok() => log(&this, "kept"),
+                3 if std::env::var("MIXINSTUFF_DEMO_LYRICS_PICKER_KEEP").is_ok() => log(&this, "kept"),
                 3 => {
                     let actions = this.source_actions.borrow();
                     let active = this.source.borrow().clone();

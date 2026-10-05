@@ -550,10 +550,10 @@ mod tests {
     #[test]
     fn cache_paths_are_the_python_apps() {
         let url = "https://lh3.googleusercontent.com/abc=w544-h544-l90-rj";
-        let cache = Path::new("/cache/muse");
-        assert_eq!(thumb_cache_path(cache, url), Path::new("/cache/muse/thumbs/82b272759bc0929447bb3682c86ff15b4744d450"));
-        assert_eq!(blur_cache_path(cache, url, true), Path::new("/cache/muse/covers_blurred/82b272759bc0929447bb3682c86ff15b4744d450_b42_s720_dark.png"));
-        assert_eq!(blur_cache_path(cache, url, false), Path::new("/cache/muse/covers_blurred/82b272759bc0929447bb3682c86ff15b4744d450_b42_s720_light.png"));
+        let cache = Path::new("/cache/mixinstuff");
+        assert_eq!(thumb_cache_path(cache, url), Path::new("/cache/mixinstuff/thumbs/82b272759bc0929447bb3682c86ff15b4744d450"));
+        assert_eq!(blur_cache_path(cache, url, true), Path::new("/cache/mixinstuff/covers_blurred/82b272759bc0929447bb3682c86ff15b4744d450_b42_s720_dark.png"));
+        assert_eq!(blur_cache_path(cache, url, false), Path::new("/cache/mixinstuff/covers_blurred/82b272759bc0929447bb3682c86ff15b4744d450_b42_s720_light.png"));
     }
 
     #[test]
@@ -626,7 +626,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_read_is_not_remembered() {
-        let url = "/nowhere/mixtapes-missing-cover.png".to_owned();
+        let url = "/nowhere/mixinstuff-missing-cover.png".to_owned();
         assert_eq!(get_dominant_color(reqwest::Client::new(), PathBuf::from("/nowhere"), url.clone()).await, None);
         assert_eq!(COLOR_CACHE.lock().unwrap().get(&url), None);
         assert_eq!(get_blurred_cover(reqwest::Client::new(), PathBuf::from("/nowhere"), String::new(), true).await, None);
@@ -648,11 +648,11 @@ mod tests {
     }
 
     /// Runs both effects on real covers and prints what to hold against `tools/cover_effects_ref.py <files>`.
-    /// `MIXTAPES_COVERS=/a.jpg:/b.jpg cargo test -- --ignored compare_covers --nocapture`
+    /// `MIXINSTUFF_COVERS=/a.jpg:/b.jpg cargo test -- --ignored compare_covers --nocapture`
     #[test]
     #[ignore]
     fn compare_covers() {
-        let covers = std::env::var_os("MIXTAPES_COVERS").expect("MIXTAPES_COVERS lists image files");
+        let covers = std::env::var_os("MIXINSTUFF_COVERS").expect("MIXINSTUFF_COVERS lists image files");
         for path in std::env::split_paths(&covers) {
             let img = decode(&std::fs::read(&path).unwrap()).expect("a decodable cover");
             let accent = pick_accent(&img).map(color_utils::to_css);

@@ -1,4 +1,4 @@
-1 24 "MixtapesBridge.exe.manifest"
+1 24 "MixinstuffBridge.exe.manifest"
 
 1 VERSIONINFO
 FILEVERSION 1,0,0,0
@@ -8,12 +8,12 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "FileDescription", "Mixtapes"
-            VALUE "ProductName", "Mixtapes"
+            VALUE "FileDescription", "Mixinstuff"
+            VALUE "ProductName", "Mixinstuff"
             VALUE "FileVersion", "1.0.0"
-            VALUE "CompanyName", "pocoguy"
-            VALUE "InternalName", "MixtapesBridge"
-            VALUE "OriginalFilename", "MixtapesBridge.exe"
+            VALUE "CompanyName", "matko802"
+            VALUE "InternalName", "MixinstuffBridge"
+            VALUE "OriginalFilename", "MixinstuffBridge.exe"
         END
     END
     BLOCK "VarFileInfo"

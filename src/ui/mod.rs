@@ -137,7 +137,7 @@ pub fn load_css() {
     let Some(display) = gdk::Display::default() else { return };
     // The stylesheet Python shipped as style.css, from the GResource bundle.
     let base = gtk::CssProvider::new();
-    base.load_from_resource("/com/pocoguy/muse/style.css");
+    base.load_from_resource("/io/github/matko802/mixinstuff/style.css");
     gtk::style_context_add_provider_for_display(&display, &base, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     for css in [PLAYER_BAR_CSS, COVER_VIEW_CSS, SONG_ROW_CSS] {
         let provider = gtk::CssProvider::new();

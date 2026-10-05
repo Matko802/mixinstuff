@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
-  <gresource prefix="/com/pocoguy/muse">
+  <gresource prefix="/io/github/matko802/mixinstuff">
     <file>style.css</file>
   </gresource>
-  <gresource prefix="/com/pocoguy/muse/icons">
+  <gresource prefix="/io/github/matko802/mixinstuff/icons">
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/compass2-symbolic.svg</file>
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/music-queue-symbolic.svg</file>
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/triangular-antenna-symbolic.svg</file>
@@ -13,7 +13,7 @@
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/ko-fi-symbolic.svg</file>
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/github-symbolic.svg</file>
     <file preprocess="xml-stripblanks">hicolor/scalable/actions/heart-outline-thick-symbolic.svg</file>
-    <file preprocess="xml-stripblanks">hicolor/scalable/apps/com.pocoguy.Muse.svg</file>
-    <file preprocess="xml-stripblanks">hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg</file>
+    <file preprocess="xml-stripblanks">hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg</file>
+    <file preprocess="xml-stripblanks">hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg</file>
   </gresource>
 </gresources>

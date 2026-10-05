@@ -236,7 +236,7 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
         });
     }
     // -- cache -------------------------------------------------------------
-    // Styled like Reset Mixtapes: its own group, a destructive button row.
+    // Styled like Reset Mixinstuff: its own group, a destructive button row.
     let cache_group = adw::PreferencesGroup::builder().description("Queue changes only apply to tracks that aren't cached yet").build();
     let clear_row = adw::ButtonRow::builder().title("Clear Cached Lyrics").end_icon_name("user-trash-symbolic").build();
     // The builder would replace the button class the row styles itself with.

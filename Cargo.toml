@@ -1,14 +1,14 @@
 [package]
-name = "mixtapes"
+name = "mixinstuff"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "GPL-3.0-or-later"
 description = "A modern, Linux-first YouTube Music player"
-default-run = "mixtapes"
+default-run = "mixinstuff"
 
 [[bin]]
-name = "mixtapes"
+name = "mixinstuff"
 path = "src/main.rs"
 
 [dependencies]
@@ -47,7 +47,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 anyhow = "1"
-# The download library, shared with the Python app at <music>/.mixtapes/library.db.
+# The download library, shared with the Python app at <music>/.mixinstuff/library.db.
 rusqlite = "0.40"
 # Tag and cover writing for downloaded files, what mutagen did in downloads.py.
 lofty = "0.24"
@@ -100,7 +100,7 @@ mpris-server = { version = "0.10", features = ["tokio"] }
 [build-dependencies]
 # Compiles the GResource bundle (stylesheet and icons) in build.rs.
 glib-build-tools = "0.22"
-# The icon and file details in mixtapes.exe (windows/mixtapes.rc).
+# The icon and file details in mixinstuff.exe (windows/mixinstuff.rc).
 embed-resource = "3"
 
 [profile.dev.package."*"]

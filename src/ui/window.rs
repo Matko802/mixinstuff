@@ -35,8 +35,8 @@ use crate::ui::pages::playlist::{InitialData, PlaylistPage};
 use crate::ui::player_bar::{PlayerBar, PlayerBarCallbacks};
 use crate::ui::queue_panel::QueuePanel;
 
-const APP_ID: &str = "com.pocoguy.Muse";
-const APP_NAME: &str = "Mixtapes";
+const APP_ID: &str = "io.github.matko802.Mixinstuff";
+const APP_NAME: &str = "Mixinstuff";
 const NETWORK_SETTLE: Duration = Duration::from_millis(1500);
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(600);
 const SEARCH_MIN_CHARS: usize = 3;
@@ -1256,7 +1256,7 @@ impl MainWindow {
                 Ok(Ok(Some(Link::Playlist(id)))) => w.navigate(NavRequest::Playlist { id, title: String::new(), thumb: None }),
                 Ok(Ok(Some(Link::Album(id)))) => w.navigate(NavRequest::Album { id, title: String::new(), thumb: None }),
                 Ok(Ok(Some(Link::Artist(id)))) => w.navigate(NavRequest::Artist { id: Some(id), name: String::new() }),
-                Ok(Ok(None)) => w.add_toast("Mixtapes cannot open this link"),
+                Ok(Ok(None)) => w.add_toast("Mixinstuff cannot open this link"),
                 Ok(Err(err)) => {
                     tracing::warn!(%err, text, "link did not resolve");
                     w.add_toast("Could not open the link");
@@ -2149,7 +2149,7 @@ fn build_primary_menu(window: &adw::ApplicationWindow) -> gtk::MenuButton {
     app_section.append(Some("Keyboard Shortcuts"), Some("win.shortcuts"));
     app_section.append(Some("Preferences"), Some("win.preferences"));
     app_section.append(Some("What's New"), Some("win.whats-new"));
-    app_section.append(Some("About Mixtapes"), Some("win.about"));
+    app_section.append(Some("About Mixinstuff"), Some("win.about"));
     app_section.append(Some("Quit"), Some("win.quit"));
     menu.append_section(None, &app_section);
 
@@ -2484,8 +2484,8 @@ fn install_actions(
                     .application_name(APP_NAME)
                     .developer_name("POCOGuy")
                     .version(crate::ui::release_notes::current_version())
-                    .issue_url("https://github.com/m-obeid/Mixtapes/issues")
-                    .website("https://www.pocoguy.com/#!/mixtapes")
+                    .issue_url("https://github.com/Matko802/mixinstuff/issues")
+                    .website("https://www.matko802.com/#!/mixinstuff")
                     .copyright("© 2026 POCOGuy")
                     .license_type(gtk::License::Gpl30)
                     .build()

@@ -1,20 +1,20 @@
 <div align="center">
-<img height="150" src="assets/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg" />
+<img height="150" src="assets/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg" />
 
-<h3 style="font-size: 30px"> Mixtapes </h3>
+<h3 style="font-size: 30px"> Mixinstuff </h3>
 
 A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
-<br><small>formerly known as Muse</small>
+<br><small>forked from <a href="https://github.com/m-obeid/Mixtapes">m-obeid/Mixtapes</a></small>
 
 </div>
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/m-obeid/Mixtapes)](https://github.com/m-obeid/Mixtapes/stargazers)
-[![GitHub issues](https://img.shields.io/github/issues/m-obeid/Mixtapes)](https://github.com/m-obeid/Mixtapes/issues)
-[![AUR](https://img.shields.io/aur/version/mixtapes-git)](https://aur.archlinux.org/packages/mixtapes-git)
-[![Flatpak CI](https://img.shields.io/github/actions/workflow/status/m-obeid/Mixtapes/build-flatpak.yml?label=Flatpak%20Build)](https://github.com/m-obeid/Mixtapes/actions/workflows/build-flatpak.yml)
-[![Windows Build](https://img.shields.io/github/actions/workflow/status/m-obeid/Mixtapes/build-windows.yml?label=Windows%20Build)](https://github.com/m-obeid/Mixtapes/actions/workflows/build-windows.yml)
-[![Windows Download](https://img.shields.io/badge/Windows-Download%20Installer-blue?logo=windows)](https://nightly.link/m-obeid/Mixtapes/workflows/build-windows/main/mixtapes-windows-x86_64-setup.zip)
+[![GitHub stars](https://img.shields.io/github/stars/Matko802/mixinstuff)](https://github.com/Matko802/mixinstuff/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/Matko802/mixinstuff)](https://github.com/Matko802/mixinstuff/issues)
+[![AUR](https://img.shields.io/aur/version/mixinstuff-git)](https://aur.archlinux.org/packages/mixinstuff-git)
+[![Flatpak CI](https://img.shields.io/github/actions/workflow/status/Matko802/mixinstuff/build-flatpak.yml?label=Flatpak%20Build)](https://github.com/Matko802/mixinstuff/actions/workflows/build-flatpak.yml)
+[![Windows Build](https://img.shields.io/github/actions/workflow/status/Matko802/mixinstuff/build-windows.yml?label=Windows%20Build)](https://github.com/Matko802/mixinstuff/actions/workflows/build-windows.yml)
+[![Windows Download](https://img.shields.io/badge/Windows-Download%20Installer-blue?logo=windows)](https://nightly.link/Matko802/mixinstuff/workflows/build-windows/main/mixinstuff-windows-x86_64-setup.zip)
 
 > [!NOTE]
 > This software is in alpha. Expect bugs and missing features.
@@ -23,8 +23,7 @@ A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 
 <br>
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/M8P12091FB)
-[![GitHub Sponsors](https://img.shields.io/github/sponsors/m-obeid?style=for-the-badge&logo=githubsponsors)](https://github.com/sponsors/m-obeid/)
+Upstream project by [m-obeid](https://github.com/m-obeid) — please consider [supporting him](https://github.com/sponsors/m-obeid).
 
 <br clear="both"/>
 
@@ -72,29 +71,13 @@ A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 
 ## Installation
 
-### Flatpak (Recommended)
+### Flatpak
 
-This is the recommended way to install Mixtapes on Linux, as it avoids issues with your distribution's packaging.
-
-Add the automated repository and install:
+Download the bundle from [GitHub Actions](https://github.com/Matko802/mixinstuff/actions), then:
 
 ```bash
-flatpak remote-add --user --if-not-exists mixtapes https://m-obeid.github.io/Mixtapes/mixtapes.flatpakrepo
-flatpak install --user mixtapes com.pocoguy.Muse
-```
-
-> [!NOTE]
-> If you previously installed under the old "Muse" repository name, remove the old remote first:
-> `flatpak remote-delete --user muse`
-
-<details>
-<summary>Offline bundle install</summary>
-
-Download the latest artifact from [GitHub Actions](https://github.com/m-obeid/Mixtapes/actions), then:
-
-```bash
-unzip Mixtapes-x86_64-flatpak.zip
-flatpak install --user ./Mixtapes-x86_64.flatpak
+unzip Mixinstuff-x86_64-flatpak.zip
+flatpak install --user ./Mixinstuff-x86_64.flatpak
 ```
 
 Both `x86_64` and `aarch64` builds are available.
@@ -104,7 +87,7 @@ Both `x86_64` and `aarch64` builds are available.
 ### Windows
 
 Get the installer from the
-[latest Windows build](https://nightly.link/m-obeid/Mixtapes/workflows/build-windows/main/mixtapes-windows-x86_64-setup.zip),
+[latest Windows build](https://nightly.link/Matko802/mixinstuff/workflows/build-windows/main/mixinstuff-windows-x86_64-setup.zip),
 or the portable folder from the same CI run. The installer adds the Microsoft
 Edge WebView2 Runtime, which the sign-in page needs, where Windows lacks it
 (Windows 10 LTSC, for one).
@@ -112,7 +95,7 @@ Edge WebView2 Runtime, which the sign-in page needs, where Windows lacks it
 ### AUR (Arch Linux)
 
 ```bash
-yay -S mixtapes-git
+yay -S mixinstuff-git
 ```
 
 > [!WARNING]
@@ -125,7 +108,7 @@ yay -S mixtapes-git
 > This is not extensively tested, if there are any issues to fix, please open a PR!
 
 ```
-nix run github:m-obeid/Mixtapes       # run directly from GitHub
+nix run github:Matko802/mixinstuff       # run directly from GitHub
 nix run                               # run from local checkout
 nix develop                           # enter dev shell
 ```
@@ -133,7 +116,7 @@ nix develop                           # enter dev shell
 ### From Source
 
 > [!NOTE]
-> Mixtapes is written in Rust. The original Python app was retired once the port reached feature parity.
+> Mixinstuff is written in Rust. The original Python app was retired once the port reached feature parity.
 > [ARCHITECTURE.md](ARCHITECTURE.md) describes how it is put together.
 
 <details>
@@ -163,10 +146,10 @@ sudo apt install git cargo libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev li
 </details>
 
 ```bash
-git clone https://github.com/m-obeid/Mixtapes.git
-cd Mixtapes
+git clone https://github.com/Matko802/mixinstuff.git
+cd mixinstuff
 cargo build --release
-./target/release/mixtapes
+./target/release/mixinstuff
 ```
 
 > [!NOTE]
@@ -189,9 +172,9 @@ cargo build --release
 
 ```bash
 flatpak install flathub org.gnome.Platform//50 org.gnome.Sdk//50 org.freedesktop.Sdk.Extension.node24//25.08 org.freedesktop.Sdk.Extension.rust-stable//25.08
-git clone https://github.com/m-obeid/Mixtapes.git && cd Mixtapes
-flatpak-builder --user --install --force-clean build-dir com.pocoguy.Muse.yaml
-flatpak run com.pocoguy.Muse
+git clone https://github.com/Matko802/mixinstuff.git && cd mixinstuff
+flatpak-builder --user --install --force-clean build-dir io.github.matko802.Mixinstuff.yaml
+flatpak run io.github.matko802.Mixinstuff
 ```
 
 </details>
@@ -230,23 +213,23 @@ With no credentials the Last.fm row in Preferences stays disabled and says so. L
 
 ## Authentication
 
-Mixtapes asks on first launch whether to sign in. The sign-in window is Google's own page. Once you are signed in, Mixtapes keeps its own copy of the session and clears the window's cookies.
+Mixinstuff asks on first launch whether to sign in. The sign-in window is Google's own page. Once you are signed in, Mixinstuff keeps its own copy of the session and clears the window's cookies.
 
-- **Skip it** and Mixtapes remembers. Playlists, likes, artist subscriptions and listening history then live on this device, and Home builds shelves from what you play. Sign in any time from the main menu.
+- **Skip it** and Mixinstuff remembers. Playlists, likes, artist subscriptions and listening history then live on this device, and Home builds shelves from what you play. Sign in any time from the main menu.
 - **Brand accounts:** if your library lives on a channel of your Google account, pick it under Preferences, General, Account.
-- **Sign out** from the main menu or Preferences. Reset Mixtapes under Preferences, Advanced signs out and runs the setup again.
+- **Sign out** from the main menu or Preferences. Reset Mixinstuff under Preferences, Advanced signs out and runs the setup again.
 
-The session is stored in `headers_auth.json` in the data folder (`~/.local/share/muse`, or `~/.var/app/com.pocoguy.Muse/data/muse` for the Flatpak). Treat it like a password.
+The session is stored in `headers_auth.json` in the data folder (`~/.local/share/mixinstuff`, or `~/.var/app/io.github.matko802.Mixinstuff/data/mixinstuff` for the Flatpak). Treat it like a password.
 
 ## Opening Links
 
-Mixtapes opens YouTube and YouTube Music links. Songs play, and playlists, albums and artists open their page.
+Mixinstuff opens YouTube and YouTube Music links. Songs play, and playlists, albums and artists open their page.
 
 - Paste a link into the search field.
-- Run `mixtapes <link>`. A running Mixtapes takes the link.
-- Open a `mixtapes://open?url=<link>` link. Mixtapes registers the `mixtapes://` scheme, so any app or browser hands these over.
+- Run `mixinstuff <link>`. A running Mixinstuff takes the link.
+- Open a `mixtapes://open?url=<link>` link. Mixinstuff registers the `mixinstuff://` scheme, so any app or browser hands these over.
 
-To open YouTube Music pages from your browser, install the [Open in Mixtapes](https://raw.githubusercontent.com/m-obeid/Mixtapes/main/extras/open-in-mixtapes.user.js) userscript with [Violentmonkey](https://violentmonkey.github.io/) or Tampermonkey. A song, playlist, album or artist page you open in the browser goes straight to Mixtapes. Browsing within the site stays in the browser, and an "Open in Mixtapes" button hands over the page you are on. The script's menu switches the automatic handover off. The browser asks once before it lets a page open Mixtapes.
+To open YouTube Music pages from your browser, install the [Open in Mixinstuff](https://raw.githubusercontent.com/Matko802/mixinstuff/main/extras/open-in-mixinstuff.user.js) userscript with [Violentmonkey](https://violentmonkey.github.io/) or Tampermonkey. A song, playlist, album or artist page you open in the browser goes straight to Mixinstuff. Browsing within the site stays in the browser, and an "Open in Mixtapes" button hands over the page you are on. The script's menu switches the automatic handover off. The browser asks once before it lets a page open Mixtapes.
 
 Your desktop sends every `https://` link to the browser and has no way to hand one site to another app, so links clicked outside the browser still open there first.
 
@@ -273,7 +256,7 @@ Your desktop sends every `https://` link to the browser and has no way to hand o
 |   ✅️   | **MPRIS Support**            | Control playback from system media controls                                                                                                                                                                                                                                                  |
 |   ✅️   | **Download Support**         | Download tracks for offline playback, even as local files                                                                                                                                                                                                                                    |
 |   ✅️   | **Radio / Mixes**            | Start a radio station from a song, album, playlist, or artist                                                                                                                                                                                                                                |
-|   ✅️   | **Link Handling**            | Open YouTube Music links from the search field, the command line, `mixtapes://` links or the browser userscript                                                                                                                                                                              |
+|   ✅️   | **Link Handling**            | Open YouTube Music links from the search field, the command line, `mixinstuff://` links or the browser userscript                                                                                                                                                                              |
 |   ✅️   | **Dedicated Data Directory** | Cookies, cache, etc. in a dedicated directory                                                                                                                                                                                                                                                |
 |   ✅️   | **Background Playback**      | Music keeps playing when the window is closed                                                                                                                                                                                                                                                |
 |   ✅️   | **Setup & Release Notes**    | First-run setup wizard and a What's New dialog after updates                                                                                                                                                                                                                                 |
@@ -283,14 +266,14 @@ Your desktop sends every `https://` link to the browser and has no way to hand o
 |   ✅️   | **Discord RPC**              | Show your current track on Discord<br>✅️ Linux<br>✅️ Windows                                                                                                                                                                                                                                 |
 |   ✅️   | **Lyrics**                   | Synchronized lyrics using a bunch of providers (Apple Music, BetterLyrics, BiniLyrics, NetEase, LRCLIB, native YT Music)<br>✅️ Reorderable provider search queue<br>✅️ Second line: romanization, translation or background vocals<br>✅️ Word-level karaoke timing with duration-aware fades |
 |   ✅️   | **Rust Rewrite**             | Rewritten in Rust for speed and memory use; the Python app is retired                                                                                                                                                                                                                        |
-|   ✅️   | **AUR**                      | Available as `mixtapes-git`                                                                                                                                                                                                                                                                  |
+|   ✅️   | **AUR**                      | Available as `mixinstuff-git`                                                                                                                                                                                                                                                                  |
 |   ☑️   | **Flatpak**                  | ✅️ Flatpak build (x86_64 and aarch64)<br>✅️ App icon<br>🔜 Flathub release                                                                                                                                                                                                                    |
 |   ☑️   | **Nix**                      | Flake builds; not extensively tested                                                                                                                                                                                                                                                         |
 |   ✅️   | **Windows**                  | Installer and portable builds from CI, with media controls, tray and sign-in                                                                                                                                                                                                                 |
 |   🔜   | **macOS**                    | Can build it for macOS, just need to test, there's a PR for auto-builds.                                                                                                                                                                                                                     |
 |   🔜   | **GNOME Circle**             | Still considering it, might not happen                                                                                                                                                                                                                                                       |
 
-Have an idea or found a bug? [Open an issue!](https://github.com/m-obeid/Mixtapes/issues)
+Have an idea or found a bug? [Open an issue!](https://github.com/Matko802/mixinstuff/issues)
 
 ## Contributing
 

@@ -1,40 +1,40 @@
 // ==UserScript==
-// @name         Open in Mixtapes
-// @namespace    https://github.com/m-obeid/Mixtapes
+// @name         Open in Mixinstuff
+// @namespace    https://github.com/Matko802/mixinstuff
 // @version      1.0.0
-// @description  Hand the YouTube Music page you are on to Mixtapes: songs play, playlists, albums and artists open.
+// @description  Hand the YouTube Music page you are on to Mixinstuff: songs play, playlists, albums and artists open.
 // @match        https://music.youtube.com/*
 // @grant        GM_registerMenuCommand
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @run-at       document-idle
-// @downloadURL  https://raw.githubusercontent.com/m-obeid/Mixtapes/main/extras/open-in-mixtapes.user.js
-// @updateURL    https://raw.githubusercontent.com/m-obeid/Mixtapes/main/extras/open-in-mixtapes.user.js
+// @downloadURL  https://raw.githubusercontent.com/Matko802/mixinstuff/main/extras/open-in-mixinstuff.user.js
+// @updateURL    https://raw.githubusercontent.com/Matko802/mixinstuff/main/extras/open-in-mixinstuff.user.js
 // ==/UserScript==
 
 (function () {
   "use strict";
 
-  // Pages Mixtapes opens. Home, Explore and search stay in the browser.
+  // Pages Mixinstuff opens. Home, Explore and search stay in the browser.
   const OPENABLE = /^\/(watch|playlist|browse\/(MPREb|VL|UC)|channel\/|@)/;
   const AUTO_KEY = "autoOpen";
 
   const openable = () => OPENABLE.test(location.pathname);
 
-  // The browser asks once whether to allow mixtapes:// links, then remembers.
-  function openInMixtapes() {
+  // The browser asks once whether to allow mixinstuff:// links, then remembers.
+  function openInMixinstuff() {
     const url = new URL(location.href);
-    // Playback position means nothing to Mixtapes, and the share tag is noise.
+    // Playback position means nothing to Mixinstuff, and the share tag is noise.
     url.searchParams.delete("t");
     url.searchParams.delete("si");
-    location.href = "mixtapes://open?url=" + encodeURIComponent(url.toString());
+    location.href = "mixinstuff://open?url=" + encodeURIComponent(url.toString());
   }
 
   function button() {
     const b = document.createElement("button");
-    b.id = "open-in-mixtapes";
-    b.textContent = "Open in Mixtapes";
-    b.title = "Open this page in Mixtapes";
+    b.id = "open-in-mixinstuff";
+    b.textContent = "Open in Mixinstuff";
+    b.title = "Open this page in Mixinstuff";
     Object.assign(b.style, {
       position: "fixed",
       right: "16px",
@@ -49,7 +49,7 @@
       cursor: "pointer",
       boxShadow: "0 2px 8px rgba(0, 0, 0, 0.4)",
     });
-    b.addEventListener("click", openInMixtapes);
+    b.addEventListener("click", openInMixinstuff);
     document.body.appendChild(b);
     return b;
   }
@@ -67,16 +67,16 @@
     lastPath = location.pathname + location.search;
     // Automatic handover only on a page opened from outside, not on every click inside the site.
     if (first && openable() && GM_getValue(AUTO_KEY, true)) {
-      openInMixtapes();
+      openInMixinstuff();
     }
   }
   setInterval(onNavigate, 500);
   onNavigate();
 
-  GM_registerMenuCommand("Open in Mixtapes", openInMixtapes);
-  GM_registerMenuCommand("Toggle opening links in Mixtapes automatically", () => {
+  GM_registerMenuCommand("Open in Mixinstuff", openInMixinstuff);
+  GM_registerMenuCommand("Toggle opening links in Mixinstuff automatically", () => {
     const next = !GM_getValue(AUTO_KEY, true);
     GM_setValue(AUTO_KEY, next);
-    alert(next ? "Links to songs, playlists, albums and artists now open in Mixtapes." : "Links now stay in the browser. The button still hands a page over.");
+    alert(next ? "Links to songs, playlists, albums and artists now open in Mixinstuff." : "Links now stay in the browser. The button still hands a page over.");
   });
 })();

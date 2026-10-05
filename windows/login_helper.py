@@ -1,13 +1,13 @@
 """
 Standalone YouTube Music login helper for Windows.
 Uses Edge WebView2 via pywebview to capture auth cookies,
-then writes them to a JSON file for Mixtapes to import.
+then writes them to a JSON file for Mixinstuff to import.
 
 Usage:
   login_helper.exe [--output PATH]
 
 Writes captured headers JSON to:
-  --output PATH   (default: %LOCALAPPDATA%/Mixtapes/login_headers.json)
+  --output PATH   (default: %LOCALAPPDATA%/Mixinstuff/login_headers.json)
 """
 
 import json
@@ -21,13 +21,13 @@ OUTPUT_PATH = None
 
 
 def get_default_output():
-    # Match the app's auth path: GLib.get_user_data_dir() + "/muse/headers_auth.json"
-    # On Windows: %LOCALAPPDATA%/muse/headers_auth.json
-    # On Linux: ~/.local/share/muse/headers_auth.json
+    # Match the app's auth path: GLib.get_user_data_dir() + "/mixinstuff/headers_auth.json"
+    # On Windows: %LOCALAPPDATA%/mixinstuff/headers_auth.json
+    # On Linux: ~/.local/share/mixinstuff/headers_auth.json
     appdata = os.environ.get("LOCALAPPDATA", "")
     if not appdata:
         appdata = os.path.join(os.path.expanduser("~"), ".local", "share")
-    d = os.path.join(appdata, "muse")
+    d = os.path.join(appdata, "mixinstuff")
     os.makedirs(d, exist_ok=True)
     return os.path.join(d, "headers_auth.json")
 
@@ -153,7 +153,7 @@ def main():
             OUTPUT_PATH = args[i + 1]
 
     window = webview.create_window(
-        "Mixtapes - Login to YouTube Music",
+        "Mixinstuff - Login to YouTube Music",
         "https://accounts.google.com/ServiceLogin?ltmpl=music&service=youtube"
         "&uilel=3&passive=true"
         "&continue=https%3A%2F%2Fmusic.youtube.com%2Flibrary",

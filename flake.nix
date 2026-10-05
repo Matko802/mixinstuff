@@ -1,5 +1,5 @@
 {
-  description = "Mixtapes, a Linux-first YouTube Music player written in Rust";
+  description = "Mixinstuff, a Linux-first YouTube Music player written in Rust";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -11,7 +11,7 @@
       let
         pkgs = import nixpkgs { inherit system; };
 
-        version = pkgs.lib.pipe (self + "/com.pocoguy.Muse.metainfo.xml") [
+        version = pkgs.lib.pipe (self + "/io.github.matko802.Mixinstuff.metainfo.xml") [
           builtins.readFile
           (builtins.match ".*<releases>[^<]*<release version=\"([^\"]+)\"[^>]*>.*")
           builtins.head
@@ -40,8 +40,8 @@
           }.${system};
         };
 
-        mixtapes = pkgs.rustPlatform.buildRustPackage {
-          pname = "mixtapes";
+        mixinstuff = pkgs.rustPlatform.buildRustPackage {
+          pname = "mixinstuff";
           inherit version;
           src = self;
           cargoLock.lockFile = ./Cargo.lock;
@@ -69,11 +69,10 @@
           doCheck = false;
 
           postInstall = ''
-            ln -s mixtapes $out/bin/muse
-            install -Dm644 com.pocoguy.Muse.desktop $out/share/applications/com.pocoguy.Muse.desktop
-            install -Dm644 com.pocoguy.Muse.metainfo.xml $out/share/metainfo/com.pocoguy.Muse.metainfo.xml
-            install -Dm644 assets/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg $out/share/icons/hicolor/scalable/apps/com.pocoguy.Muse.svg
-            install -Dm644 assets/icons/hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg $out/share/icons/hicolor/symbolic/apps/com.pocoguy.Muse-symbolic.svg
+            install -Dm644 io.github.matko802.Mixinstuff.desktop $out/share/applications/io.github.matko802.Mixinstuff.desktop
+            install -Dm644 io.github.matko802.Mixinstuff.metainfo.xml $out/share/metainfo/io.github.matko802.Mixinstuff.metainfo.xml
+            install -Dm644 assets/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg $out/share/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg
+            install -Dm644 assets/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg $out/share/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg
           '';
 
           preFixup = ''
@@ -82,17 +81,17 @@
 
           meta = {
             description = "A modern, Linux-first YouTube Music player";
-            homepage = "https://github.com/m-obeid/Mixtapes";
+            homepage = "https://github.com/Matko802/mixinstuff";
             license = pkgs.lib.licenses.gpl3Plus;
-            mainProgram = "mixtapes";
+            mainProgram = "mixinstuff";
             platforms = pkgs.lib.platforms.linux;
           };
         };
       in {
-        packages.default = mixtapes;
+        packages.default = mixinstuff;
 
         devShells.default = pkgs.mkShell {
-          inputsFrom = [ mixtapes ];
+          inputsFrom = [ mixinstuff ];
           packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt ] ++ runtimeTools;
           # GStreamer finds its plugins through this outside a wrapped binary.
           GST_PLUGIN_SYSTEM_PATH_1_0 = pkgs.lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" gstPlugins;
