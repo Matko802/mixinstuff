@@ -107,7 +107,7 @@ impl Wizard {
     }
 
     fn welcome_page(self: &Rc<Self>) -> adw::NavigationPage {
-        let status = self.status(crate::APP_ID, "Welcome to Mixinstuff", "");
+        let status = self.status(crate::APP_ID, "Welcome to Musishark", "");
         let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
         let start = self.pill("Get Started", true);
         let weak = Rc::downgrade(self);
@@ -192,7 +192,7 @@ impl Wizard {
     }
 
     fn channel_page(self: &Rc<Self>, accounts: Vec<crate::net::ytmusic::Account>) -> adw::NavigationPage {
-        let status = self.status("avatar-default-symbolic", "Which Channel?", "Your Google account has more than one channel. Pick the one whose library Mixinstuff should show. You can change this under Preferences.");
+        let status = self.status("avatar-default-symbolic", "Which Channel?", "Your Google account has more than one channel. Pick the one whose library Musishark should show. You can change this under Preferences.");
         let group = adw::PreferencesGroup::new();
         let current = self.ctx.net.client().channel();
         for account in accounts {
@@ -343,8 +343,8 @@ impl Wizard {
             dialog.close();
         });
         column.append(&start);
-        // Mixinstuff and my other projects are free. A quiet line and two links, no panel.
-        column.append(&gtk::Label::builder().label("Mixinstuff is free. If you like it, you can support my work.").css_classes(["dim-label"]).wrap(true).justify(gtk::Justification::Center).margin_top(18).build());
+        // Musishark and my other projects are free. A quiet line and two links, no panel.
+        column.append(&gtk::Label::builder().label("Musishark is free. If you like it, you can support my work.").css_classes(["dim-label"]).wrap(true).justify(gtk::Justification::Center).margin_top(18).build());
         column.append(&release_notes::donate_buttons());
         status.set_child(Some(&column));
         self.page("done", "Done", &status)

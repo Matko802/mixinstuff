@@ -218,9 +218,9 @@ impl Fixtures {
         dir.is_dir().then_some(Self { dir })
     }
 
-    /// Where fixtures live: `$MIXINSTUFF_FIXTURES`, else `fixtures/innertube`.
+    /// Where fixtures live: `$MUSISHARK_FIXTURES`, else `fixtures/innertube`.
     pub fn dir() -> PathBuf {
-        match std::env::var_os("MIXINSTUFF_FIXTURES") {
+        match std::env::var_os("MUSISHARK_FIXTURES") {
             Some(dir) => PathBuf::from(dir),
             None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/innertube"),
         }

@@ -17,7 +17,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for FadeEdgesBin {
-        const NAME: &'static str = "MixinstuffFadeEdgesBin";
+        const NAME: &'static str = "MusisharkFadeEdgesBin";
         type Type = super::FadeEdgesBin;
         type ParentType = gtk::Box;
     }

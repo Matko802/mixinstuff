@@ -12,9 +12,9 @@ use crate::App;
 use crate::ui::preferences::{pref_bool, save};
 use crate::ui::window::MainWindow;
 
-const METAINFO: &str = include_str!("../../io.github.matko802.Mixinstuff.metainfo.xml");
+const METAINFO: &str = include_str!("../../io.github.matko802.Musishark.metainfo.xml");
 pub const KOFI_URL: &str = "https://ko-fi.com/M8P12091FB";
-pub const RELEASES_URL: &str = "https://github.com/Matko802/mixinstuff/releases";
+pub const RELEASES_URL: &str = "https://github.com/Matko802/musishark/releases";
 pub const SPONSORS_URL: &str = "https://github.com/sponsors/m-obeid";
 /// Pref keys shared with the onboarding wizard.
 pub const SHOW_PREF: &str = "show_release_notes";
@@ -169,8 +169,8 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
 /// The banner under the notes. Off with the `show_donation_prompt` pref.
 fn donation_banner() -> gtk::Box {
     let banner = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).css_classes(["donation-banner"]).build();
-    banner.append(&gtk::Label::builder().label("This version of Mixinstuff was made possible by users like you!").css_classes(["title-2"]).wrap(true).justify(gtk::Justification::Center).build());
-    banner.append(&gtk::Label::builder().label("I love making Mixinstuff and my other projects, but I can't do it without help. Support my work with a donation:").wrap(true).justify(gtk::Justification::Center).build());
+    banner.append(&gtk::Label::builder().label("This version of Musishark was made possible by users like you!").css_classes(["title-2"]).wrap(true).justify(gtk::Justification::Center).build());
+    banner.append(&gtk::Label::builder().label("I love making Musishark and my other projects, but I can't do it without help. Support my work with a donation:").wrap(true).justify(gtk::Justification::Center).build());
     let buttons = donate_buttons();
     buttons.set_margin_top(6);
     banner.append(&buttons);

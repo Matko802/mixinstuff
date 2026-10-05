@@ -1,17 +1,17 @@
-app-id: io.github.matko802.Mixinstuff
+app-id: io.github.matko802.Musishark
 runtime: org.gnome.Platform
 runtime-version: "50"
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.node24
   - org.freedesktop.Sdk.Extension.rust-stable
-command: mixinstuff
+command: musishark
 build-options:
   append-path: /usr/lib/sdk/node24/bin:/usr/lib/sdk/rust-stable/bin
   env:
     NODEJS_DIR: /usr/lib/sdk/node24
     FLATPAK_ENABLE_SDK_EXT: node24,rust-stable
-    CARGO_HOME: /run/build/mixinstuff/cargo
+    CARGO_HOME: /run/build/musishark/cargo
   build-args:
     - --share=network
 finish-args:
@@ -47,7 +47,7 @@ modules:
       - pip3 install --prefix=${FLATPAK_DEST} --no-cache-dir "yt-dlp-ejs"
     sources: []
 
-  - name: mixinstuff
+  - name: musishark
     buildsystem: simple
     build-commands:
       # The stylesheet and the icons are compiled into the binary by build.rs,
@@ -55,11 +55,11 @@ modules:
       # under the PO-token minter come over the network, which build-args
       # already allows for this manifest.
       - cargo build --release --locked
-      - install -Dm755 target/release/mixinstuff ${FLATPAK_DEST}/bin/mixinstuff
-      - install -Dm644 io.github.matko802.Mixinstuff.desktop ${FLATPAK_DEST}/share/applications/io.github.matko802.Mixinstuff.desktop
-      - install -Dm644 io.github.matko802.Mixinstuff.metainfo.xml ${FLATPAK_DEST}/share/metainfo/io.github.matko802.Mixinstuff.metainfo.xml
-      - install -Dm644 assets/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg
-      - install -Dm644 assets/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg ${FLATPAK_DEST}/share/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg
+      - install -Dm755 target/release/musishark ${FLATPAK_DEST}/bin/musishark
+      - install -Dm644 io.github.matko802.Musishark.desktop ${FLATPAK_DEST}/share/applications/io.github.matko802.Musishark.desktop
+      - install -Dm644 io.github.matko802.Musishark.metainfo.xml ${FLATPAK_DEST}/share/metainfo/io.github.matko802.Musishark.metainfo.xml
+      - install -Dm644 assets/icons/hicolor/scalable/apps/io.github.matko802.Musishark.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/io.github.matko802.Musishark.svg
+      - install -Dm644 assets/icons/hicolor/symbolic/apps/io.github.matko802.Musishark-symbolic.svg ${FLATPAK_DEST}/share/icons/hicolor/symbolic/apps/io.github.matko802.Musishark-symbolic.svg
     sources:
       # The checked-out tree, so CI builds the commit it was invoked on.
       - type: dir

@@ -53,12 +53,12 @@ pub fn raise_fd_limit() {
 pub fn set_app_user_model_id() {
     #[cfg(windows)]
     // SAFETY: a static NUL-terminated string, set before any window exists.
-    if let Err(err) = unsafe { windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(windows::core::w!("io.github.matko802.Mixinstuff")) } {
+    if let Err(err) = unsafe { windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(windows::core::w!("io.github.matko802.Musishark")) } {
         tracing::warn!(%err, "AppUserModelID not set");
     }
 }
 
-/// Make mixinstuff:// links open this exe on Windows, for the current user. The
+/// Make musishark:// links open this exe on Windows, for the current user. The
 /// installer registers the same keys; doing it here too covers the portable
 /// build and a moved install. The link reaches the running window through
 /// GApplication's open, as on Linux.
@@ -69,14 +69,14 @@ pub fn register_link_scheme() {
         let exe = exe.display().to_string();
         let command = format!("\"{exe}\" \"%1\"");
         let values: [(&str, Option<&str>, &str); 4] = [
-            (r"Software\Classes\mixinstuff", None, "URL:Mixinstuff link"),
-            (r"Software\Classes\mixinstuff", Some("URL Protocol"), ""),
-            (r"Software\Classes\mixinstuff\DefaultIcon", None, &exe),
-            (r"Software\Classes\mixinstuff\shell\open\command", None, &command),
+            (r"Software\Classes\musishark", None, "URL:Musishark link"),
+            (r"Software\Classes\musishark", Some("URL Protocol"), ""),
+            (r"Software\Classes\musishark\DefaultIcon", None, &exe),
+            (r"Software\Classes\musishark\shell\open\command", None, &command),
         ];
         for (key, name, value) in values {
             if let Err(err) = set_registry_string(key, name, value) {
-                tracing::warn!(%err, key, "mixinstuff:// link registration failed");
+                tracing::warn!(%err, key, "musishark:// link registration failed");
                 return;
             }
         }
@@ -101,7 +101,7 @@ fn set_registry_string(key: &str, name: Option<&str>, value: &str) -> windows::c
 }
 
 /// Put the install's own folder first on PATH on Windows.
-/// yt-dlp looks up node.exe and ffmpeg.exe on PATH, and the installer puts them beside mixinstuff.exe.
+/// yt-dlp looks up node.exe and ffmpeg.exe on PATH, and the installer puts them beside musishark.exe.
 pub fn prefer_bundled_programs() {
     #[cfg(windows)]
     {
@@ -210,7 +210,7 @@ pub fn init_logging(paths: &Paths) {
 }
 
 /// Windows release builds have no console, so the log also goes to
-/// %LOCALAPPDATA%\muse\mixinstuff.log. Appended to, not recreated: a second
+/// %LOCALAPPDATA%\muse\musishark.log. Appended to, not recreated: a second
 /// launch runs this before handing over to the first, and truncating would
 /// cut the running instance's log. It starts over past LOG_FILE_LIMIT.
 #[cfg(windows)]
@@ -220,7 +220,7 @@ where
 {
     const LOG_FILE_LIMIT: u64 = 5 * 1024 * 1024;
     // The data folder, not the cache: GLib puts that in INetCache on Windows.
-    let path = paths.data_dir.join("mixinstuff.log");
+    let path = paths.data_dir.join("musishark.log");
     if std::fs::metadata(&path).is_ok_and(|m| m.len() > LOG_FILE_LIMIT) {
         let _ = std::fs::remove_file(&path);
     }
@@ -239,7 +239,7 @@ type FilterHandle = tracing_subscriber::reload::Handle<EnvFilter, tracing_subscr
 static FILTER: std::sync::OnceLock<FilterHandle> = std::sync::OnceLock::new();
 
 fn filter_for(debug: bool) -> &'static str {
-    if debug { "mixinstuff=debug,info" } else { "mixinstuff=info,warn" }
+    if debug { "musishark=debug,info" } else { "musishark=info,warn" }
 }
 
 pub fn debug_logs(paths: &Paths) -> bool {

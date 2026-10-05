@@ -7,11 +7,11 @@ use serde_json::{Map, Value};
 
 #[derive(Clone, Debug)]
 pub struct Paths {
-    /// $XDG_DATA_HOME/mixinstuff
+    /// $XDG_DATA_HOME/musishark
     pub data_dir: PathBuf,
-    /// $XDG_CACHE_HOME/mixinstuff
+    /// $XDG_CACHE_HOME/musishark
     pub cache_dir: PathBuf,
-    /// $XDG_CACHE_HOME/mixinstuff/streams, one JSON file per video id.
+    /// $XDG_CACHE_HOME/musishark/streams, one JSON file per video id.
     pub stream_cache_dir: PathBuf,
     /// Browser headers captured at login.
     pub auth_file: PathBuf,
@@ -19,15 +19,15 @@ pub struct Paths {
     pub prefs_file: PathBuf,
     /// Developer config (debug_logs).
     pub config_file: PathBuf,
-    /// Where downloads live, when something other than ~/Music/Mixinstuff.
-    /// Tests set it, and MIXINSTUFF_MUSIC_DIR sets it for a demo run.
+    /// Where downloads live, when something other than ~/Music/Musishark.
+    /// Tests set it, and MUSISHARK_MUSIC_DIR sets it for a demo run.
     music_override: Option<PathBuf>,
 }
 
 impl Paths {
     pub fn discover() -> Self {
-        let data_dir = glib::user_data_dir().join("mixinstuff");
-        let cache_dir = glib::user_cache_dir().join("mixinstuff");
+        let data_dir = glib::user_data_dir().join("musishark");
+        let cache_dir = glib::user_cache_dir().join("musishark");
         let stream_cache_dir = cache_dir.join("streams");
         for dir in [&data_dir, &stream_cache_dir] {
             if let Err(err) = std::fs::create_dir_all(dir) {
@@ -41,7 +41,7 @@ impl Paths {
             data_dir,
             cache_dir,
             stream_cache_dir,
-            music_override: std::env::var_os("MIXINSTUFF_MUSIC_DIR").map(PathBuf::from),
+            music_override: std::env::var_os("MUSISHARK_MUSIC_DIR").map(PathBuf::from),
         }
     }
 
@@ -59,16 +59,16 @@ impl Paths {
             stream_cache_dir: cache_dir.join("streams"),
             data_dir,
             cache_dir,
-            music_override: Some(root.join("Music/Mixinstuff")),
+            music_override: Some(root.join("Music/Musishark")),
         }
     }
 
-    /// ~/Music/Mixinstuff, where downloads and mirrored playlist covers live.
+    /// ~/Music/Musishark, where downloads and mirrored playlist covers live.
     pub fn music_dir(&self) -> PathBuf {
         if let Some(dir) = &self.music_override {
             return dir.clone();
         }
-        glib::user_special_dir(glib::UserDirectory::Music).unwrap_or_else(|| glib::home_dir().join("Music")).join("Mixinstuff")
+        glib::user_special_dir(glib::UserDirectory::Music).unwrap_or_else(|| glib::home_dir().join("Music")).join("Musishark")
     }
 
     /// <music_dir>/Playlists/<title>.jpg, a playlist's mirrored cover. None for an empty title.

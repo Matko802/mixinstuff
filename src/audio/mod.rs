@@ -106,7 +106,7 @@ pub fn spawn() -> anyhow::Result<(AudioHandle, AudioEvents)> {
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<anyhow::Result<()>>();
 
     let thread = std::thread::Builder::new()
-        .name("mixinstuff-audio".into())
+        .name("musishark-audio".into())
         .spawn(move || run_loop(cmd_rx, control_tx, telemetry_tx, ready_tx))?;
 
     ready_rx.recv().unwrap_or_else(|_| Err(anyhow::anyhow!("audio thread died during setup")))?;
@@ -177,7 +177,7 @@ fn run_loop(
         // thread. Build the source by hand and attach it to this thread's context.
         {
             let engine = glib::thread_guard::ThreadGuard::new(engine.clone());
-            let ticker = glib::timeout_source_new(POSITION_TICK, Some("mixinstuff-position-tick"), glib::Priority::DEFAULT, move || {
+            let ticker = glib::timeout_source_new(POSITION_TICK, Some("musishark-position-tick"), glib::Priority::DEFAULT, move || {
                 engine.get_ref().tick();
                 glib::ControlFlow::Continue
             });
@@ -698,14 +698,14 @@ mod tests {
     #[ignore]
     fn a_song_with_cover_art_plays_without_a_picture_decoder() {
         gst::init().unwrap();
-        let music = glib::user_special_dir(glib::UserDirectory::Music).unwrap().join("Mixinstuff");
+        let music = glib::user_special_dir(glib::UserDirectory::Music).unwrap().join("Musishark");
         fn first_audio(dir: &std::path::Path) -> Option<std::path::PathBuf> {
             let mut entries: Vec<_> = std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()).map(|e| e.path()).collect();
             entries.sort();
-            entries.iter().find(|p| p.extension().is_some_and(|x| x == "mp3" || x == "opus" || x == "m4a")).cloned().or_else(|| entries.iter().filter(|p| p.is_dir() && !p.ends_with(".mixinstuff")).find_map(|d| first_audio(d)))
+            entries.iter().find(|p| p.extension().is_some_and(|x| x == "mp3" || x == "opus" || x == "m4a")).cloned().or_else(|| entries.iter().filter(|p| p.is_dir() && !p.ends_with(".musishark")).find_map(|d| first_audio(d)))
         }
-        // MIXINSTUFF_TEST_MEDIA points it at any file, such as one with a video track.
-        let file = std::env::var_os("MIXINSTUFF_TEST_MEDIA").map(std::path::PathBuf::from).or_else(|| first_audio(&music)).expect("a downloaded song");
+        // MUSISHARK_TEST_MEDIA points it at any file, such as one with a video track.
+        let file = std::env::var_os("MUSISHARK_TEST_MEDIA").map(std::path::PathBuf::from).or_else(|| first_audio(&music)).expect("a downloaded song");
         println!("playing {}", file.display());
 
         let playbin = gst::ElementFactory::make("playbin").build().unwrap();

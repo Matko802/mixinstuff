@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn MIXINSTUFF_DEMO_SAMPLE output into a profile.
+"""Turn MUSISHARK_DEMO_SAMPLE output into a profile.
 
 usage: symbolize_samples.py PREFIX ROOTMAP... [--top N] [--focus NAME] [--debug-dir DIR]
 

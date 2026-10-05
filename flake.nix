@@ -1,5 +1,5 @@
 {
-  description = "Mixinstuff, a Linux-first YouTube Music player written in Rust";
+  description = "Musishark, a Linux-first YouTube Music player written in Rust";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -10,13 +10,13 @@
   outputs = { self, nixpkgs, utils, crane }:
     {
         overlays.default = final: _prev: {
-          mixinstuff = self.packages.${final.stdenv.hostPlatform.system}.default;
+          musishark = self.packages.${final.stdenv.hostPlatform.system}.default;
         };
     } // utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
 
-        version = pkgs.lib.pipe (self + "/io.github.matko802.Mixinstuff.metainfo.xml") [
+        version = pkgs.lib.pipe (self + "/io.github.matko802.Musishark.metainfo.xml") [
           builtins.readFile
           (builtins.match ".*<releases>[^<]*<release version=\"([^\"]+)\"[^>]*>.*")
           builtins.head
@@ -54,13 +54,13 @@
             (craneLib.fileset.commonCargoSources ./.)
             ./resources
             ./assets
-            ./io.github.matko802.Mixinstuff.metainfo.xml
+            ./io.github.matko802.Musishark.metainfo.xml
           ];
         };
 
         commonArgs = {
           inherit src;
-          pname = "mixinstuff";
+          pname = "musishark";
           inherit version;
           strictDeps = true;
 
@@ -93,14 +93,14 @@
         # Dependencies compiled once; source edits only rebuild our crates.
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
-        mixinstuff = craneLib.buildPackage (commonArgs // {
+        musishark = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
 
           postInstall = ''
-            install -Dm644 ${self}/io.github.matko802.Mixinstuff.desktop $out/share/applications/io.github.matko802.Mixinstuff.desktop
-            install -Dm644 ${self}/io.github.matko802.Mixinstuff.metainfo.xml $out/share/metainfo/io.github.matko802.Mixinstuff.metainfo.xml
-            install -Dm644 ${self}/assets/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg $out/share/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg
-            install -Dm644 ${self}/assets/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg $out/share/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg
+            install -Dm644 ${self}/io.github.matko802.Musishark.desktop $out/share/applications/io.github.matko802.Musishark.desktop
+            install -Dm644 ${self}/io.github.matko802.Musishark.metainfo.xml $out/share/metainfo/io.github.matko802.Musishark.metainfo.xml
+            install -Dm644 ${self}/assets/icons/hicolor/scalable/apps/io.github.matko802.Musishark.svg $out/share/icons/hicolor/scalable/apps/io.github.matko802.Musishark.svg
+            install -Dm644 ${self}/assets/icons/hicolor/symbolic/apps/io.github.matko802.Musishark-symbolic.svg $out/share/icons/hicolor/symbolic/apps/io.github.matko802.Musishark-symbolic.svg
           '';
 
           preFixup = ''
@@ -109,17 +109,17 @@
 
           meta = {
             description = "A modern, Linux-first YouTube Music player";
-            homepage = "https://github.com/Matko802/mixinstuff";
+            homepage = "https://github.com/Matko802/musishark";
             license = pkgs.lib.licenses.gpl3Plus;
-            mainProgram = "mixinstuff";
+            mainProgram = "musishark";
             platforms = pkgs.lib.platforms.linux;
           };
         });
       in {
-        packages.default = mixinstuff;
+        packages.default = musishark;
 
         devShells.default = pkgs.mkShell {
-          inputsFrom = [ mixinstuff ];
+          inputsFrom = [ musishark ];
           packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt ] ++ runtimeTools;
           # GStreamer finds its plugins through this outside a wrapped binary.
           GST_PLUGIN_SYSTEM_PATH_1_0 = pkgs.lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" gstPlugins;

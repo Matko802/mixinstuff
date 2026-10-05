@@ -24,7 +24,7 @@ const EMBEDDED_LASTFM_API_SECRET: &str = "51523d91a6e58babdb0b06b130f5ec45";
 const LASTFM_API_ROOT: &str = "https://ws.audioscrobbler.com/2.0/";
 const LASTFM_AUTH_URL: &str = "https://www.last.fm/api/auth/";
 const LISTENBRAINZ_API_ROOT: &str = "https://api.listenbrainz.org";
-const USER_AGENT: &str = "Mixinstuff (https://matko802.com/#!/mixinstuff)";
+const USER_AGENT: &str = "Musishark (https://matko802.com/#!/musishark)";
 
 /// Last.fm never takes a track under 30 seconds.
 const MIN_TRACK_LENGTH: f64 = 30.0;
@@ -232,8 +232,8 @@ impl Scrobbler {
             tx,
             http,
             paths: paths.clone(),
-            api_key: env_or("MIXINSTUFF_LASTFM_API_KEY", EMBEDDED_LASTFM_API_KEY),
-            api_secret: env_or("MIXINSTUFF_LASTFM_API_SECRET", EMBEDDED_LASTFM_API_SECRET),
+            api_key: env_or("MUSISHARK_LASTFM_API_KEY", EMBEDDED_LASTFM_API_KEY),
+            api_secret: env_or("MUSISHARK_LASTFM_API_SECRET", EMBEDDED_LASTFM_API_SECRET),
         });
         rt.spawn(this.clone().run(rx));
         if this.pending_count() > 0 {
@@ -828,8 +828,8 @@ fn ignored_listens(data: &Value) -> Vec<(String, String, String)> {
 
 fn listenbrainz_metadata(entry: &Entry) -> Value {
     let mut info = json!({
-        "media_player": "Mixinstuff",
-        "submission_client": "Mixinstuff",
+        "media_player": "Musishark",
+        "submission_client": "Musishark",
         "music_service": "music.youtube.com",
     });
     if entry.duration > 0 {

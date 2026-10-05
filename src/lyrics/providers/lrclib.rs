@@ -13,8 +13,8 @@ use crate::lyrics::model::{LyricsMatch, LyricsResult};
 
 const SOURCE: &str = "LRCLIB";
 const API: &str = "https://lrclib.net/api/";
-const USER_AGENT: &str = "Mixinstuff (https://github.com/Matko802/mixinstuff)";
-const BROWSER_USER_AGENT: &str = "Mixinstuff/1.0";
+const USER_AGENT: &str = "Musishark (https://github.com/Matko802/musishark)";
+const BROWSER_USER_AGENT: &str = "Musishark/1.0";
 /// Enough for a hit. Capping low keeps the worst case at a few seconds when the chain walks several title variants and the API is sluggish.
 const TIMEOUT: Duration = Duration::from_secs(3);
 const BROWSER_TIMEOUT: Duration = Duration::from_secs(6);

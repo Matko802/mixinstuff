@@ -126,12 +126,12 @@ mod tests {
         let api: std::sync::Arc<dyn Browse> = client.api();
         let headers = client.browser_headers().expect("a signed in session");
 
-        let title = format!("Mixinstuff upload test {}", std::process::id());
+        let title = format!("Musishark upload test {}", std::process::id());
         let file = std::env::temp_dir().join(format!("{title}.mp3"));
         let made = std::process::Command::new("ffmpeg")
             .args(["-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-metadata"])
             .arg(format!("title={title}"))
-            .args(["-metadata", "artist=Mixinstuff Test"])
+            .args(["-metadata", "artist=Musishark Test"])
             .arg(&file)
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -183,7 +183,7 @@ mod tests {
         let client = crate::net::ytmusic::YtMusic::new(&paths).unwrap();
         let api: std::sync::Arc<dyn Browse> = client.api();
         let songs = crate::net::playlists::get_upload_songs(&api).await.expect("upload songs");
-        for song in songs.iter().filter(|song| song.artist == "Mixinstuff Test") {
+        for song in songs.iter().filter(|song| song.artist == "Musishark Test") {
             let Some(entity) = song.entity_id.clone() else { continue };
             match delete_entity(&api, &entity).await {
                 Ok(()) => println!("deleted {} - {}", song.artist, song.title),

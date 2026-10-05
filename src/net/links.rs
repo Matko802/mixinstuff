@@ -22,9 +22,9 @@ pub enum Link {
 }
 
 /// The app's own link scheme. The desktop entry registers it, so the system
-/// opens `mixinstuff://open?url=<link>` here. `mixinstuff://music.youtube.com/...`
+/// opens `musishark://open?url=<link>` here. `musishark://music.youtube.com/...`
 /// reads as the same link over https.
-pub const SCHEME: &str = "mixinstuff";
+pub const SCHEME: &str = "musishark";
 
 const HOSTS: [&str; 6] = ["music.youtube.com", "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"];
 
@@ -43,7 +43,7 @@ fn parse_url(text: &str) -> Option<reqwest::Url> {
     reqwest::Url::parse(&with_scheme).ok()
 }
 
-/// What a `mixinstuff:` link carries: the `url` of `open?url=`, or the rest of
+/// What a `musishark:` link carries: the `url` of `open?url=`, or the rest of
 /// the link as an https address.
 fn unwrap_scheme(rest: &str) -> Option<reqwest::Url> {
     if rest.starts_with("open") {
@@ -138,12 +138,12 @@ mod tests {
 
     #[test]
     fn the_apps_own_scheme_carries_a_link() {
-        let wrapped = "mixinstuff://open?url=https%3A%2F%2Fmusic.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ%26list%3DPLx";
+        let wrapped = "musishark://open?url=https%3A%2F%2Fmusic.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ%26list%3DPLx";
         assert_eq!(parse(wrapped), song("dQw4w9WgXcQ", Some("PLx")));
         assert!(is_youtube_url(wrapped));
-        assert_eq!(parse("mixinstuff://music.youtube.com/browse/MPREb_abc"), Some(Link::Album("MPREb_abc".into())));
-        assert_eq!(parse("mixinstuff://open?url=mixinstuff%3A%2F%2Fopen"), None, "no link inside a link");
-        assert_eq!(parse("mixinstuff://open?url=https%3A%2F%2Fexample.com%2F"), None);
+        assert_eq!(parse("musishark://music.youtube.com/browse/MPREb_abc"), Some(Link::Album("MPREb_abc".into())));
+        assert_eq!(parse("musishark://open?url=musishark%3A%2F%2Fopen"), None, "no link inside a link");
+        assert_eq!(parse("musishark://open?url=https%3A%2F%2Fexample.com%2F"), None);
     }
 
     #[test]

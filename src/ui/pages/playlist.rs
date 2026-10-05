@@ -2440,7 +2440,7 @@ impl PlaylistPage {
                     let weak = Rc::downgrade(&p);
                     let cover_row = cover_row.clone();
                     crate::ui::crop_dialog::show(&window, pixbuf, move |cropped| {
-                        let temp = std::env::temp_dir().join(format!("mixinstuff_crop_{}.png", std::process::id()));
+                        let temp = std::env::temp_dir().join(format!("musishark_crop_{}.png", std::process::id()));
                         // YouTube shows the cover at 1024 at most, and a phone
                         // photo would otherwise be a several megabyte upload.
                         let cropped = match cropped.width().max(cropped.height()) > COVER_MAX_PIXELS {

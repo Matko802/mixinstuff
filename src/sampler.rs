@@ -5,7 +5,7 @@
 //! binary both keep frame pointers. `dump` writes the raw addresses and the
 //! memory map, which `tools/symbolize_samples.py` turns into a profile.
 //!
-//! Demo only: MIXINSTUFF_DEMO_SAMPLE=path.
+//! Demo only: MUSISHARK_DEMO_SAMPLE=path.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 

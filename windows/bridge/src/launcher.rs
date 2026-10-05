@@ -1,5 +1,5 @@
 #![windows_subsystem = "windows"]
-//! Mixinstuff Windows Launcher
+//! Musishark Windows Launcher
 //! Sets up the MSYS2 environment and launches the Python app.
 
 use std::env;
@@ -60,11 +60,11 @@ fn main() {
             use std::ffi::OsStr;
             use std::os::windows::ffi::OsStrExt;
             let msg = format!(
-                "Failed to start Mixinstuff.\n\nError: {}\n\nEnsure the runtime directory is intact.",
+                "Failed to start Musishark.\n\nError: {}\n\nEnsure the runtime directory is intact.",
                 e
             );
             let wide_msg: Vec<u16> = OsStr::new(&msg).encode_wide().chain(Some(0)).collect();
-            let wide_title: Vec<u16> = OsStr::new("Mixinstuff").encode_wide().chain(Some(0)).collect();
+            let wide_title: Vec<u16> = OsStr::new("Musishark").encode_wide().chain(Some(0)).collect();
             unsafe {
                 windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
                     std::ptr::null_mut(),

@@ -1,6 +1,6 @@
 //! The download library: one SQLite table of what is on disk.
 //!
-//! The file is `<music>/.mixinstuff/library.db`, the same database the Python
+//! The file is `<music>/.musishark/library.db`, the same database the Python
 //! app writes, so a song downloaded in either app is known to both. The
 //! `downloads` table keeps Python's columns exactly.
 //!
@@ -62,11 +62,11 @@ const LEGACY_DIR: &str = "YouTube Music";
 pub fn migrate_legacy_folder(music_dir: &Path) {
     let Some(parent) = music_dir.parent() else { return };
     let legacy = parent.join(LEGACY_DIR);
-    if !legacy.join(".mixinstuff").join("library.db").is_file() {
+    if !legacy.join(".musishark").join("library.db").is_file() {
         return;
     }
     if music_dir.exists() {
-        if music_dir.join(".mixinstuff").join("library.db").is_file() {
+        if music_dir.join(".musishark").join("library.db").is_file() {
             tracing::warn!(legacy = %legacy.display(), "both music folders hold a library, leaving the old one");
             return;
         }
@@ -88,7 +88,7 @@ pub fn migrate_legacy_folder(music_dir: &Path) {
 
 /// Point rows at the renamed folder.
 fn rewrite_paths(music_dir: &Path, old_root: &Path) {
-    let db_path = music_dir.join(".mixinstuff").join("library.db");
+    let db_path = music_dir.join(".musishark").join("library.db");
     let Ok(db) = Connection::open(&db_path) else { return };
     let sep = std::path::MAIN_SEPARATOR;
     let old_prefix = format!("{}{sep}", old_root.to_string_lossy());
@@ -117,7 +117,7 @@ impl Store {
     /// Open the library, creating the folder and table when they are missing.
     pub fn open(music_dir: &Path) -> Self {
         migrate_legacy_folder(music_dir);
-        let path = music_dir.join(".mixinstuff").join("library.db");
+        let path = music_dir.join(".musishark").join("library.db");
         let store = Self { db: Mutex::new(None), path, known: RwLock::new(HashMap::new()), verified: RwLock::new(HashMap::new()) };
         store.with_db(|db| {
             db.execute_batch(SCHEMA)?;
@@ -383,7 +383,7 @@ mod tests {
     fn the_old_music_folder_is_renamed_with_its_rows() {
         let root = tempfile::tempdir().unwrap();
         let legacy = root.path().join("YouTube Music");
-        let current = root.path().join("Mixinstuff");
+        let current = root.path().join("Musishark");
         let song = legacy.join("Artist").join("One.opus");
         std::fs::create_dir_all(song.parent().unwrap()).unwrap();
         std::fs::write(&song, b"audio").unwrap();
@@ -402,7 +402,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let legacy = root.path().join("YouTube Music");
         std::fs::create_dir_all(legacy.join("Someone Else")).unwrap();
-        Store::open(&root.path().join("Mixinstuff"));
+        Store::open(&root.path().join("Musishark"));
         assert!(legacy.is_dir(), "a folder with no library of ours stays put");
     }
 

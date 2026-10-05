@@ -72,7 +72,7 @@ mod layout_imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for CardGridLayout {
-        const NAME: &'static str = "MixinstuffCardGridLayout";
+        const NAME: &'static str = "MusisharkCardGridLayout";
         type Type = super::CardGridLayout;
         type ParentType = gtk::LayoutManager;
     }
@@ -157,7 +157,7 @@ mod grid_imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for CardGrid {
-        const NAME: &'static str = "MixinstuffCardGrid";
+        const NAME: &'static str = "MusisharkCardGrid";
         type Type = super::CardGrid;
         type ParentType = gtk::Widget;
 
@@ -227,7 +227,7 @@ mod card_layout_imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for CardLayout {
-        const NAME: &'static str = "MixinstuffCardLayout";
+        const NAME: &'static str = "MusisharkCardLayout";
         type Type = super::CardLayout;
         type ParentType = gtk::LayoutManager;
     }

@@ -1,11 +1,11 @@
 [Desktop Entry]
-Name=Mixinstuff
+Name=Musishark
 Comment=A modern, Linux-first YouTube Music player
-Exec=mixinstuff %U
-Icon=io.github.matko802.Mixinstuff
+Exec=musishark %U
+Icon=io.github.matko802.Musishark
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;Player;Music;
 Keywords=youtube;music;streaming;player;audio;
 StartupNotify=true
-MimeType=x-scheme-handler/mixinstuff;
+MimeType=x-scheme-handler/musishark;

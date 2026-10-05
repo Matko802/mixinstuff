@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.matko802.Mixinstuff</id>
+  <id>io.github.matko802.Musishark</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <name>Mixinstuff</name>
+  <name>Musishark</name>
   <summary>A modern, Linux-first YouTube Music player</summary>
 
   <description>
     <p>
-      Mixinstuff is a YouTube Music player built with GTK4 and Libadwaita for Linux.
+      Musishark is a YouTube Music player built with GTK4 and Libadwaita for Linux.
       Browse your library, search for music, create playlists, and enjoy seamless playback
       with MPRIS integration, responsive mobile-friendly design, and background playback.
     </p>
@@ -21,11 +21,11 @@
     <name>Mohamad Obeid</name>
   </developer>
 
-  <launchable type="desktop-id">io.github.matko802.Mixinstuff.desktop</launchable>
+  <launchable type="desktop-id">io.github.matko802.Musishark.desktop</launchable>
 
-  <url type="homepage">https://github.com/m-obeid/Mixinstuff</url>
-  <url type="bugtracker">https://github.com/m-obeid/Mixinstuff/issues</url>
-  <url type="vcs-browser">https://github.com/m-obeid/Mixinstuff</url>
+  <url type="homepage">https://github.com/m-obeid/Musishark</url>
+  <url type="bugtracker">https://github.com/m-obeid/Musishark/issues</url>
+  <url type="vcs-browser">https://github.com/m-obeid/Musishark</url>
   <url type="donation">https://ko-fi.com/M8P12091FB</url>
 
   <supports>
@@ -41,47 +41,47 @@
   <screenshots>
     <screenshot type="default">
       <caption>Home feed</caption>
-      <image>https://raw.githubusercontent.com/m-obeid/Mixinstuff/main/screenshots/0.png</image>
+      <image>https://raw.githubusercontent.com/m-obeid/Musishark/main/screenshots/0.png</image>
     </screenshot>
     <screenshot>
       <caption>Playlist page and open queue</caption>
-      <image>https://raw.githubusercontent.com/m-obeid/Mixinstuff/main/screenshots/1.png</image>
+      <image>https://raw.githubusercontent.com/m-obeid/Musishark/main/screenshots/1.png</image>
     </screenshot>
     <screenshot>
       <caption>Synced lyrics with open queue</caption>
-      <image>https://raw.githubusercontent.com/m-obeid/Mixinstuff/main/screenshots/2.png</image>
+      <image>https://raw.githubusercontent.com/m-obeid/Musishark/main/screenshots/2.png</image>
     </screenshot>
     <screenshot>
       <caption>Artist page</caption>
-      <image>https://raw.githubusercontent.com/m-obeid/Mixinstuff/main/screenshots/3.png</image>
+      <image>https://raw.githubusercontent.com/m-obeid/Musishark/main/screenshots/3.png</image>
     </screenshot>
     <screenshot>
       <caption>Album page</caption>
-      <image>https://raw.githubusercontent.com/m-obeid/Mixinstuff/main/screenshots/4.png</image>
+      <image>https://raw.githubusercontent.com/m-obeid/Musishark/main/screenshots/4.png</image>
     </screenshot>
     <screenshot>
       <caption>Search results</caption>
-      <image>https://raw.githubusercontent.com/m-obeid/Mixinstuff/main/screenshots/5.png</image>
+      <image>https://raw.githubusercontent.com/m-obeid/Musishark/main/screenshots/5.png</image>
     </screenshot>
     <screenshot>
       <caption>Library page in grid view</caption>
-      <image>https://raw.githubusercontent.com/m-obeid/Mixinstuff/main/screenshots/6.png</image>
+      <image>https://raw.githubusercontent.com/m-obeid/Musishark/main/screenshots/6.png</image>
     </screenshot>
     <screenshot>
       <caption>Mobile expanded player</caption>
-      <image>https://raw.githubusercontent.com/m-obeid/Mixinstuff/main/screenshots/7.png</image>
+      <image>https://raw.githubusercontent.com/m-obeid/Musishark/main/screenshots/7.png</image>
     </screenshot>
     <screenshot>
       <caption>Mobile queue</caption>
-      <image>https://raw.githubusercontent.com/m-obeid/Mixinstuff/main/screenshots/8.png</image>
+      <image>https://raw.githubusercontent.com/m-obeid/Musishark/main/screenshots/8.png</image>
     </screenshot>
     <screenshot>
       <caption>Mobile artist page</caption>
-      <image>https://raw.githubusercontent.com/m-obeid/Mixinstuff/main/screenshots/9.png</image>
+      <image>https://raw.githubusercontent.com/m-obeid/Musishark/main/screenshots/9.png</image>
     </screenshot>
     <screenshot>
       <caption>Mobile album page</caption>
-      <image>https://raw.githubusercontent.com/m-obeid/Mixinstuff/main/screenshots/10.png</image>
+      <image>https://raw.githubusercontent.com/m-obeid/Musishark/main/screenshots/10.png</image>
     </screenshot>
   </screenshots>
 
@@ -91,7 +91,7 @@
 
     <release version="2026-10-05.0" date="2026-10-05">
       <description>
-        <p>Mixinstuff is a fork of Mixtapes by m-obeid, renamed and maintained by Matko802.</p>
+        <p>Musishark is a fork of Mixtapes by m-obeid, renamed and maintained by Matko802.</p>
         <ul>
           <li>New name and identity across the app, packages and desktop integration</li>
         </ul>
@@ -99,7 +99,7 @@
     </release>
     <release version="2026-10-03.0" date="2026-10-03">
       <description>
-        <p>Mixinstuff is now written in Rust. The whole app was rebuilt from the ground up over the past weeks, with every feature of the Python version carried over, and it is faster, lighter and quicker to start in every way we could measure.</p>
+        <p>Musishark is now written in Rust. The whole app was rebuilt from the ground up over the past weeks, with every feature of the Python version carried over, and it is faster, lighter and quicker to start in every way we could measure.</p>
         <ul>
           <li>Rewritten in Rust. One native binary replaces the Python app and its interpreter, GTK bindings and package list</li>
           <li>Songs start in under a second. A new player client fetches streams directly, with yt-dlp kept only as a fallback</li>
@@ -109,7 +109,7 @@
           <li>A setup wizard on first launch: sign in with Google or skip, then pick the settings people ask about most</li>
           <li>This What's New dialog, once per update. Both it and the donation banner switch off under Preferences</li>
           <li>Playlists, likes and artist subscriptions without a Google account. They live on this device, in the library beside Downloads, and every menu that adds to a playlist offers them</li>
-          <li>Open YouTube and YouTube Music links: paste one into search, run mixinstuff with the link, or use the Open in Mixinstuff userscript in your browser. Songs play, and playlists, albums and artists open their page</li>
+          <li>Open YouTube and YouTube Music links: paste one into search, run musishark with the link, or use the Open in Musishark userscript in your browser. Songs play, and playlists, albums and artists open their page</li>
           <li>Listening history without a Google account, kept on this device</li>
           <li>Podcasts: a Podcasts page under Explore, shows that open with every episode, and shows, episodes and profiles in search and on Home</li>
           <li>A personal Home without a Google account. Quick picks, Listen again, new releases and similar artists come from what you play, like and subscribe to on this device</li>
@@ -331,7 +331,7 @@
       <description>
         <p>Discord Rich Presence support and a stack of stability fixes around fast skipping, the queue, and the explore page.</p>
         <ul>
-          <li>Discord Rich Presence: now playing track with album art, small Mixinstuff icon, and live progress bar (cross-platform: Linux, macOS, Windows)</li>
+          <li>Discord Rich Presence: now playing track with album art, small Musishark icon, and live progress bar (cross-platform: Linux, macOS, Windows)</li>
           <li>Start Radio from any playlist or album via the more menu</li>
           <li>Fast-skip stability: spamming next no longer wraps the queue back to the first track</li>
           <li>Fix: clicking a song in a playlist could silently play the first track when the click target wasn't found in the queue</li>

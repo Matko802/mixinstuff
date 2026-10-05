@@ -1,6 +1,6 @@
-# Mixinstuff: architecture
+# Musishark: architecture
 
-Mixinstuff was a Python/GTK4 app, ported to Rust one layer at a time in 2026. The
+Musishark was a Python/GTK4 app, ported to Rust one layer at a time in 2026. The
 Python sources were removed once the port reached parity and are in git history
 up to commit 180c3fe. This document keeps the references to them (`player/player.py`
 and so on) because they explain why each part of the Rust code is shaped the way it is.
@@ -22,8 +22,8 @@ The race conditions the Python code guards against by hand (stale EOS, stale yt-
 | Thread | Owns | Never touches |
 |---|---|---|
 | GTK main | `PlayerState` (GObject), `Player` controller, the queue, every widget | playbin, sockets |
-| Audio (`mixinstuff-audio`) | playbin, bus watch, position ticker | the queue, widgets, HTTP |
-| tokio workers (`mixinstuff-net`) | `reqwest::Client`, session headers, yt-dlp subprocesses, disk caches | widgets, playbin |
+| Audio (`musishark-audio`) | playbin, bus watch, position ticker | the queue, widgets, HTTP |
+| tokio workers (`musishark-net`) | `reqwest::Client`, session headers, yt-dlp subprocesses, disk caches | widgets, playbin |
 
 Rule 1: mutable playback state has exactly one owner, the `Player` on the GTK thread.
 Rule 2: the audio thread receives commands and emits events. It knows URIs and generation numbers, never tracks.
@@ -75,7 +75,7 @@ src/ui/cover.rs    load_texture plus CoverImage: async fetch and texture cache
 src/ui/like_button.rs LikeButton: click likes, hold or right-click dislikes, rates through Player
 src/ui/marquee.rs  MarqueeLabel: scrolling title
 src/ui/context_menu.rs song menu builder with sections, prefix action groups, popup at pointer
-src/demo.rs        MIXINSTUFF_DEMO queue, autoplay and in-app PNG snapshots
+src/demo.rs        MUSISHARK_DEMO queue, autoplay and in-app PNG snapshots
 src/ui/context.rs  UiContext (player, net, paths, compact flag) and Navigator
 src/ui/pages/      home, explore (feed plus search results), category, all moods, library, history
 src/ui/widgets/    scroll box, media card, song list rows, SongRow, transport, visualizer, cover picture, playing tracker
@@ -145,13 +145,13 @@ Search runs the unfiltered call plus songs, artists, community playlists and alb
 
 ## Stream resolution
 
-`StreamResolver` is the seam that replaces yt-dlp. `YtDlpResolver` shells out with the same format policy and PO-token setup the Python app uses, so playback works from day one. `StreamCache` reads and writes the exact JSON files the Python app left in `~/.cache/mixinstuff/streams`.
+`StreamResolver` is the seam that replaces yt-dlp. `YtDlpResolver` shells out with the same format policy and PO-token setup the Python app uses, so playback works from day one. `StreamCache` reads and writes the exact JSON files the Python app left in `~/.cache/musishark/streams`.
 
 `PlayerEndpointResolver` (`net/player_endpoint.rs`) sits in front of it since 2026-09-18. It posts one `player` request as the VISIONOS client, which returns direct opus URLs that need no signature, no PO token and no cookies, and serve open-ended ranges. Measured: 0.26 s to resolve and 0.84 s from click to sound, against about 6 s through yt-dlp (a Python start, seven player clients, player.js under node). It needs a visitor id, read off the music.youtube.com landing page and warmed at startup, and it probes two bytes at offset 200000 before trusting a URL, because a client YouTube gates serves only a 100 KB preview (ANDROID_VR does, tested with and without botguard tokens). Whatever VISIONOS declines, such as uploads and age-gated or private videos, goes to yt-dlp with the session as before. The idea came from limusic, which uses the same client as its first fallback.
 
 ## Verifying playback without pages
 
-`MIXINSTUFF_DEMO=1` stages a queue at startup from audio files under ~/Music (or `MIXINSTUFF_DEMO_URI`), `MIXINSTUFF_DEMO_VIDEO=<id>` adds a real YouTube track through yt-dlp, `MIXINSTUFF_DEMO_AUTOPLAY=1` presses play after three seconds, `MIXINSTUFF_DEMO_QUEUE=1` opens the sidebar, `MIXINSTUFF_DEMO_EXPAND=1` opens the expanded player, `MIXINSTUFF_DEMO_TAB` and `MIXINSTUFF_DEMO_SEARCH` pick a tab or run a live search, `MIXINSTUFF_DEMO_ACTIVATE=1` plays the first result, `MIXINSTUFF_DEMO_WIDTH=420` starts in the phone layout, `MIXINSTUFF_DEMO_LOGIN=1` opens the sign-in dialog and snapshots it, and `MIXINSTUFF_DEMO_SNAPSHOT=<prefix>` writes PNGs of the window from inside GTK. `demo:` ids are served by `DemoResolver` in front of the real resolver, so the controller path is identical to production.
+`MUSISHARK_DEMO=1` stages a queue at startup from audio files under ~/Music (or `MUSISHARK_DEMO_URI`), `MUSISHARK_DEMO_VIDEO=<id>` adds a real YouTube track through yt-dlp, `MUSISHARK_DEMO_AUTOPLAY=1` presses play after three seconds, `MUSISHARK_DEMO_QUEUE=1` opens the sidebar, `MUSISHARK_DEMO_EXPAND=1` opens the expanded player, `MUSISHARK_DEMO_TAB` and `MUSISHARK_DEMO_SEARCH` pick a tab or run a live search, `MUSISHARK_DEMO_ACTIVATE=1` plays the first result, `MUSISHARK_DEMO_WIDTH=420` starts in the phone layout, `MUSISHARK_DEMO_LOGIN=1` opens the sign-in dialog and snapshots it, and `MUSISHARK_DEMO_SNAPSHOT=<prefix>` writes PNGs of the window from inside GTK. `demo:` ids are served by `DemoResolver` in front of the real resolver, so the controller path is identical to production.
 
 ## Comparing against the Python app
 
@@ -212,8 +212,8 @@ link button at the bottom and a dialog focuses it on open. The
 also needs a line in `resources/resources.gresource.xml`, or GTK draws the
 missing-image blob.
 
-Demo hooks: `MIXINSTUFF_DEMO_ONBOARDING=ms[,page]` and
-`MIXINSTUFF_DEMO_WHATS_NEW=ms`. They write `onboarding_done` and
+Demo hooks: `MUSISHARK_DEMO_ONBOARDING=ms[,page]` and
+`MUSISHARK_DEMO_WHATS_NEW=ms`. They write `onboarding_done` and
 `last_seen_version` into the real prefs when the dialog closes.
 
 ## Without an account
@@ -260,7 +260,7 @@ the first three artists. `merge` puts them ahead of YouTube's signed-out feed an
 YouTube's rows of the same name. A failed fetch costs its shelf only. The
 shelves are rebuilt with Home, so they follow new plays on the next refresh.
 
-Preferences, Advanced has Reset Mixinstuff: after a confirmation it signs
+Preferences, Advanced has Reset Musishark: after a confirmation it signs
 out, removes `prefs.json`, the library and album caches, the playlist cache
 and the whole cache dir, then spawns the same executable and quits. The new
 process is a fresh install and opens the wizard. Downloads and `local.db`
@@ -341,7 +341,7 @@ so a later metadata refresh cannot put the address back.
 
 Details that follow the Python adapter: Loading reports as Playing so the
 shell does not blink between tracks, the track id is the sanitized video id
-under `/io/github/matko802/Mixinstuff/track`, CanGoPrevious is answered live because
+under `/io/github/matko802/Musishark/track`, CanGoPrevious is answered live because
 Previous restarts the track past three seconds, and an idle player gets its
 own path rather than `NO_TRACK`, which is reserved for track lists. Play on a
 stopped player loads the staged track, which the shell expects and the
@@ -461,8 +461,8 @@ kept a segment endpoint (`source=yt_live_broadcast`) from before the HLS
 path existed, which plays one fragment and stops. Live playlists are not
 cached, since they expire and the bars need to know the stream is live, and
 a cached entry of that shape is dropped on read. Checked with the demo
-(`MIXINSTUFF_DEMO_URI="" MIXINSTUFF_DEMO_VIDEO=<live id>,<song>
-MIXINSTUFF_DEMO_AUTOPLAY=1`): a station played for a minute with no switch.
+(`MUSISHARK_DEMO_URI="" MUSISHARK_DEMO_VIDEO=<live id>,<song>
+MUSISHARK_DEMO_AUTOPLAY=1`): a station played for a minute with no switch.
 
 ## Home straplines and long listens
 
@@ -474,7 +474,7 @@ used to be dropped as a podcast shelf. It is hour-long mixes, so it stays and
 uses the quick-picks tile grid, four rows high: `add_speed_dial` takes a
 title, a strapline and a row count, and the page keeps one `Dial` per grid so
 the compact layout resizes both. Durations past an hour read `1:59:59`.
-`MIXINSTUFF_DEMO_SCROLL=ms,<heading>` scrolls the visible page to a heading
+`MUSISHARK_DEMO_SCROLL=ms,<heading>` scrolls the visible page to a heading
 for a snapshot.
 
 ## Listening history
@@ -562,7 +562,7 @@ Rich Presence, cover theming and the lyrics view landed on 2026-09-18, see
   (`bin/` with the DLLs `ntldd` finds, plus yt-dlp, node, ffmpeg and
   botguard; `lib/` plugins and modules; `share/` schemas and icons), and
   `windows/installer.iss` wraps it. `build.rs` embeds the icon and file
-  details from `windows/mixinstuff.rc`. Release builds use the windows
+  details from `windows/musishark.rc`. Release builds use the windows
   subsystem, so helpers start through `stream::helper_command`, which keeps
   them from opening consoles. `smtc.rs` drives the System Media Transport
   Controls from a hidden window of its own. `bootstrap.rs` sets the Windows
@@ -572,7 +572,7 @@ Rich Presence, cover theming and the lyrics view landed on 2026-09-18, see
   Volume is wasapi2sink's, which is the app's slider in the Windows mixer;
   it reports every change back late, so `Player` ignores reports for half a
   second after setting the volume itself. Release builds log to
-  `mixinstuff.log` in the data folder (%LOCALAPPDATA%\muse). GSK defaults to
+  `musishark.log` in the data folder (%LOCALAPPDATA%\muse). GSK defaults to
   Vulkan there: the GL renderer paints the window shadow black under
   DirectComposition. Sign-in runs Google's page in WebView2 through wry, as
   a native child window over an empty area of the GTK dialog (`login.rs`);
@@ -580,7 +580,7 @@ Rich Presence, cover theming and the lyrics view landed on 2026-09-18, see
   as the session bus: without it GApplication finds no running instance and
   every launch opens another window. `tray.rs` keeps a notification-area
   icon, the way back to a window hidden for background playback.
-  `bootstrap::register_link_scheme` registers `mixinstuff://` for the current
+  `bootstrap::register_link_scheme` registers `musishark://` for the current
   user at every start (the installer does too), and GApplication's open
   hands a link to the running window as on Linux.
 
@@ -715,7 +715,7 @@ The uploads tab's all-songs button pushes a virtual playlist page over
 
 `src/downloads/` is the offline half of the app, a port of downloads.py.
 
-`store.rs` owns the library: one SQLite table at `<music>/.mixinstuff/library.db`,
+`store.rs` owns the library: one SQLite table at `<music>/.musishark/library.db`,
 the same file and columns the Python app writes, so a song downloaded in either
 app is known to both. It also renames a pre-rename `~/Music/YouTube Music`
 folder on first open and rewrites the rows that pointed into it. `is_downloaded`
@@ -796,7 +796,7 @@ both apps stay interchangeable.
 - `presence.rs` wires both to the player. `Player::on_play` tells a fresh play
   (`Started`) from a metadata correction (`Refined`), so the scrobble clock
   never restarts on the audio-version swap.
-- A demo run mutes scrobbling and Discord. `MIXINSTUFF_DEMO_PRESENCE=1` lifts it.
+- A demo run mutes scrobbling and Discord. `MUSISHARK_DEMO_PRESENCE=1` lifts it.
 - `ui/appearance.rs` owns three display-wide CSS providers: the blurred cover
   background, the cover accent with its optional tint, and the derived colors
   (`playing_fg`, `blur_sidebar_bg`, `visualizer_bar`). `ui/cover_effects.rs`
@@ -868,7 +868,7 @@ tests.
 repository's `assets/icons`, which stays the single copy because the README
 and the Flatpak repo file link to it. Nothing is looked up on disk at run
 time. The icon theme's resource path names the theme folder
-(`/io/github/matko802/mixinstuff/icons/hicolor`), since GTK looks under
+(`/io/github/matko802/musishark/icons/hicolor`), since GTK looks under
 `<path>/scalable/actions`. The folder is `resources/` and not `data/` because
 the root already has an ignored `data/` holding a saved browser session.
 
@@ -876,12 +876,12 @@ The crate sits at the repository root since 2026-09-18. It lived in `rust/`
 while the Python app occupied `src/`.
 
 The AUR PKGBUILD and the Flatpak manifest build the crate with cargo and
-install one binary (`mixinstuff`, with `muse` as a link), the desktop file, the
+install one binary (`musishark`, with `muse` as a link), the desktop file, the
 metainfo and the app icon. yt-dlp with Node stays a runtime dependency for the fallback resolver and
 downloads. `rustypipe-botguard` is no longer shipped beside the app: it is
 linked in as a crate (see PO tokens below). Its `v8` dependency downloads a
 prebuilt `librusty_v8` of about 28 MB in its build script. The AUR build and
-the Flatpak (whose mixinstuff module already has network) fetch it themselves. The
+the Flatpak (whose musishark module already has network) fetch it themselves. The
 Nix sandbox has none, so `flake.nix` pins the archive with `fetchurl` and
 passes it as `RUSTY_V8_ARCHIVE`; its version must follow `v8` in Cargo.lock
 (130.0.7 now) and the two hashes with it. The build script's download has
@@ -902,14 +902,14 @@ compiles even though the app's own client is rustls.
 ## Stutter, measured with sysprof
 
 Method: a release build with `-C force-frame-pointers=yes` in its own target
-dir (`target-prof`), `sysprof-cli -- ./target-prof/release/mixinstuff` with a
+dir (`target-prof`), `sysprof-cli -- ./target-prof/release/musishark` with a
 demo scenario, then `sysprof-cat` and a small script that merges the callgraph
-by symbol. `MIXINSTUFF_DEMO_FRAMES=1` logs frame pacing, and these hooks repeat
-an action so it dominates a capture: `MIXINSTUFF_DEMO_TOGGLE`,
-`MIXINSTUFF_DEMO_RESIZE`, `MIXINSTUFF_DEMO_NEXT_EVERY`. `MIXINSTUFF_DEMO_CLASSES`
+by symbol. `MUSISHARK_DEMO_FRAMES=1` logs frame pacing, and these hooks repeat
+an action so it dominates a capture: `MUSISHARK_DEMO_TOGGLE`,
+`MUSISHARK_DEMO_RESIZE`, `MUSISHARK_DEMO_NEXT_EVERY`. `MUSISHARK_DEMO_CLASSES`
 dumps every widget's classes and state after each toggle, to diff.
-`MIXINSTUFF_DEMO_PHASES` times the frame clock phases, and
-`MIXINSTUFF_DEMO_WATCHDOG` raises SIGUSR2 when the GTK thread stops answering,
+`MUSISHARK_DEMO_PHASES` times the frame clock phases, and
+`MUSISHARK_DEMO_WATCHDOG` raises SIGUSR2 when the GTK thread stops answering,
 for a backtrace under gdb. Only a release build is worth measuring: the debug
 build stalls for its own reasons.
 
@@ -947,7 +947,7 @@ build stalls for its own reasons.
   of the visible page), which is the floor without a lazier home feed.
 - Measure without touching the desktop: `mutter --headless --virtual-monitor
   1400x900 --wayland-display mx-headless --no-x11`, then run the demo with
-  `WAYLAND_DISPLAY=mx-headless`. `MIXINSTUFF_DEMO_FRAMES` logs `worst_frame_ms`,
+  `WAYLAND_DISPLAY=mx-headless`. `MUSISHARK_DEMO_FRAMES` logs `worst_frame_ms`,
   the time inside one frame, which the frame gap count understates.
 - The queue model was replaced whole on every sync, 951 rows at each track
   start, and the list view showed blank rows while scrolling to the playing
@@ -972,11 +972,11 @@ music.youtube.com, since the music client answers youtube.com URLs with a bare
 `Player::play_link` (the watch queue YouTube Music would play, from that song
 on) or pushes the page. Two ways in: a link pasted into the search field opens
 instead of searching, and the application sets `HANDLES_OPEN`, so
-`mixinstuff <link>` hands the link to the running window. The desktop entry
-passes `%U` and registers `x-scheme-handler/mixinstuff`. `mixinstuff://open?url=`
-carries a link (one level, a wrapped `mixinstuff:` link is refused), and
-`mixinstuff://music.youtube.com/...` reads as the same path over https.
-`extras/open-in-mixinstuff.user.js` is the browser half: a button on
+`musishark <link>` hands the link to the running window. The desktop entry
+passes `%U` and registers `x-scheme-handler/musishark`. `musishark://open?url=`
+carries a link (one level, a wrapped `musishark:` link is refused), and
+`musishark://music.youtube.com/...` reads as the same path over https.
+`extras/open-in-musishark.user.js` is the browser half: a button on
 music.youtube.com and an automatic handover, on by default, on the first page
 load only, since the site never reloads between pages. Linux routes links per
 scheme, never per domain, so a plain https link cannot reach the app without

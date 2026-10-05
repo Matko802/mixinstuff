@@ -1,7 +1,7 @@
 <div align="center">
-<img height="150" src="assets/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg" />
+<img height="150" src="assets/icons/hicolor/scalable/apps/io.github.matko802.Musishark.svg" />
 
-<h3 style="font-size: 30px"> Mixinstuff </h3>
+<h3 style="font-size: 30px"> Musishark </h3>
 
 A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 <br><small>forked from <a href="https://github.com/m-obeid/Mixtapes">m-obeid/Mixtapes</a></small>
@@ -9,12 +9,12 @@ A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 </div>
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/Matko802/mixinstuff)](https://github.com/Matko802/mixinstuff/stargazers)
-[![GitHub issues](https://img.shields.io/github/issues/Matko802/mixinstuff)](https://github.com/Matko802/mixinstuff/issues)
-[![AUR](https://img.shields.io/aur/version/mixinstuff-git)](https://aur.archlinux.org/packages/mixinstuff-git)
-[![Flatpak CI](https://img.shields.io/github/actions/workflow/status/Matko802/mixinstuff/build-flatpak.yml?label=Flatpak%20Build)](https://github.com/Matko802/mixinstuff/actions/workflows/build-flatpak.yml)
-[![Windows Build](https://img.shields.io/github/actions/workflow/status/Matko802/mixinstuff/build-windows.yml?label=Windows%20Build)](https://github.com/Matko802/mixinstuff/actions/workflows/build-windows.yml)
-[![Windows Download](https://img.shields.io/badge/Windows-Download%20Installer-blue?logo=windows)](https://nightly.link/Matko802/mixinstuff/workflows/build-windows/main/mixinstuff-windows-x86_64-setup.zip)
+[![GitHub stars](https://img.shields.io/github/stars/Matko802/musishark)](https://github.com/Matko802/musishark/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/Matko802/musishark)](https://github.com/Matko802/musishark/issues)
+[![AUR](https://img.shields.io/aur/version/musishark-git)](https://aur.archlinux.org/packages/musishark-git)
+[![Flatpak CI](https://img.shields.io/github/actions/workflow/status/Matko802/musishark/build-flatpak.yml?label=Flatpak%20Build)](https://github.com/Matko802/musishark/actions/workflows/build-flatpak.yml)
+[![Windows Build](https://img.shields.io/github/actions/workflow/status/Matko802/musishark/build-windows.yml?label=Windows%20Build)](https://github.com/Matko802/musishark/actions/workflows/build-windows.yml)
+[![Windows Download](https://img.shields.io/badge/Windows-Download%20Installer-blue?logo=windows)](https://nightly.link/Matko802/musishark/workflows/build-windows/main/musishark-windows-x86_64-setup.zip)
 
 > [!NOTE]
 > This software is in alpha. Expect bugs and missing features.
@@ -73,11 +73,11 @@ Upstream project by [m-obeid](https://github.com/m-obeid) — please consider [s
 
 ### Flatpak
 
-Download the bundle from [GitHub Actions](https://github.com/Matko802/mixinstuff/actions), then:
+Download the bundle from [GitHub Actions](https://github.com/Matko802/musishark/actions), then:
 
 ```bash
-unzip Mixinstuff-x86_64-flatpak.zip
-flatpak install --user ./Mixinstuff-x86_64.flatpak
+unzip Musishark-x86_64-flatpak.zip
+flatpak install --user ./Musishark-x86_64.flatpak
 ```
 
 Both `x86_64` and `aarch64` builds are available.
@@ -87,7 +87,7 @@ Both `x86_64` and `aarch64` builds are available.
 ### Windows
 
 Get the installer from the
-[latest Windows build](https://nightly.link/Matko802/mixinstuff/workflows/build-windows/main/mixinstuff-windows-x86_64-setup.zip),
+[latest Windows build](https://nightly.link/Matko802/musishark/workflows/build-windows/main/musishark-windows-x86_64-setup.zip),
 or the portable folder from the same CI run. The installer adds the Microsoft
 Edge WebView2 Runtime, which the sign-in page needs, where Windows lacks it
 (Windows 10 LTSC, for one).
@@ -95,7 +95,7 @@ Edge WebView2 Runtime, which the sign-in page needs, where Windows lacks it
 ### AUR (Arch Linux)
 
 ```bash
-yay -S mixinstuff-git
+yay -S musishark-git
 ```
 
 > [!WARNING]
@@ -108,7 +108,7 @@ yay -S mixinstuff-git
 > This is not extensively tested, if there are any issues to fix, please open a PR!
 
 ```
-nix run github:Matko802/mixinstuff       # run directly from GitHub
+nix run github:Matko802/musishark       # run directly from GitHub
 nix run                               # run from local checkout
 nix develop                           # enter dev shell
 ```
@@ -116,7 +116,7 @@ nix develop                           # enter dev shell
 ### From Source
 
 > [!NOTE]
-> Mixinstuff is written in Rust. The original Python app was retired once the port reached feature parity.
+> Musishark is written in Rust. The original Python app was retired once the port reached feature parity.
 > [ARCHITECTURE.md](ARCHITECTURE.md) describes how it is put together.
 
 <details>
@@ -146,10 +146,10 @@ sudo apt install git cargo libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev li
 </details>
 
 ```bash
-git clone https://github.com/Matko802/mixinstuff.git
-cd mixinstuff
+git clone https://github.com/Matko802/musishark.git
+cd musishark
 cargo build --release
-./target/release/mixinstuff
+./target/release/musishark
 ```
 
 > [!NOTE]
@@ -172,9 +172,9 @@ cargo build --release
 
 ```bash
 flatpak install flathub org.gnome.Platform//50 org.gnome.Sdk//50 org.freedesktop.Sdk.Extension.node24//25.08 org.freedesktop.Sdk.Extension.rust-stable//25.08
-git clone https://github.com/Matko802/mixinstuff.git && cd mixinstuff
-flatpak-builder --user --install --force-clean build-dir io.github.matko802.Mixinstuff.yaml
-flatpak run io.github.matko802.Mixinstuff
+git clone https://github.com/Matko802/musishark.git && cd musishark
+flatpak-builder --user --install --force-clean build-dir io.github.matko802.Musishark.yaml
+flatpak run io.github.matko802.Musishark
 ```
 
 </details>
@@ -202,8 +202,8 @@ The key and secret live in `EMBEDDED_LASTFM_API_KEY` and `EMBEDDED_LASTFM_API_SE
 To build against your own Last.fm app, register one at [last.fm/api/account/create](https://www.last.fm/api/account/create), then either replace the two constants or set these before launching:
 
 ```bash
-export MIXINSTUFF_LASTFM_API_KEY=your_key
-export MIXINSTUFF_LASTFM_API_SECRET=your_secret
+export MUSISHARK_LASTFM_API_KEY=your_key
+export MUSISHARK_LASTFM_API_SECRET=your_secret
 ```
 
 > [!IMPORTANT]
@@ -213,23 +213,23 @@ With no credentials the Last.fm row in Preferences stays disabled and says so. L
 
 ## Authentication
 
-Mixinstuff asks on first launch whether to sign in. The sign-in window is Google's own page. Once you are signed in, Mixinstuff keeps its own copy of the session and clears the window's cookies.
+Musishark asks on first launch whether to sign in. The sign-in window is Google's own page. Once you are signed in, Musishark keeps its own copy of the session and clears the window's cookies.
 
-- **Skip it** and Mixinstuff remembers. Playlists, likes, artist subscriptions and listening history then live on this device, and Home builds shelves from what you play. Sign in any time from the main menu.
+- **Skip it** and Musishark remembers. Playlists, likes, artist subscriptions and listening history then live on this device, and Home builds shelves from what you play. Sign in any time from the main menu.
 - **Brand accounts:** if your library lives on a channel of your Google account, pick it under Preferences, General, Account.
-- **Sign out** from the main menu or Preferences. Reset Mixinstuff under Preferences, Advanced signs out and runs the setup again.
+- **Sign out** from the main menu or Preferences. Reset Musishark under Preferences, Advanced signs out and runs the setup again.
 
-The session is stored in `headers_auth.json` in the data folder (`~/.local/share/mixinstuff`, or `~/.var/app/io.github.matko802.Mixinstuff/data/mixinstuff` for the Flatpak). Treat it like a password.
+The session is stored in `headers_auth.json` in the data folder (`~/.local/share/musishark`, or `~/.var/app/io.github.matko802.Musishark/data/musishark` for the Flatpak). Treat it like a password.
 
 ## Opening Links
 
-Mixinstuff opens YouTube and YouTube Music links. Songs play, and playlists, albums and artists open their page.
+Musishark opens YouTube and YouTube Music links. Songs play, and playlists, albums and artists open their page.
 
 - Paste a link into the search field.
-- Run `mixinstuff <link>`. A running Mixinstuff takes the link.
-- Open a `mixinstuff://open?url=<link>` link. Mixinstuff registers the `mixinstuff://` scheme, so any app or browser hands these over.
+- Run `musishark <link>`. A running Musishark takes the link.
+- Open a `musishark://open?url=<link>` link. Musishark registers the `musishark://` scheme, so any app or browser hands these over.
 
-To open YouTube Music pages from your browser, install the [Open in Mixinstuff](https://raw.githubusercontent.com/Matko802/mixinstuff/main/extras/open-in-mixinstuff.user.js) userscript with [Violentmonkey](https://violentmonkey.github.io/) or Tampermonkey. A song, playlist, album or artist page you open in the browser goes straight to Mixinstuff. Browsing within the site stays in the browser, and an "Open in Mixinstuff" button hands over the page you are on. The script's menu switches the automatic handover off. The browser asks once before it lets a page open Mixinstuff.
+To open YouTube Music pages from your browser, install the [Open in Musishark](https://raw.githubusercontent.com/Matko802/musishark/main/extras/open-in-musishark.user.js) userscript with [Violentmonkey](https://violentmonkey.github.io/) or Tampermonkey. A song, playlist, album or artist page you open in the browser goes straight to Musishark. Browsing within the site stays in the browser, and an "Open in Musishark" button hands over the page you are on. The script's menu switches the automatic handover off. The browser asks once before it lets a page open Musishark.
 
 Your desktop sends every `https://` link to the browser and has no way to hand one site to another app, so links clicked outside the browser still open there first.
 
@@ -256,7 +256,7 @@ Your desktop sends every `https://` link to the browser and has no way to hand o
 |   ✅️   | **MPRIS Support**            | Control playback from system media controls                                                                                                                                                                                                                                                  |
 |   ✅️   | **Download Support**         | Download tracks for offline playback, even as local files                                                                                                                                                                                                                                    |
 |   ✅️   | **Radio / Mixes**            | Start a radio station from a song, album, playlist, or artist                                                                                                                                                                                                                                |
-|   ✅️   | **Link Handling**            | Open YouTube Music links from the search field, the command line, `mixinstuff://` links or the browser userscript                                                                                                                                                                              |
+|   ✅️   | **Link Handling**            | Open YouTube Music links from the search field, the command line, `musishark://` links or the browser userscript                                                                                                                                                                              |
 |   ✅️   | **Dedicated Data Directory** | Cookies, cache, etc. in a dedicated directory                                                                                                                                                                                                                                                |
 |   ✅️   | **Background Playback**      | Music keeps playing when the window is closed                                                                                                                                                                                                                                                |
 |   ✅️   | **Setup & Release Notes**    | First-run setup wizard and a What's New dialog after updates                                                                                                                                                                                                                                 |
@@ -266,14 +266,14 @@ Your desktop sends every `https://` link to the browser and has no way to hand o
 |   ✅️   | **Discord RPC**              | Show your current track on Discord<br>✅️ Linux<br>✅️ Windows                                                                                                                                                                                                                                 |
 |   ✅️   | **Lyrics**                   | Synchronized lyrics using a bunch of providers (Apple Music, BetterLyrics, BiniLyrics, NetEase, LRCLIB, native YT Music)<br>✅️ Reorderable provider search queue<br>✅️ Second line: romanization, translation or background vocals<br>✅️ Word-level karaoke timing with duration-aware fades |
 |   ✅️   | **Rust Rewrite**             | Rewritten in Rust for speed and memory use; the Python app is retired                                                                                                                                                                                                                        |
-|   ✅️   | **AUR**                      | Available as `mixinstuff-git`                                                                                                                                                                                                                                                                  |
+|   ✅️   | **AUR**                      | Available as `musishark-git`                                                                                                                                                                                                                                                                  |
 |   ☑️   | **Flatpak**                  | ✅️ Flatpak build (x86_64 and aarch64)<br>✅️ App icon<br>🔜 Flathub release                                                                                                                                                                                                                    |
 |   ☑️   | **Nix**                      | Flake builds; not extensively tested                                                                                                                                                                                                                                                         |
 |   ✅️   | **Windows**                  | Installer and portable builds from CI, with media controls, tray and sign-in                                                                                                                                                                                                                 |
 |   🔜   | **macOS**                    | Can build it for macOS, just need to test, there's a PR for auto-builds.                                                                                                                                                                                                                     |
 |   🔜   | **GNOME Circle**             | Still considering it, might not happen                                                                                                                                                                                                                                                       |
 
-Have an idea or found a bug? [Open an issue!](https://github.com/Matko802/mixinstuff/issues)
+Have an idea or found a bug? [Open an issue!](https://github.com/Matko802/musishark/issues)
 
 ## Contributing
 
@@ -281,18 +281,18 @@ Contributions are welcome! Feel free to open issues for bug reports or feature r
 
 ## Star History
 
-<a href="https://star-history.dera.page/#Matko802/mixinstuff&type=date&legend=top-left">
+<a href="https://star-history.dera.page/#Matko802/musishark&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=Matko802/mixinstuff&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=Matko802/mixinstuff&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=Matko802/mixinstuff&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=Matko802/musishark&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=Matko802/musishark&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=Matko802/musishark&type=date&legend=top-left" />
  </picture>
 </a>
 
 ## Contributors
 
-<a href="https://github.com/Matko802/mixinstuff/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=Matko802/mixinstuff" width="600"/>
+<a href="https://github.com/Matko802/musishark/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=Matko802/musishark" width="600"/>
 </a>
 
 The app icon was sketched by [Jakub Steiner](https://gitlab.gnome.org/jimmac) and rendered by [gnoman](https://gitlab.gnome.org/gnoman).

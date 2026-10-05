@@ -508,7 +508,7 @@ mod imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for LyricRow {
-        const NAME: &'static str = "MixinstuffLyricRow";
+        const NAME: &'static str = "MusisharkLyricRow";
         type Type = super::LyricRow;
         type ParentType = gtk::ListBoxRow;
     }
@@ -1008,7 +1008,7 @@ mod interlude_imp {
 
     #[glib::object_subclass]
     impl ObjectSubclass for InterludeRow {
-        const NAME: &'static str = "MixinstuffLyricInterludeRow";
+        const NAME: &'static str = "MusisharkLyricInterludeRow";
         type Type = super::InterludeRow;
         type ParentType = gtk::ListBoxRow;
     }

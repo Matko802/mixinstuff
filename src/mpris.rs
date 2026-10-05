@@ -29,11 +29,11 @@ use crate::player::Player;
 use crate::state::PlayerState;
 use crate::ui::cover::fetch_cover_bytes;
 
-/// Owns `org.mpris.MediaPlayer2.Mixinstuff`, the name the Python app took.
-const BUS_SUFFIX: &str = "Mixinstuff";
-const IDENTITY: &str = "Mixinstuff";
-const DESKTOP_ENTRY: &str = "io.github.matko802.Mixinstuff";
-const TRACK_ID_PREFIX: &str = "/io/github/matko802/Mixinstuff/track";
+/// Owns `org.mpris.MediaPlayer2.Musishark`, the name the Python app took.
+const BUS_SUFFIX: &str = "Musishark";
+const IDENTITY: &str = "Musishark";
+const DESKTOP_ENTRY: &str = "io.github.matko802.Musishark";
+const TRACK_ID_PREFIX: &str = "/io/github/matko802/Musishark/track";
 /// Art below this is upscaled: some clients render small covers badly.
 const MIN_ART_SIZE: i32 = 512;
 

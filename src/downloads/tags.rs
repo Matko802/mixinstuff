@@ -72,7 +72,7 @@ fn apply(path: &Path, tags: &Tags, cover: Option<&[u8]>) -> lofty::error::Result
 
 /// The JSON the Python app wrote, so files stay readable by both.
 fn ytm_comment(video_id: &str, album_id: &str) -> String {
-    serde_json::json!({ "videoId": video_id, "albumId": album_id, "source": "YouTube Music (Mixinstuff)" }).to_string()
+    serde_json::json!({ "videoId": video_id, "albumId": album_id, "source": "YouTube Music (Musishark)" }).to_string()
 }
 
 /// The cover embedded in a downloaded file, for showing art offline.
@@ -93,7 +93,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&comment).unwrap();
         assert_eq!(parsed["videoId"], "vid123");
         assert_eq!(parsed["albumId"], "MPREabc");
-        assert!(parsed["source"].as_str().unwrap().contains("Mixinstuff"));
+        assert!(parsed["source"].as_str().unwrap().contains("Musishark"));
     }
 
     /// Writes a real file, so it also proves the lofty round trip.

@@ -1,15 +1,15 @@
 [package]
-name = "mixinstuff-bridge"
+name = "musishark-bridge"
 version = "0.1.0"
 edition = "2021"
-description = "Native Windows bridge for Mixinstuff - SMTC and launcher"
+description = "Native Windows bridge for Musishark - SMTC and launcher"
 
 [[bin]]
-name = "MixinstuffBridge"
+name = "MusisharkBridge"
 path = "src/bridge.rs"
 
 [[bin]]
-name = "Mixinstuff"
+name = "Musishark"
 path = "src/launcher.rs"
 
 [dependencies]

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Assembles dist/mixinstuff, a self-contained Windows install of the release build.
+# Assembles dist/musishark, a self-contained Windows install of the release build.
 # Run from the repository root in an MSYS2 UCRT64 shell after `cargo build --release`.
 #
 # Layout, the same as an MSYS2 prefix, so GLib, GTK and GStreamer find their
 # data relative to their DLLs without any environment variables:
-#   bin/      mixinstuff.exe, every DLL it needs, yt-dlp, node, ffmpeg, botguard
+#   bin/      musishark.exe, every DLL it needs, yt-dlp, node, ffmpeg, botguard
 #   lib/      GStreamer plugins, GIO modules, gdk-pixbuf loaders
 #   libexec/  gst-plugin-scanner
 #   share/    GSettings schemas, Adwaita and hicolor icon themes, Adwaita fonts
@@ -12,20 +12,20 @@
 set -euo pipefail
 
 PREFIX="${MSYSTEM_PREFIX:?run this from an MSYS2 shell}"
-OUT=dist/mixinstuff
+OUT=dist/musishark
 rm -rf "$OUT"
 mkdir -p "$OUT/bin" "$OUT/lib" "$OUT/libexec/gstreamer-1.0" "$OUT/share/glib-2.0/schemas" "$OUT/share/icons"
 
 echo "App and helper programs"
-cp target/release/mixinstuff.exe "$OUT/bin/"
+cp target/release/musishark.exe "$OUT/bin/"
 # The installer points the taskbar identity (AppUserModelID) at this.
-cp windows/mixinstuff.ico "$OUT/bin/"
+cp windows/musishark.ico "$OUT/bin/"
 # yt-dlp reaches these through PATH, which the app starts with its own folder.
 cp "$PREFIX/bin/node.exe" "$PREFIX/bin/ffmpeg.exe" "$PREFIX/bin/ffprobe.exe" "$OUT/bin/"
 # The official build bundles yt-dlp-ejs, the YouTube challenge solver node runs.
 curl -fsSL --retry 5 -o "$OUT/bin/yt-dlp.exe" https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe
 # GLib starts its own session bus with this. GApplication needs the bus to
-# find a running Mixinstuff, so a second launch hands over instead of opening
+# find a running Musishark, so a second launch hands over instead of opening
 # another window.
 cp "$PREFIX/bin/gdbus.exe" "$OUT/bin/"
 # WebView2's loader for the sign-in page, from the webview2-com-sys build.

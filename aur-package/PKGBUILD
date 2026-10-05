@@ -1,28 +1,28 @@
 # Maintainer: Mohamad Obeid <mobeid nine nine nine nine at gmail dot com>
 # Contributor: Keo Ponleou Sok <dev.ponleousk@gmail.com>
-pkgname=mixinstuff-git
+pkgname=musishark-git
 pkgver=2026.09.12.0
 pkgrel=1
 pkgdesc="A modern, Linux-first YouTube Music player"
 arch=('x86_64' 'aarch64')
-url="https://github.com/Matko802/mixinstuff"
+url="https://github.com/Matko802/musishark"
 license=('GPL3')
 # Note: webkitgtk-6.0 must come from the 'extra' repository. The CachyOS build
-# is known to malfunction with Mixinstuff - see the install hook below.
+# is known to malfunction with Musishark - see the install hook below.
 depends=('gtk4' 'libadwaita' 'webkitgtk-6.0' 'openssl' 'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugins-bad' 'sqlite' 'yt-dlp' 'yt-dlp-ejs' 'nodejs')
 makedepends=('git' 'cargo')
 optdepends=('ffmpeg: for downloading music')
-provides=("mixinstuff")
-conflicts=("mixinstuff")
+provides=("musishark")
+conflicts=("musishark")
 install="${pkgname}.install"
 # makepkg's -flto breaks the link of aws-lc-sys, the C library under rustls.
 options=(!lto)
-source=("${pkgname}::git+https://github.com/Matko802/mixinstuff.git")
+source=("${pkgname}::git+https://github.com/Matko802/musishark.git")
 sha256sums=('SKIP')
 
 pkgver() {
   cd "$pkgname"
-  grep -oP '(?<=<release version=")[^"]+' io.github.matko802.Mixinstuff.metainfo.xml | head -1 | tr '-' '.'
+  grep -oP '(?<=<release version=")[^"]+' io.github.matko802.Musishark.metainfo.xml | head -1 | tr '-' '.'
 }
 
 prepare() {
@@ -43,10 +43,10 @@ build() {
 package() {
   cd "$pkgname"
 
-  install -Dm755 target/release/mixinstuff "$pkgdir/usr/bin/mixinstuff"
+  install -Dm755 target/release/musishark "$pkgdir/usr/bin/musishark"
 
-  install -Dm644 io.github.matko802.Mixinstuff.desktop "$pkgdir/usr/share/applications/io.github.matko802.Mixinstuff.desktop"
-  install -Dm644 io.github.matko802.Mixinstuff.metainfo.xml "$pkgdir/usr/share/metainfo/io.github.matko802.Mixinstuff.metainfo.xml"
-  install -Dm644 assets/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.matko802.Mixinstuff.svg"
-  install -Dm644 assets/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg "$pkgdir/usr/share/icons/hicolor/symbolic/apps/io.github.matko802.Mixinstuff-symbolic.svg"
+  install -Dm644 io.github.matko802.Musishark.desktop "$pkgdir/usr/share/applications/io.github.matko802.Musishark.desktop"
+  install -Dm644 io.github.matko802.Musishark.metainfo.xml "$pkgdir/usr/share/metainfo/io.github.matko802.Musishark.metainfo.xml"
+  install -Dm644 assets/icons/hicolor/scalable/apps/io.github.matko802.Musishark.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.matko802.Musishark.svg"
+  install -Dm644 assets/icons/hicolor/symbolic/apps/io.github.matko802.Musishark-symbolic.svg "$pkgdir/usr/share/icons/hicolor/symbolic/apps/io.github.matko802.Musishark-symbolic.svg"
 }

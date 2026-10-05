@@ -1,4 +1,4 @@
-//! Mixinstuff entry point.
+//! Musishark entry point.
 //!
 //! Boot order matters and mirrors src/main.py:
 //! 1. process tunables (malloc arenas, fd limit) before any thread exists,
@@ -45,8 +45,8 @@ use crate::paths::Paths;
 use crate::player::Player;
 use crate::ui::window::MainWindow;
 
-const APP_ID: &str = "io.github.matko802.Mixinstuff";
-const APP_NAME: &str = "Mixinstuff";
+const APP_ID: &str = "io.github.matko802.Musishark";
+const APP_NAME: &str = "Musishark";
 
 /// Everything the UI layer receives. Cloned into signal handlers as `Rc`.
 pub struct App {
@@ -85,7 +85,7 @@ fn main() -> glib::ExitCode {
     bootstrap::apply_gsk_renderer_pref(&paths);
 
     // The stylesheet and icons, compiled in by build.rs.
-    if let Err(err) = gio::resources_register_include!("mixinstuff.gresource") {
+    if let Err(err) = gio::resources_register_include!("musishark.gresource") {
         eprintln!("resource bundle failed to load: {err}");
         return glib::ExitCode::FAILURE;
     }
@@ -98,7 +98,7 @@ fn main() -> glib::ExitCode {
     // Network runtime. Worker threads only run reqwest, yt-dlp subprocesses and file IO.
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
-        .thread_name("mixinstuff-net")
+        .thread_name("musishark-net")
         .enable_all()
         .build()
     {
@@ -131,8 +131,8 @@ fn main() -> glib::ExitCode {
     };
 
     let (downloads, download_events) = downloads::Downloads::new(paths.clone(), net.clone());
-    // A demo run plays scratch tracks. MIXINSTUFF_DEMO_PRESENCE=1 lets them through on purpose.
-    let publish = demo.is_none() || std::env::var_os("MIXINSTUFF_DEMO_PRESENCE").is_some();
+    // A demo run plays scratch tracks. MUSISHARK_DEMO_PRESENCE=1 lets them through on purpose.
+    let publish = demo.is_none() || std::env::var_os("MUSISHARK_DEMO_PRESENCE").is_some();
     let scrobbler = scrobbler::Scrobbler::start(&paths, runtime.handle());
     let lyrics = lyrics::Lyrics::new(&paths, net.client().http().clone(), net.client().clone());
     scrobbler.set_muted(!publish);
@@ -155,9 +155,9 @@ fn main() -> glib::ExitCode {
     let app = adw::Application::builder()
         .application_id(APP_ID)
         // A demo run is its own instance. As a unique application it handed off to
-        // whatever Mixinstuff was already open and exited, so testing meant closing
+        // whatever Musishark was already open and exited, so testing meant closing
         // the instance the listener was using.
-        // HANDLES_OPEN: `mixinstuff <link>` hands the link to the running window.
+        // HANDLES_OPEN: `musishark <link>` hands the link to the running window.
         .flags(if app_ctx.demo.is_some() { gio::ApplicationFlags::NON_UNIQUE } else { gio::ApplicationFlags::FLAGS_NONE } | gio::ApplicationFlags::HANDLES_OPEN)
         .build();
 
@@ -209,7 +209,7 @@ fn on_startup(ctx: &Rc<App>) {
     if let Some(display) = gdk::Display::default() {
         let theme = gtk::IconTheme::for_display(&display);
         // GTK looks under <path>/scalable/actions and so on, so the path names the theme folder.
-        theme.add_resource_path("/io/github/matko802/mixinstuff/icons/hicolor");
+        theme.add_resource_path("/io/github/matko802/musishark/icons/hicolor");
     }
     gtk::Window::set_default_icon_name(APP_ID);
     ui::load_css();
