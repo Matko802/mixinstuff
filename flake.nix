@@ -90,6 +90,10 @@
       in {
         packages.default = mixinstuff;
 
+        overlays.default = final: _prev: {
+          mixinstuff = self.packages.${final.system}.default;
+        };
+
         devShells.default = pkgs.mkShell {
           inputsFrom = [ mixinstuff ];
           packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt ] ++ runtimeTools;
