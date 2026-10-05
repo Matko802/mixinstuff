@@ -334,7 +334,7 @@ fn switch_channel(ctx: &Rc<App>, win: std::rc::Weak<MainWindow>, expander: glib:
 fn playback_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder().title("Playback").build();
 
-    let background_row = switch_row("Background Playback", "Allow music to keep playing when the window is closed", pref_bool(ctx, "background_play", true));
+    let background_row = switch_row("Background Playback", "Allow music to keep playing when the window is closed", pref_bool(ctx, "background_play", false));
     {
         let ctx = ctx.clone();
         background_row.connect_active_notify(move |row| save(&ctx, "background_play", row.is_active()));

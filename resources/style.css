@@ -868,3 +868,17 @@ gridview.queue-list > child {
   padding-left: 0;
   padding-right: 0;
 }
+
+/* About dialog: the version + original-creator link row is always the last
+   link row we add, so it alone gets the green button treatment. */
+dialog.about listbox row.link:last-child {
+  background-color: @success_color;
+  border-radius: 12px;
+}
+dialog.about listbox row.link:last-child:hover {
+  background-color: shade(@success_color, 1.08);
+}
+dialog.about listbox row.link:last-child label.title,
+dialog.about listbox row.link:last-child label.subtitle {
+  color: @success_fg_color;
+}

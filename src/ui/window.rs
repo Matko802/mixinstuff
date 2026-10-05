@@ -2479,17 +2479,31 @@ fn install_actions(
             true,
             Box::new(move || {
                 let Some(win) = win.upgrade() else { return };
-                adw::AboutDialog::builder()
+                let dialog = adw::AboutDialog::builder()
                     .application_icon(APP_ID)
                     .application_name(APP_NAME)
                     .developer_name("Matko802")
+                    .developers(["Matko802", "m-obeid (original creator)"])
                     .version(crate::ui::release_notes::current_version())
                     .issue_url("https://github.com/Matko802/musishark/issues")
-                    .website("https://github.com/Matko802/musishark")
                     .copyright("© 2026 Matko802")
                     .license_type(gtk::License::Gpl30)
-                    .build()
-                    .present(Some(&win));
+                    .build();
+                // "GitHub repo" replaces the stock Website row and goes to our repo.
+                dialog.add_link(
+                    "GitHub repo",
+                    "https://github.com/Matko802/musishark",
+                );
+                // Green version + original-creator row (styled in style.css
+                // as the last link row); opens the creator's GitHub repos.
+                dialog.add_link(
+                    &format!(
+                        "{} · original creator m-obeid",
+                        crate::ui::release_notes::current_version()
+                    ),
+                    "https://github.com/m-obeid?tab=repositories",
+                );
+                dialog.present(Some(&win));
             }),
         );
     }
@@ -2723,7 +2737,7 @@ fn install_close_handler(window: &adw::ApplicationWindow, ctx: &Rc<App>) {
             .read_prefs()
             .get("background_play")
             .and_then(|v| v.as_bool())
-            .unwrap_or(true);
+            .unwrap_or(false);
         if background && state.queue_length() > 0 && state.current_index() >= 0 {
             win.set_visible(false);
             return glib::Propagation::Stop;
