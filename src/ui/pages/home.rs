@@ -164,30 +164,6 @@ impl HomePage {
                 return;
             }
         }
-        if want == Provider::SoundCloud {
-            let sc = self.ctx.net.soundcloud().clone();
-            let handle = self.ctx.net.spawn(async move { sc.charts().await });
-            let weak = Rc::downgrade(self);
-            let want_id = want_id.clone();
-            glib::spawn_future_local(async move {
-                let outcome = handle.await;
-                let Some(page) = weak.upgrade() else { return };
-                match outcome {
-                    Ok(Ok(sections)) if !sections.is_empty() => {
-                        page.landing.replace(want_id.clone());
-                        page.section_cache.borrow_mut().insert(want_id, sections.clone());
-                        page.apply_home(Ok(sections));
-                    }
-                    Ok(Ok(_)) => page.apply_home(Err("empty")),
-                    Ok(Err(err)) => {
-                        tracing::warn!(%err, "soundcloud charts failed");
-                        page.apply_home(Err("error"));
-                    }
-                    Err(_) => page.loading.set(false),
-                }
-            });
-            return;
-        }
         if want == Provider::WatchShark {
             let ws = self.ctx.net.watchshark().clone();
             let handle = self.ctx.net.spawn(async move { ws.home_sections().await });

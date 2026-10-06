@@ -492,7 +492,6 @@ impl MainWindow {
         use crate::net::provider::Provider;
         let dialog = match provider {
             Provider::YouTube => LoginDialog::new(self.ui.clone(), &self.window),
-            Provider::SoundCloud => LoginDialog::new_soundcloud(self.ui.clone(), &self.window),
             Provider::WatchShark => {
                 let server = self.ui.net.watchshark().try_read_server();
                 LoginDialog::new_watchshark(self.ui.clone(), &self.window, &server)
@@ -936,20 +935,11 @@ impl MainWindow {
         let id = id.to_owned();
         let known_title = title.to_owned();
         let handle = self.ui.net.spawn(async move {
-            use crate::net::soundcloud::ScId;
             use crate::net::watchshark::WsId;
-            if let Some(sc_id) = crate::net::soundcloud::parse_sc_id(&id) {
-                let sc = net.soundcloud().clone();
-                return match sc_id {
-                    ScId::Playlist(n) => sc.playlist(n).await,
-                    ScId::User(n) => sc.user_tracks(n).await,
-                    _ => Err(crate::net::ytmusic::NetError::Message("Not a SoundCloud set or artist".into())),
-                };
-            }
             if let Some(WsId::User(name)) = crate::net::watchshark::parse_ws_id(&id) {
                 return net.watchshark().channel_tracks(&name).await;
             }
-            Err(crate::net::ytmusic::NetError::Message("Not an external set or artist".into()))
+            Err(crate::net::ytmusic::NetError::Message("Not a WatchShark artist".into()))
         });
         glib::spawn_future_local(async move {
             let outcome = handle.await;
@@ -960,7 +950,7 @@ impl MainWindow {
                     page.show_virtual(&title, tracks, &meta);
                 }
                 Ok(Err(err)) => {
-                    tracing::warn!(%err, "soundcloud collection failed");
+                    tracing::warn!(%err, "watchshark collection failed");
                     page.show_virtual(&known_title, Vec::new(), "nothing here");
                 }
                 Err(_) => {}
@@ -1208,9 +1198,6 @@ impl MainWindow {
     }
 
     pub fn open_link(self: &Rc<Self>, text: &str) -> bool {
-        if text.contains("soundcloud.com") {
-            return self.open_soundcloud_link(text);
-        }
         if text.contains("watchshark") {
             return self.open_watchshark_link(text);
         }
@@ -1234,29 +1221,6 @@ impl MainWindow {
                 Ok(Ok(None)) => w.add_toast("Musishark cannot open this link"),
                 Ok(Err(err)) => {
                     tracing::warn!(%err, text, "link did not resolve");
-                    w.add_toast("Could not open the link");
-                }
-                Err(_) => {}
-            }
-        });
-        true
-    }
-
-    fn open_soundcloud_link(self: &Rc<Self>, text: &str) -> bool {
-        let sc = self.ui.net.soundcloud().clone();
-        let url = text.trim().to_owned();
-        let handle = self.ui.net.spawn(async move { sc.resolve(&url).await });
-        let weak = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let outcome = handle.await;
-            let Some(w) = weak.upgrade() else { return };
-            use crate::net::soundcloud::Resolved;
-            match outcome {
-                Ok(Ok(Resolved::Track(track))) => w.ui.player.play_tracks(vec![track], 0, false, None, false),
-                Ok(Ok(Resolved::Playlist(id, title))) => w.navigate(NavRequest::Playlist { id, title, thumb: None }),
-                Ok(Ok(Resolved::Artist(id, name))) => w.navigate(NavRequest::Artist { id: Some(id), name }),
-                Ok(Err(err)) => {
-                    tracing::warn!(%err, "soundcloud link did not resolve");
                     w.add_toast("Could not open the link");
                 }
                 Err(_) => {}
@@ -1461,7 +1425,7 @@ impl MainWindow {
     fn navigate(self: &Rc<Self>, request: NavRequest) {
         match request {
             NavRequest::Playlist { id, title, thumb } | NavRequest::Album { id, title, thumb } => {
-                if crate::net::soundcloud::is_soundcloud_id(&id) || crate::net::watchshark::is_watchshark_id(&id) {
+                if crate::net::watchshark::is_watchshark_id(&id) {
                     self.open_external_collection(&id, &title);
                     return;
                 }
@@ -1488,7 +1452,7 @@ impl MainWindow {
                 initial,
             ),
             NavRequest::Artist { id, name } => match id {
-                Some(id) if crate::net::soundcloud::is_soundcloud_id(&id) || crate::net::watchshark::is_watchshark_id(&id) => self.open_external_collection(&id, &name),
+                Some(id) if crate::net::watchshark::is_watchshark_id(&id) => self.open_external_collection(&id, &name),
                 Some(id) => self.open_artist(&id, Some(&name)),
                 None => self.resolve_artist_from_player(),
             },

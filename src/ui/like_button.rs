@@ -103,7 +103,7 @@ impl LikeButton {
             return;
         };
         let client = self.player.net().client();
-        if video_id.is_external() || !client.auth_state().has_session() {
+        if video_id.is_watchshark() || !client.auth_state().has_session() {
             let liked = self.player.local().is_liked(video_id.as_str());
             self.video_id.replace(Some(video_id));
             self.status.set(if liked { LikeStatus::Like } else { LikeStatus::Indifferent });

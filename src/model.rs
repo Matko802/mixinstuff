@@ -15,16 +15,8 @@ impl VideoId {
         &self.0
     }
 
-    pub fn is_soundcloud(&self) -> bool {
-        self.0.starts_with("sc:")
-    }
-
     pub fn is_watchshark(&self) -> bool {
         self.0.starts_with("ws:")
-    }
-
-    pub fn is_external(&self) -> bool {
-        self.is_soundcloud() || self.is_watchshark()
     }
 }
 

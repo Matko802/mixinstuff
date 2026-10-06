@@ -16,7 +16,6 @@ pub mod playlists;
 pub mod potoken;
 pub mod provider;
 pub mod search;
-pub mod soundcloud;
 pub mod stream;
 pub mod uploads;
 pub mod watchshark;
@@ -39,7 +38,6 @@ pub struct NetHandle {
     resolver: Arc<dyn StreamResolver>,
     caches: Arc<Caches>,
     tokens: Arc<potoken::PoTokens>,
-    soundcloud: Arc<soundcloud::SoundCloud>,
     watchshark: Arc<watchshark::WatchShark>,
 }
 
@@ -47,10 +45,9 @@ impl NetHandle {
     pub fn new(rt: tokio::runtime::Handle, paths: &Paths) -> anyhow::Result<Self> {
         let client = YtMusic::new(paths)?;
         let tokens = Arc::new(potoken::PoTokens::new(paths));
-        let soundcloud = soundcloud::SoundCloud::new(paths);
         let watchshark = watchshark::WatchShark::new(paths);
         let ytdlp = Arc::new(YtDlpResolver::new(paths, tokens.clone()));
-        let native = Arc::new(player_endpoint::PlayerEndpointResolver::new(paths, ytdlp.clone(), ytdlp, soundcloud.clone(), watchshark.clone()));
+        let native = Arc::new(player_endpoint::PlayerEndpointResolver::new(paths, ytdlp, watchshark.clone()));
         rt.spawn({
             let native = native.clone();
             async move { native.warm().await }
@@ -67,7 +64,7 @@ impl NetHandle {
                 }
             }
         });
-        Ok(Self { rt, client, resolver, caches, tokens, soundcloud, watchshark })
+        Ok(Self { rt, client, resolver, caches, tokens, watchshark })
     }
 
     pub fn spawn<F>(&self, fut: F) -> JoinHandle<F::Output>
@@ -93,10 +90,6 @@ impl NetHandle {
 
     pub fn tokens(&self) -> &Arc<potoken::PoTokens> {
         &self.tokens
-    }
-
-    pub fn soundcloud(&self) -> &Arc<soundcloud::SoundCloud> {
-        &self.soundcloud
     }
 
     pub fn watchshark(&self) -> &Arc<watchshark::WatchShark> {

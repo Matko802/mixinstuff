@@ -1598,7 +1598,7 @@ impl PlaylistPage {
     fn on_start_radio(&self) {
         let pid = self.audio_playlist_id.borrow().clone().or_else(|| self.playlist_id());
         let Some(pid) = pid else { return };
-        if pid.starts_with("sc:") {
+        if pid.starts_with("ws:") {
             self.ctx.player.start_radio(None, Some(pid));
             toast(&self.stack, "Starting radio...");
             return;

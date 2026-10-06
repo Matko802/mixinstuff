@@ -50,17 +50,12 @@ impl YtDlpResolver {
 
     async fn run(&self, video_id: &VideoId, auth: Option<&HttpAuth>) -> Result<StreamInfo, ResolveError> {
         let url = format!("https://music.youtube.com/watch?v={video_id}");
-        self.run_url(&url, video_id, auth, true).await
-    }
-
-    pub(crate) async fn run_url(&self, url: &str, video_id: &VideoId, auth: Option<&HttpAuth>, youtube: bool) -> Result<StreamInfo, ResolveError> {
         let mut cmd = helper_command(&self.binary);
-        cmd.args(["-j", "--no-playlist", "--no-warnings", "-f", YTDLP_FORMAT, "-S", YTDLP_FORMAT_SORT]);
-        if youtube {
-            cmd.args(["--extractor-args", YTDLP_PLAYER_CLIENTS]).args(["--js-runtimes", "node"]);
-            if let Some(token) = self.tokens.for_video(video_id.as_str()).await {
-                cmd.arg("--extractor-args").arg(crate::net::potoken::extractor_arg(&token));
-            }
+        cmd.args(["-j", "--no-playlist", "--no-warnings", "-f", YTDLP_FORMAT, "-S", YTDLP_FORMAT_SORT])
+            .args(["--extractor-args", YTDLP_PLAYER_CLIENTS])
+            .args(["--js-runtimes", "node"]);
+        if let Some(token) = self.tokens.for_video(video_id.as_str()).await {
+            cmd.arg("--extractor-args").arg(crate::net::potoken::extractor_arg(&token));
         }
         let cookie_file = match auth {
             Some(auth) => {

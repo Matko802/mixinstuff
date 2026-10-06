@@ -23,11 +23,6 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
         switches.push((provider, row));
     }
 
-    let sc_account_row = adw::ActionRow::builder().title("SoundCloud Account").build();
-    let sc_account_button = gtk::Button::builder().valign(gtk::Align::Center).build();
-    sc_account_row.add_suffix(&sc_account_button);
-    group.add(&sc_account_row);
-
     let ws_server_row = adw::ActionRow::builder().title("WatchShark Server").activatable(true).build();
     group.add(&ws_server_row);
     let ws_account_row = adw::ActionRow::builder().title("WatchShark Account").build();
@@ -40,8 +35,6 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
         ctx: ctx.clone(),
         win: Rc::downgrade(win),
         switches,
-        sc_account_row,
-        sc_account_button,
         ws_server_row,
         ws_account_row,
         ws_account_button,
@@ -51,11 +44,6 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
         let row = row.clone();
         let provider = *provider;
         row.connect_active_notify(move |row| state.toggled(provider, row.is_active()));
-    }
-    {
-        let state = state.clone();
-        let button = state.sc_account_button.clone();
-        button.connect_clicked(move |_| state.sc_account_clicked());
     }
     {
         let state = state.clone();
@@ -75,8 +63,6 @@ struct ProviderRows {
     ctx: Rc<App>,
     win: std::rc::Weak<MainWindow>,
     switches: Vec<(Provider, adw::SwitchRow)>,
-    sc_account_row: adw::ActionRow,
-    sc_account_button: gtk::Button,
     ws_server_row: adw::ActionRow,
     ws_account_row: adw::ActionRow,
     ws_account_button: gtk::Button,
@@ -92,7 +78,6 @@ impl ProviderRows {
     fn enabled(&self, provider: Provider) -> bool {
         match provider {
             Provider::YouTube => provider::ytm_enabled(&self.ctx.paths),
-            Provider::SoundCloud => provider::sc_enabled(&self.ctx.paths),
             Provider::WatchShark => provider::ws_enabled(&self.ctx.paths),
         }
     }
@@ -105,7 +90,6 @@ impl ProviderRows {
         }
         match provider {
             Provider::YouTube => provider::set_ytm_enabled(&self.ctx.paths, active),
-            Provider::SoundCloud => provider::set_sc_enabled(&self.ctx.paths, active),
             Provider::WatchShark => provider::set_ws_enabled(&self.ctx.paths, active),
         }
         if !active && provider::active(&self.ctx.paths) == provider {
@@ -132,23 +116,8 @@ impl ProviderRows {
                     };
                     row.set_subtitle(&glib::markup_escape_text(&subtitle));
                 }
-                Provider::SoundCloud => row.set_subtitle("Public catalog: search, charts, tracks and sets"),
                 Provider::WatchShark => row.set_subtitle("Music from your own server"),
             }
-        }
-        let sc = self.ctx.net.soundcloud();
-        let sc_on = self.enabled(Provider::SoundCloud);
-        self.sc_account_row.set_sensitive(sc_on);
-        if sc.has_token() {
-            self.sc_account_row.set_subtitle("Connected: likes sync with your account");
-            self.sc_account_button.set_label("Disconnect");
-            self.sc_account_button.remove_css_class("suggested-action");
-            self.sc_account_button.add_css_class("destructive-action");
-        } else {
-            self.sc_account_row.set_subtitle("Optional: connect for likes");
-            self.sc_account_button.set_label("Connect");
-            self.sc_account_button.remove_css_class("destructive-action");
-            self.sc_account_button.add_css_class("suggested-action");
         }
         let ws = self.ctx.net.watchshark();
         let ws_on = self.enabled(Provider::WatchShark);
@@ -171,26 +140,6 @@ impl ProviderRows {
             self.ws_account_button.remove_css_class("destructive-action");
             self.ws_account_button.add_css_class("suggested-action");
         }
-    }
-
-    fn sc_account_clicked(self: &Rc<Self>) {
-        let sc = self.ctx.net.soundcloud().clone();
-        if sc.has_token() {
-            let this = self.clone();
-            glib::spawn_future_local(async move {
-                sc.set_token(None).await;
-                this.refresh();
-                this.toast("Disconnected from SoundCloud");
-            });
-            return;
-        }
-        let Some(win) = self.win.upgrade() else { return };
-        let this = Rc::downgrade(self);
-        win.open_provider_login(Provider::SoundCloud, move || {
-            if let Some(this) = this.upgrade() {
-                this.refresh();
-            }
-        });
     }
 
     fn ws_server_clicked(self: &Rc<Self>) {

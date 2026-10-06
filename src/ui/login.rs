@@ -15,7 +15,6 @@ const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/201001
 #[derive(Clone)]
 enum LoginMode {
     YouTube,
-    SoundCloud,
     WatchShark { server: String },
 }
 
@@ -23,7 +22,6 @@ impl LoginMode {
     fn title(&self) -> &'static str {
         match self {
             LoginMode::YouTube => "Sign in to YouTube Music",
-            LoginMode::SoundCloud => "Sign in to SoundCloud",
             LoginMode::WatchShark { .. } => "Sign in to WatchShark",
         }
     }
@@ -31,7 +29,6 @@ impl LoginMode {
     fn start_url(&self) -> String {
         match self {
             LoginMode::YouTube => LOGIN_URL.to_owned(),
-            LoginMode::SoundCloud => "https://soundcloud.com/".to_owned(),
             LoginMode::WatchShark { server } => format!("{server}/"),
         }
     }
@@ -52,10 +49,6 @@ pub struct LoginDialog {
 impl LoginDialog {
     pub fn new(ctx: Rc<UiContext>, parent: &impl IsA<gtk::Window>) -> Rc<Self> {
         Self::open(ctx, parent, LoginMode::YouTube)
-    }
-
-    pub fn new_soundcloud(ctx: Rc<UiContext>, parent: &impl IsA<gtk::Window>) -> Rc<Self> {
-        Self::open(ctx, parent, LoginMode::SoundCloud)
     }
 
     pub fn new_watchshark(ctx: Rc<UiContext>, parent: &impl IsA<gtk::Window>, server: &str) -> Rc<Self> {
@@ -160,7 +153,6 @@ impl LoginDialog {
         }
         match self.mode.clone() {
             LoginMode::YouTube => self.on_youtube_request(request),
-            LoginMode::SoundCloud => self.on_soundcloud_request(request),
             LoginMode::WatchShark { server } => self.on_watchshark_request(&server),
         }
     }
@@ -226,58 +218,6 @@ impl LoginDialog {
             d.captured.replace(captured);
             d.finished.set(true);
             d.finish_login();
-        });
-    }
-
-    fn on_soundcloud_request(self: &Rc<Self>, request: &webkit6::URIRequest) {
-        let uri = request.uri().map(|u| u.to_string()).unwrap_or_default();
-        if !uri.contains("api-v2.soundcloud.com") {
-            return;
-        }
-        let token = request
-            .http_headers()
-            .and_then(|h| h.one("Authorization").map(|a| a.to_string()))
-            .and_then(|a| a.strip_prefix("OAuth ").map(str::to_owned))
-            .filter(|t| !t.is_empty());
-        let Some(token) = token else { return };
-        if self.tried_token.borrow().as_deref() == Some(token.as_str()) {
-            return;
-        }
-        self.tried_token.replace(Some(token.clone()));
-        self.finished.set(true);
-        self.set_status("blue", "Signing in...");
-        let weak = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(d) = weak.upgrade() else { return };
-            let sc = d.ctx.net.soundcloud().clone();
-            sc.set_token(Some(token)).await;
-            let outcome = d.ctx.net.spawn(async move { sc.me().await }).await;
-            match outcome {
-                Ok(Ok(name)) => {
-                    tracing::info!(name = %name, "soundcloud login successful");
-                    d.set_status("green", "Signed in.");
-                    d.clear_webkit_cookies();
-                    if let Some(f) = d.on_success.borrow().as_ref() {
-                        f();
-                    }
-                    d.window.close();
-                }
-                Ok(Err(err)) => {
-                    tracing::warn!(%err, "soundcloud login failed");
-                    let sc = d.ctx.net.soundcloud().clone();
-                    sc.set_token(None).await;
-                    d.finished.set(false);
-                    d.tried_token.replace(None);
-                    d.set_status("red", &format!("SoundCloud refused the session: {err}"));
-                }
-                Err(_) => {
-                    let sc = d.ctx.net.soundcloud().clone();
-                    sc.set_token(None).await;
-                    d.finished.set(false);
-                    d.tried_token.replace(None);
-                    d.set_status("red", "SoundCloud refused the session. Try again.");
-                }
-            }
         });
     }
 

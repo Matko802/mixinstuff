@@ -247,36 +247,6 @@ impl ExplorePage {
             return;
         }
         let want = self.provider_bar.active();
-        if want == Provider::SoundCloud {
-            self.clear_explore();
-            self.explore_box.append(&loading_box("Loading…"));
-            let sc = self.ctx.net.soundcloud().clone();
-            let handle = self.ctx.net.spawn(async move { sc.charts().await });
-            self.explore_inflight.replace(Some(handle.abort_handle()));
-            let weak = Rc::downgrade(self);
-            glib::spawn_future_local(async move {
-                let outcome = handle.await;
-                let Some(page) = weak.upgrade() else { return };
-                if page.provider_bar.active() != want {
-                    return;
-                }
-                let Ok(result) = outcome else { return };
-                page.explore_inflight.borrow_mut().take();
-                match result {
-                    Ok(sections) if !sections.is_empty() => {
-                        page.landing.replace(want.id().to_owned());
-                        page.landing_cache.borrow_mut().insert(want.id().to_owned(), ExploreLanding::Charts(sections.clone()));
-                        page.render_chart_sections(sections);
-                    }
-                    Ok(_) => page.update_explore_ui(None),
-                    Err(err) => {
-                        tracing::warn!(%err, "soundcloud charts failed");
-                        page.update_explore_ui(None);
-                    }
-                }
-            });
-            return;
-        }
         if want == Provider::WatchShark {
             self.clear_explore();
             self.explore_box.append(&loading_box("Loading…"));
@@ -620,31 +590,6 @@ impl ExplorePage {
         }
         self.stack.set_visible_child_name("loading");
 
-        if want == Provider::SoundCloud {
-            let sc = self.ctx.net.soundcloud().clone();
-            let lookup = query.clone();
-            let handle = self.ctx.net.spawn(async move { sc.search(&lookup).await });
-            self.inflight.replace(Some(handle.abort_handle()));
-            let weak = Rc::downgrade(self);
-            glib::spawn_future_local(async move {
-                let outcome = handle.await;
-                let Some(page) = weak.upgrade() else { return };
-                if page.current_query.borrow().as_deref() != Some(query.as_str()) || page.provider_bar.active() != want {
-                    return;
-                }
-                page.inflight.borrow_mut().take();
-                match outcome {
-                    Ok(Ok(results)) => page.render_results(&query, results),
-                    Ok(Err(err)) => {
-                        tracing::warn!(%err, %query, "soundcloud search failed");
-                        toast(&page.stack, &format!("Search failed: {err}"));
-                        page.render_results(&query, SearchResults::default());
-                    }
-                    Err(_) => {}
-                }
-            });
-            return;
-        }
         if want == Provider::WatchShark {
             let ws = self.ctx.net.watchshark().clone();
             let lookup = query.clone();
