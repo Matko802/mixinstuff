@@ -139,7 +139,12 @@ impl HomePage {
         if self.loading.get() {
             return;
         }
-        if self.loaded.get() && !force {
+        if self.loading.get() {
+            return;
+        }
+        let want = self.provider_bar.active();
+        let want_id = want.id().to_owned();
+        if !force && self.loaded.get() && *self.landing.borrow() == want_id {
             return;
         }
         self.loading.set(true);
@@ -151,8 +156,6 @@ impl HomePage {
             self.apply_home(Err("offline"));
             return;
         }
-        let want = self.provider_bar.active();
-        let want_id = want.id().to_owned();
         if !force {
             if let Some(cached) = self.section_cache.borrow().get(&want_id).cloned() {
                 self.landing.replace(want_id);
