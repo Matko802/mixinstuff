@@ -552,37 +552,9 @@ Rich Presence, cover theming and the lyrics view landed on 2026-09-18, see
   through playbin's download flag (`set_download_buffering`). Python's tmpfs
   staging and its `noseek_vids.json` memory are not ported and not needed for
   that case. A stream that refuses to seek for another reason stays unseekable.
-- Windows support, in progress. `.github/workflows/build-windows.yml` builds
-  against MSYS2's UCRT64 GTK 4, libadwaita and GStreamer and runs the tests;
-  nothing Windows-only is compiled anywhere else. In place: Discord over the
-  `\\.\pipe\discord-ipc-N` named pipe, bundled SQLite, `.exe` helpers found
-  beside the app, and PO tokens from the bundled `rustypipe-botguard.exe`
-  (`net/potoken_cli.rs`), since V8 has no prebuilt library for windows-gnu.
-  `windows/bundle.sh` lays the release build out like an MSYS2 prefix
-  (`bin/` with the DLLs `ntldd` finds, plus yt-dlp, node, ffmpeg and
-  botguard; `lib/` plugins and modules; `share/` schemas and icons), and
-  `windows/installer.iss` wraps it. `build.rs` embeds the icon and file
-  details from `windows/musishark.rc`. Release builds use the windows
-  subsystem, so helpers start through `stream::helper_command`, which keeps
-  them from opening consoles. `smtc.rs` drives the System Media Transport
-  Controls from a hidden window of its own. `bootstrap.rs` sets the Windows
-  specifics before GTK loads: the AppUserModelID, fontconfig for Pango (in
-  the C runtime's environment, which `set_var` does not reach), and
-  `GDK_DEBUG=dcomp`, without which GTK 4.24 falls back to the CPU renderer.
-  Volume is wasapi2sink's, which is the app's slider in the Windows mixer;
-  it reports every change back late, so `Player` ignores reports for half a
-  second after setting the volume itself. Release builds log to
-  `musishark.log` in the data folder (%LOCALAPPDATA%\muse). GSK defaults to
-  Vulkan there: the GL renderer paints the window shadow black under
-  DirectComposition. Sign-in runs Google's page in WebView2 through wry, as
-  a native child window over an empty area of the GTK dialog (`login.rs`);
-  `bundle.sh` ships `WebView2Loader.dll`, and `gdbus.exe`, which GLib runs
-  as the session bus: without it GApplication finds no running instance and
-  every launch opens another window. `tray.rs` keeps a notification-area
-  icon, the way back to a window hidden for background playback.
-  `bootstrap::register_link_scheme` registers `musishark://` for the current
-  user at every start (the installer does too), and GApplication's open
-  hands a link to the running window as on Linux.
+- Linux-only. The app targets Linux (Flatpak, AUR, Nix) and uses the
+  system font, WebKitGTK for sign-in, MPRIS for media controls and the
+  Unix Discord IPC socket. There is no Windows or macOS support.
 
 Dead in the Python tree, deliberately skipped: `ui/pages/mix.py`,
 `ui/pages/mood.py`, `ui/pages/album.py` and `ui/queue.py` are never

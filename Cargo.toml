@@ -61,47 +61,18 @@ pinyin = { version = "0.11", default-features = false, features = ["with_tone"] 
 # Cover decode and PNG encode for ui/cover_effects.rs, what PIL did. 0.25.9 is the newest release on rust-version 1.85.
 image = { version = "0.25.9", default-features = false, features = ["jpeg", "png", "webp"] }
 
-[target.'cfg(not(windows))'.dependencies]
-# Embedded sign-in page, like ui/login_webview.py. WebKitGTK 6.0 (GNOME 48 runtime ships 2.48).
-# Windows has no WebKitGTK; its sign-in window is WebView2.
+# Embedded sign-in page (ui/login.rs), WebKitGTK 6.0 (GNOME 48 runtime ships 2.48).
 webkit6 = { version = "0.6", features = ["v2_44"] }
-# BotGuard in an embedded V8, for the PO tokens uploaded songs need. V8 has no
-# prebuilt library for windows-gnu, so Windows runs the bundled program instead.
+# BotGuard in an embedded V8, for the PO tokens uploaded songs need.
 rustypipe-botguard = "0.1.2"
 # mallopt, setrlimit and pathconf. See bootstrap.rs and downloads/naming.rs.
 libc = "0.2"
-
-[target.'cfg(windows)'.dependencies]
-# The sign-in page in WebView2 (ui/login.rs), where Linux uses WebKitGTK.
-wry = { version = "0.57", default-features = false, features = ["os-webview"] }
-# System Media Transport Controls (smtc.rs), the AppUserModelID and the
-# Discord pipe's read timeout.
-windows = { version = "0.62", features = [
-    "Foundation",
-    "Media",
-    "Storage_Streams",
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_Security",
-    "Win32_System_LibraryLoader",
-    "Win32_System_Pipes",
-    "Win32_System_Registry",
-    "Win32_System_WinRT",
-    "Win32_UI_Shell",
-    "Win32_UI_WindowsAndMessaging",
-] }
-# SQLite is not a system library on Windows. The Linux builds link the system one.
-rusqlite = { version = "0.40", features = ["bundled"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-# MPRIS D-Bus interface. Wired in when player/mpris.py is ported.
+# MPRIS D-Bus interface.
 mpris-server = { version = "0.10", features = ["tokio"] }
 
 [build-dependencies]
 # Compiles the GResource bundle (stylesheet and icons) in build.rs.
 glib-build-tools = "0.22"
-# The icon and file details in musishark.exe (windows/musishark.rc).
-embed-resource = "3"
 
 [profile.dev.package."*"]
 # Optimized dependencies keep debug builds of gtk and gst usable.

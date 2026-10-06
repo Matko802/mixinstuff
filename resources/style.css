@@ -1,19 +1,8 @@
-/* Force a consistent CJK fallback across every widget. Without this,
-   different widgets pick different fallback fonts for Japanese / Chinese /
-   Korean glyphs (depending on which Pango layout context happens to be
-   used), so the same kanji can render in one font in the queue and another
-   in the lyrics view. Listing the Noto CJK families after Adwaita Sans
-   keeps Latin text in the system look while routing missing-glyph
-   fallbacks to the same CJK family everywhere.
-   NOTE: ``inherit`` is not valid inside a font-family list — GTK's CSS
-   parser drops the whole rule when it sees an invalid value, so we list
-   explicit family names instead. */
-* {
-  font-family: "Adwaita Sans", "Cantarell",
-               "Noto Sans CJK JP", "Noto Sans CJK SC",
-               "Noto Sans CJK TC", "Noto Sans CJK KR",
-               sans-serif;
-}
+/* The app uses the system font: whatever the desktop (GNOME Tweaks,
+   gsettings org.gnome.desktop.interface font-name) selects. No
+   font-family is set here on purpose, so GTK inherits that setting on
+   every widget. CJK glyphs fall back through fontconfig's own
+   sans-serif chain, which is consistent system-wide. */
 
 /* Surface colors are read as var(--window-bg-color) and friends, not the
    @window_bg_color names. libadwaita feeds the vars from the names, never

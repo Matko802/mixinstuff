@@ -16,8 +16,6 @@ A modern, Linux-first YouTube Music player built with GTK4 and Libadwaita.
 [![GitHub issues](https://img.shields.io/github/issues/Matko802/musishark)](https://github.com/Matko802/musishark/issues)
 [![AUR](https://img.shields.io/aur/version/musishark-git)](https://aur.archlinux.org/packages/musishark-git)
 [![Flatpak CI](https://img.shields.io/github/actions/workflow/status/Matko802/musishark/build-flatpak.yml?label=Flatpak%20Build)](https://github.com/Matko802/musishark/actions/workflows/build-flatpak.yml)
-[![Windows Build](https://img.shields.io/github/actions/workflow/status/Matko802/musishark/build-windows.yml?label=Windows%20Build)](https://github.com/Matko802/musishark/actions/workflows/build-windows.yml)
-[![Windows Download](https://img.shields.io/badge/Windows-Download%20Installer-blue?logo=windows)](https://nightly.link/Matko802/musishark/workflows/build-windows/main/musishark-windows-x86_64-setup.zip)
 
 > [!NOTE]
 > This software is in alpha. Expect bugs and missing features.
@@ -64,10 +62,9 @@ Upstream project by [m-obeid](https://github.com/m-obeid) — please consider [s
 - **Full Playback Control** - Play/pause, seeking, queue management, shuffle, repeat modes
 - **Downloads** - Download tracks for offline playback as local files
 - **Scrobbling** - Submit your plays to Last.fm and ListenBrainz, with an offline backlog
-- **MPRIS Support** - Control playback from system media controls (Linux)
-- **Windows SMTC** - System media transport controls integration (Windows)
+- **MPRIS Support** - Control playback from system media controls
 - **Radio & Mixes** - Start a radio station from any song or artist
-- **Background Playback** - Music keeps playing when the window is closed (system tray on Windows)
+- **Background Playback** - Music keeps playing when the window is closed
 - **Playlist Editing** - Reorder, multi-select edit, change covers, visibility, and metadata
 - **Caching** - Cached data for snappy performance
 - **Responsive UI** - Adaptive layout built with Libadwaita
@@ -86,14 +83,6 @@ flatpak install --user ./Musishark-x86_64.flatpak
 Both `x86_64` and `aarch64` builds are available.
 
 </details>
-
-### Windows
-
-Get the installer from the
-[latest Windows build](https://nightly.link/Matko802/musishark/workflows/build-windows/main/musishark-windows-x86_64-setup.zip),
-or the portable folder from the same CI run. The installer adds the Microsoft
-Edge WebView2 Runtime, which the sign-in page needs, where Windows lacks it
-(Windows 10 LTSC, for one).
 
 ### AUR (Arch Linux)
 
@@ -266,14 +255,12 @@ Your desktop sends every `https://` link to the browser and has no way to hand o
 |   ✅️   | **Settings**                 | General, Appearance, Lyrics, Services and Advanced pages                                                                                                                                                                                                                                     |
 |   ✅️   | **Cover Art Tint**           | Tint Libadwaita to match cover art, kinda like Material You, with an optional blurred cover background                                                                                                                                                                                       |
 |   ✅️   | **Scrobbling**               | Submit plays to Last.fm and ListenBrainz<br>✅️ Now Playing<br>✅️ Offline backlog with retries                                                                                                                                                                                                |
-|   ✅️   | **Discord RPC**              | Show your current track on Discord<br>✅️ Linux<br>✅️ Windows                                                                                                                                                                                                                                 |
+|   ✅️   | **Discord RPC**              | Show your current track on Discord                                                                                                                                                                                                                                 |
 |   ✅️   | **Lyrics**                   | Synchronized lyrics using a bunch of providers (Apple Music, BetterLyrics, BiniLyrics, NetEase, LRCLIB, native YT Music)<br>✅️ Reorderable provider search queue<br>✅️ Second line: romanization, translation or background vocals<br>✅️ Word-level karaoke timing with duration-aware fades |
 |   ✅️   | **Rust Rewrite**             | Rewritten in Rust for speed and memory use; the Python app is retired                                                                                                                                                                                                                        |
 |   ✅️   | **AUR**                      | Available as `musishark-git`                                                                                                                                                                                                                                                                  |
 |   ☑️   | **Flatpak**                  | ✅️ Flatpak build (x86_64 and aarch64)<br>✅️ App icon<br>🔜 Flathub release                                                                                                                                                                                                                    |
 |   ☑️   | **Nix**                      | Flake builds; not extensively tested                                                                                                                                                                                                                                                         |
-|   ✅️   | **Windows**                  | Installer and portable builds from CI, with media controls, tray and sign-in                                                                                                                                                                                                                 |
-|   🔜   | **macOS**                    | Can build it for macOS, just need to test, there's a PR for auto-builds.                                                                                                                                                                                                                     |
 |   🔜   | **GNOME Circle**             | Still considering it, might not happen                                                                                                                                                                                                                                                       |
 
 Have an idea or found a bug? [Open an issue!](https://github.com/Matko802/musishark/issues)

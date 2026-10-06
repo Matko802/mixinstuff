@@ -900,13 +900,10 @@ fn write_json(path: &std::path::Path, data: &Value, private: bool) {
         }
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec_pretty(data).map_err(std::io::Error::other)?)?;
-        #[cfg(unix)]
         if private {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
         }
-        #[cfg(not(unix))]
-        let _ = private;
         std::fs::rename(&tmp, path)
     };
     if let Err(err) = write() {

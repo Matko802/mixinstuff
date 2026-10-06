@@ -125,14 +125,9 @@ pub fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
-/// The IPC connection: a Unix socket, or on Windows the named pipe Discord
-/// listens on, which opens like a file. The frames are the same on both.
-#[cfg(unix)]
+/// The IPC connection: a Unix socket. The frames are the same on both.
 type IpcStream = std::os::unix::net::UnixStream;
-#[cfg(windows)]
-type IpcStream = std::fs::File;
 
-#[cfg(unix)]
 fn open_ipc(path: &std::path::Path) -> std::io::Result<IpcStream> {
     let stream = IpcStream::connect(path)?;
     stream.set_read_timeout(Some(IO_TIMEOUT))?;
@@ -140,49 +135,10 @@ fn open_ipc(path: &std::path::Path) -> std::io::Result<IpcStream> {
     Ok(stream)
 }
 
-/// A pipe has no timeouts to set, so `wait_for_reply` bounds each read instead.
-#[cfg(windows)]
-fn open_ipc(path: &std::path::Path) -> std::io::Result<IpcStream> {
-    std::fs::OpenOptions::new().read(true).write(true).open(path)
-}
-
-/// Wait until a whole frame header sits in the pipe, or give up after
-/// IO_TIMEOUT. A blocking read on a pipe never times out, and one reply that
-/// never came used to stall the worker for the rest of the session.
-#[cfg(windows)]
-fn wait_for_reply(stream: &IpcStream) -> std::io::Result<()> {
-    use std::os::windows::io::AsRawHandle;
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::System::Pipes::PeekNamedPipe;
-    let deadline = Instant::now() + IO_TIMEOUT;
-    loop {
-        let mut available = 0u32;
-        // SAFETY: the handle belongs to `stream`, which outlives the call; only the count is written.
-        unsafe { PeekNamedPipe(HANDLE(stream.as_raw_handle()), None, 0, None, Some(&mut available), None) }.map_err(std::io::Error::other)?;
-        if available >= 8 {
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "discord did not answer"));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
-/// The socket's own read timeout covers this on Unix.
-#[cfg(unix)]
+/// The socket's own read timeout covers this.
 fn wait_for_reply(_stream: &IpcStream) -> std::io::Result<()> {
     Ok(())
 }
-
-#[cfg(windows)]
-fn candidate_ipc_paths() -> Vec<PathBuf> {
-    (0..10).map(|i| PathBuf::from(format!(r"\\.\pipe\discord-ipc-{i}"))).collect()
-}
-
-/// Every path a Discord client exposes, Flatpak and Snap variants included.
-#[cfg(unix)]
-fn candidate_ipc_paths() -> Vec<PathBuf> {
     let mut bases: Vec<PathBuf> = Vec::new();
     if let Some(xdg) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from) {
         bases.push(xdg.clone());
@@ -353,8 +309,8 @@ impl Connection {
             return;
         }
         for path in candidate_ipc_paths() {
-            // A named pipe does not show up as an existing path; opening it is the test.
-            if cfg!(unix) && !path.exists() {
+            // A missing socket path is not a Discord client; opening it is the test otherwise.
+            if !path.exists() {
                 continue;
             }
             match self.handshake(&path) {

@@ -6,9 +6,6 @@
 //! 3. GStreamer init, the tokio runtime and the audio thread,
 //! 4. the libadwaita application, which owns the GTK main loop.
 
-// Release builds on Windows open no console window next to the app.
-#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
-
 mod audio;
 mod bootstrap;
 mod demo;
@@ -17,8 +14,6 @@ mod downloads;
 mod local_library;
 mod lyrics;
 mod model;
-// MPRIS on Linux. Elsewhere the same two calls land in smtc.rs.
-#[cfg_attr(not(target_os = "linux"), path = "smtc.rs")]
 mod mpris;
 mod net;
 mod paths;
@@ -74,11 +69,6 @@ pub struct App {
 fn main() -> glib::ExitCode {
     bootstrap::cap_malloc_arenas();
     bootstrap::raise_fd_limit();
-    bootstrap::prefer_bundled_programs();
-    bootstrap::use_bundled_fonts();
-    bootstrap::enable_gpu_rendering();
-    bootstrap::set_app_user_model_id();
-    bootstrap::register_link_scheme();
 
     let paths = Paths::discover();
     bootstrap::init_logging(&paths);

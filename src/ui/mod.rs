@@ -144,18 +144,6 @@ pub fn load_css() {
         provider.load_from_string(css);
         gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
-    // GTK on Windows defaults to Segoe UI 9 with full hinting. GNOME's 11pt,
-    // slight hinting and grayscale antialiasing keep the layout the same size as on Linux.
-    #[cfg(windows)]
-    if let Some(settings) = gtk::Settings::default() {
-        settings.set_gtk_font_name(Some("Adwaita Sans 11"));
-        settings.set_gtk_xft_antialias(1);
-        settings.set_gtk_xft_hinting(1);
-        settings.set_gtk_xft_hintstyle(Some("hintslight"));
-        settings.set_gtk_xft_rgba(Some("none"));
-        // 96 dpi, in 1024ths.
-        settings.set_gtk_xft_dpi(96 * 1024);
-    }
 }
 
 /// "m:ss" for the timings label.

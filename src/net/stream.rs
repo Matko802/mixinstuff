@@ -272,23 +272,15 @@ pub async fn write_netscape_cookies(dir: &Path, cookie_header: &str) -> std::io:
     Ok(path)
 }
 
-/// A `Command` for a helper program. On Windows it gets no console window,
-/// which a windowless app would otherwise open for every yt-dlp run.
+/// A `Command` for a helper program (yt-dlp, node, ffmpeg).
 pub fn helper_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    #[cfg_attr(not(windows), allow(unused_mut))]
-    let mut cmd = Command::new(program);
-    // CREATE_NO_WINDOW
-    #[cfg(windows)]
-    cmd.creation_flags(0x0800_0000);
-    cmd
+    Command::new(program)
 }
 
 /// PATH lookup plus the install spots the Python app checked.
 pub fn find_executable(name: &str) -> Option<PathBuf> {
     let name = &format!("{name}{}", std::env::consts::EXE_SUFFIX);
-    // A Windows install carries its helpers beside the app.
-    let beside_app = std::env::current_exe().ok().filter(|_| cfg!(windows)).and_then(|exe| exe.parent().map(|dir| dir.join(name)));
-    let mut candidates: Vec<PathBuf> = beside_app.into_iter().collect();
+    let mut candidates: Vec<PathBuf> = Vec::new();
     candidates.extend(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).map(|d| d.join(name)).collect::<Vec<_>>()).unwrap_or_default());
     if let Some(home) = std::env::var_os("HOME") {
         candidates.push(PathBuf::from(home).join(".cargo/bin").join(name));
