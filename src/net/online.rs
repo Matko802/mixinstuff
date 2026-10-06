@@ -1,8 +1,3 @@
-//! Port of the connectivity probe in ui/utils.py. Gio.NetworkMonitor is fast
-//! but noisy, so it only triggers a probe. A TCP connect to music.youtube.com
-//! decides, and listeners hear about real transitions once each.
-//!
-//! GTK-thread only: the probe runs on tokio, the bookkeeping does not.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -13,12 +8,8 @@ use gtk::glib;
 use crate::net::NetHandle;
 use crate::paths::Paths;
 
-/// How stale the cached answer is allowed to get before is_online re-probes.
 const PROBE_INTERVAL: Duration = Duration::from_secs(15);
-/// The force_offline pref is read from disk at most this often.
 const FORCE_OFFLINE_TTL: Duration = Duration::from_secs(10);
-/// Mobile data waking from sleep can take a few seconds to connect, and a
-/// false "offline" drops taps on songs that need the network.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const PROBE_HOST: (&str, u16) = ("music.youtube.com", 443);
 
@@ -28,11 +19,9 @@ type Waiter = Box<dyn FnOnce(bool)>;
 pub struct Online {
     net: NetHandle,
     paths: Paths,
-    /// Optimistic until the first probe lands, like the Python default.
     value: Cell<bool>,
     last_probe: Cell<Option<Instant>>,
     in_flight: Cell<bool>,
-    /// The last value handed to listeners.
     notified: Cell<bool>,
     listeners: RefCell<Vec<Listener>>,
     waiters: RefCell<Vec<Waiter>>,
@@ -54,7 +43,6 @@ impl Online {
         })
     }
 
-    /// The force_offline pref, cached so bind paths do not hit the disk.
     fn force_offline(&self) -> bool {
         let (value, expires) = self.force_offline.get();
         if expires.is_some_and(|t| Instant::now() < t) {
@@ -65,12 +53,10 @@ impl Online {
         value
     }
 
-    /// `listener(online)` runs on the GTK thread each time a probe flips the state.
     pub fn add_listener(&self, listener: impl Fn(bool) + 'static) {
         self.listeners.borrow_mut().push(Rc::new(listener));
     }
 
-    /// The last observed state. Never blocks; kicks a background probe when stale.
     pub fn is_online(self: &Rc<Self>) -> bool {
         if self.force_offline() {
             return false;
@@ -89,8 +75,6 @@ impl Online {
         self.start_probe();
     }
 
-    /// Probe at once, ignoring staleness, and hand the fresh answer to `callback`.
-    /// A probe already in flight is joined rather than duplicated.
     pub fn probe_now(self: &Rc<Self>, callback: Option<Waiter>) {
         if let Some(cb) = callback {
             self.waiters.borrow_mut().push(cb);
@@ -101,7 +85,6 @@ impl Online {
         self.start_probe();
     }
 
-    /// Force the next is_online to re-probe and re-read force_offline.
     pub fn invalidate(&self) {
         self.force_offline.set((false, None));
         self.last_probe.set(None);

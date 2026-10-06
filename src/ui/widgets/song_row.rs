@@ -1,6 +1,3 @@
-//! Port of ui/widgets/song_row.py: thumbnail with a playing indicator, title
-//! with explicit and downloaded badges, subtitle, duration, like button,
-//! right-click menu, and a click that ignores drags.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -20,7 +17,6 @@ const CLICK_SLOP: f64 = 10.0;
 const ANIMATION_STEP: Duration = Duration::from_millis(350);
 
 type ActivateHandler = Rc<dyn Fn(&MediaItem)>;
-/// What a page adds to this row's menu, built fresh each time it opens.
 type MenuExtras = Rc<dyn Fn() -> Vec<MenuAction>>;
 
 pub struct SongRow {
@@ -44,11 +40,8 @@ pub struct SongRow {
     state_handler: RefCell<Option<glib::SignalHandlerId>>,
     on_activate: RefCell<Option<ActivateHandler>>,
     press_at: Cell<(f64, f64)>,
-    /// Search rows tint the ListBoxRow and show no indicator, like attach_playing_highlight.
     row_highlight: Cell<bool>,
-    /// A subtitle the page named itself, drawn plain with no kind icon.
     plain_subtitle: RefCell<Option<String>>,
-    /// Extra menu entries the page contributes, built when the menu opens.
     menu_extras: RefCell<Option<MenuExtras>>,
 }
 
@@ -64,7 +57,6 @@ impl SongRow {
 
         let track_num = gtk::Label::builder().css_classes(["dim-label", "caption"]).valign(gtk::Align::Center).halign(gtk::Align::Center).width_request(40).height_request(40).visible(false).build();
 
-        // Same square and radius as the thumbnail, bars centered near the bottom.
         let indicator = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).halign(gtk::Align::Center).valign(gtk::Align::Center).css_classes(["playing-indicator", "song-img"]).visible(false).build();
         let bars_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(3).hexpand(true).halign(gtk::Align::Center).valign(gtk::Align::End).margin_bottom(12).build();
         let bars = [1, 2, 3].map(|n| {
@@ -130,32 +122,24 @@ impl SongRow {
         &self.row
     }
 
-    /// Search-page row: tint the outer ListBoxRow, no indicator, no duration column,
-    /// and the "Kind • Artist • Album" subtitle search.py built.
     pub fn set_search_style(&self, enabled: bool) {
         self.row_highlight.set(enabled);
         self.duration.set_visible(!enabled);
     }
 
-    /// Entries this row's menu carries on top of the standard ones, the way
-    /// the history page adds Play and Remove from History.
     pub fn set_menu_extras(&self, f: impl Fn() -> Vec<MenuAction> + 'static) {
         self.menu_extras.replace(Some(Rc::new(f)));
     }
 
-    /// Draw this text under the title instead of the kind line, the way the
-    /// category page and the history page write their own.
     pub fn set_plain_subtitle(&self, text: Option<String>) {
         self.plain_subtitle.replace(text);
     }
 
-    /// Without this the row relies on its ListBox's row-activated signal.
     #[allow(dead_code)]
     pub fn set_on_activate(&self, f: impl Fn(&MediaItem) + 'static) {
         self.on_activate.replace(Some(Rc::new(f)));
     }
 
-    /// Fill the row. A track number replaces the thumbnail on album pages.
     pub fn bind(self: &Rc<Self>, item: &MediaItem, track_number: Option<u32>) {
         self.item.replace(Some(item.clone()));
         self.title.set_label(&item.title);
@@ -172,7 +156,6 @@ impl SongRow {
         } else {
             self.subtitle_box.append(&kind_subtitle(item, true, false));
         }
-        // A live stream has no length. Its subtitle carries the antenna instead.
         self.duration.set_label(&item.duration_text().unwrap_or_default());
         self.explicit.set_visible(item.explicit);
         self.dl_icon.set_visible(item.kind == ItemKind::Song && self.ctx.downloads.is_downloaded(&item.id));
@@ -201,7 +184,6 @@ impl SongRow {
             self.like.set_data(None, None);
         }
 
-        // Follow the current track. One handler per row, dropped with the row.
         if let Some(id) = self.state_handler.borrow_mut().take() {
             self.ctx.player.state().disconnect(id);
         }

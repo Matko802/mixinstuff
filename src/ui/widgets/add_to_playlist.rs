@@ -1,7 +1,3 @@
-//! Port of ui/widgets/add_to_playlist.py: the popover for picking a playlist
-//! to add tracks to. Cover thumbnails, type-to-search, recently-used first,
-//! and a capped height so a user with two hundred playlists scrolls the
-//! list, not the window.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -45,7 +41,6 @@ fn install_css() {
     });
 }
 
-// -- recents --------------------------------------------------------------
 
 fn recents_path(paths: &Paths) -> std::path::PathBuf {
     paths.cache_dir.join("playlist_recents.json")
@@ -58,7 +53,6 @@ fn load_recents(paths: &Paths) -> HashMap<String, i64> {
         .unwrap_or_default()
 }
 
-/// Bump a playlist's last-used stamp after a successful add. Best effort.
 pub fn mark_playlist_used(paths: &Paths, playlist_id: &str) {
     if playlist_id.is_empty() {
         return;
@@ -87,7 +81,6 @@ pub fn mark_playlist_used(paths: &Paths, playlist_id: &str) {
     }
 }
 
-// -- popover --------------------------------------------------------------
 
 pub struct AddToPlaylistPopover {
     popover: gtk::Popover,
@@ -100,7 +93,6 @@ pub struct AddToPlaylistPopover {
 }
 
 impl AddToPlaylistPopover {
-    /// Build, anchor on `parent`, fill and pop up. `on_select` gets the playlist id.
     pub fn show(
         ctx: &Rc<UiContext>,
         parent: &impl IsA<gtk::Widget>,
@@ -145,7 +137,6 @@ impl AddToPlaylistPopover {
             .visible(false)
             .build();
         outer.append(&empty_label);
-        // Always there, so a listener with no playlist yet, or signed out, can still add.
         let new_button = gtk::Button::builder()
             .child(&adw::ButtonContent::builder().icon_name("list-add-symbolic").label("New Playlist…").build())
             .css_classes(["flat"])
@@ -207,7 +198,6 @@ impl AddToPlaylistPopover {
                 crate::ui::playlist_ops::ask_new_playlist(&this.ctx, &parent, move |id, _title| on_select(id));
             });
         }
-        // The popover owns the struct until it closes.
         unsafe { popover.set_data("add-to-playlist", this.clone()) };
         popover.connect_closed(|popover| {
             let popover = popover.clone();
@@ -230,8 +220,6 @@ impl AddToPlaylistPopover {
         }
     }
 
-    /// Port of _populate: editable playlists, most recently used in-app first,
-    /// the rest in the library's own most-recently-modified order.
     fn populate(self: &Rc<Self>) {
         let cached = self.ctx.net.caches().library_playlists();
         if !cached.is_empty() {
@@ -260,7 +248,6 @@ impl AddToPlaylistPopover {
         });
     }
 
-    /// Playlists on this device first, then the account's editable ones.
     fn fill(self: &Rc<Self>, playlists: Vec<MediaItem>) {
         let mut all = self.ctx.local.playlist_items();
         all.extend(editable_playlists(&playlists, self.account_name().as_deref()));

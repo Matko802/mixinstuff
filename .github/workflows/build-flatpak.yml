@@ -9,11 +9,6 @@ on:
 jobs:
   flatpak:
     name: Build Flatpak (${{ matrix.arch }})
-    # Each arch builds on a native runner. The aarch64 leg used to run under
-    # QEMU, which was tolerable while the app module only copied Python files
-    # around. It no longer is: the module now compiles the app with Nuitka, and
-    # emulated C compilation plus linking would take hours and flirt with the
-    # 6-hour job limit. ubuntu-24.04-arm is free for public repos.
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -33,10 +28,6 @@ jobs:
           sudo apt-get install -y flatpak flatpak-builder xvfb
           sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
-      # Nuitka compiles ~60 generated C files per build. A new key is written
-      # every run so the cache tracks the latest commit, and restore-keys falls
-      # back to whatever the previous run left. Separate per arch: the objects
-      # are native and share nothing across x86_64 and aarch64.
       - name: Restore ccache
         uses: actions/cache@v4
         with:
@@ -49,22 +40,9 @@ jobs:
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
         run: |
-          # flatpak-builder --ccache exposes $CCACHE_DIR inside the build
-          # sandbox; Nuitka finds ccache there and routes its C compilation
-          # through it on its own. The log line to watch is "Cached C files
-          # (using ccache) with result ...", which reads 58 misses on a cold
-          # cache and 58 hits on a warm one.
-          #
-          # Set the size cap through ccache.conf rather than `ccache -M`: the
-          # runner has no ccache binary, only the SDK inside the sandbox does.
-          # One build's objects come to ~22 MB, so 1 GB is ample headroom.
           mkdir -p "$CCACHE_DIR"
           printf 'max_size = 1.0G\n' > "$CCACHE_DIR/ccache.conf"
 
-          # `sudo env VAR=...` rather than --preserve-env: it does not depend on
-          # the runner's sudoers env policy, and a silently dropped CCACHE_DIR
-          # would send the cache to flatpak-builder's default state dir and
-          # leave actions/cache saving an empty .ccache every run.
           sudo env CCACHE_DIR="$CCACHE_DIR" xvfb-run --auto-servernum flatpak-builder \
             --ccache \
             --repo=repo \
@@ -76,9 +54,6 @@ jobs:
             flatpak_app com.matko802.Muse.yaml
           flatpak build-bundle --arch=${{ matrix.arch }} repo Mixtapes-${{ matrix.arch }}.flatpak com.matko802.Muse master
 
-          # The build ran as root, so everything it wrote to the cache is
-          # root-owned and the unprivileged actions/cache post-step cannot read
-          # it. Without this the cache silently never saves.
           sudo chown -R "$(id -u):$(id -g)" "$CCACHE_DIR"
           echo "ccache size: $(du -sh "$CCACHE_DIR" | cut -f1)"
       - name: Upload artifact
@@ -120,17 +95,14 @@ jobs:
           mkdir -p repo
           ostree init --mode=archive-z2 --repo=repo
 
-          # Export the public key for users to download
           gpg --export --armor ${{ secrets.GPG_KEY_ID }} > repo/mixtapes.gpg
 
           for f in downloaded-flatpaks/*.flatpak; do
             flatpak build-import-bundle --gpg-sign=${{ secrets.GPG_KEY_ID }} repo "$f"
           done
 
-          # Update repo and generate summary signed with the GPG key
           flatpak build-update-repo --generate-static-deltas --gpg-sign=${{ secrets.GPG_KEY_ID }} repo
 
-          # Generate the .flatpakrepo file
           cat << EOF > repo/mixtapes.flatpakrepo
           [Flatpak Repo]
           Title=Mixtapes

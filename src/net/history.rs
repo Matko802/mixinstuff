@@ -1,11 +1,3 @@
-//! Listening history: the plays YouTube has recorded, the token that removes
-//! one, and the ping that records a new one. Port of ytmusicapi's
-//! `get_history`, `remove_history_items` and `add_history_item`, plus the
-//! disk cache MusicClient keeps beside the download library.
-//!
-//! The cache is the one-row `history_cache` table in the SQLite file both
-//! apps share, written in ytmusicapi's own dict shape so either app can read
-//! what the other left.
 
 use std::sync::{Arc, LazyLock};
 
@@ -20,25 +12,17 @@ use crate::downloads::store::Store;
 use crate::model::{HttpAuth, LikeStatus, Named, Person, Track, VideoId};
 use crate::net::ytmusic::NetError;
 
-/// The heading a play with no `played` value is filed under.
 const UNDATED: &str = "Recently";
-/// What YouTube's playback tracker wants alongside the ping.
 const CLIENT_NAME: &str = "WEB_REMIX";
-/// Character set of the playback id ytmusicapi makes up per ping.
 const CPN_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
 
-/// One play: the track, when YouTube says it happened, and how to forget it.
 #[derive(Clone, Debug)]
 pub struct HistoryEntry {
     pub track: Track,
-    /// The shelf heading this play arrived under: Today, Yesterday, This week.
     pub played: String,
-    /// Removes this play when handed to the feedback endpoint. Absent on a
-    /// brand account, where YouTube offers no such menu entry.
     pub feedback_token: Option<String>,
 }
 
-/// Every play, newest first, grouped the way YouTube grouped them.
 pub async fn get_history(api: Arc<dyn Browse>) -> Result<Vec<HistoryEntry>, NetError> {
     let response = api.post("browse", json!({ "browseId": "FEmusic_history" })).await?;
     Ok(parse_history(&response))
@@ -62,10 +46,6 @@ pub fn parse_history(response: &Value) -> Vec<HistoryEntry> {
     entries
 }
 
-/// Port of _normalize_durations' artist pass: YouTube files the view count
-/// in the same column as the artists, so ytmusicapi hands it back as one of
-/// them. Left alone it reads as "Jamie Paige, 7.2M views" everywhere the
-/// artist line is shown.
 fn without_view_counts(mut track: Track) -> Track {
     track.artists.retain(|artist| !is_view_count(&artist.name));
     track.artist = track.artists.iter().map(|a| a.name.as_str()).filter(|n| !n.is_empty()).collect::<Vec<_>>().join(", ");
@@ -78,7 +58,6 @@ fn is_view_count(text: &str) -> bool {
 
 static VIEW_COUNT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\d+(?:[.,]\d+)?\s*[kKmMbB]?\s*views?\s*$").unwrap());
 
-/// Forget plays. The tokens come off the rows themselves.
 pub async fn remove_history_items(api: &dyn Browse, tokens: Vec<String>) -> Result<(), NetError> {
     if tokens.is_empty() {
         return Ok(());
@@ -87,21 +66,13 @@ pub async fn remove_history_items(api: &dyn Browse, tokens: Vec<String>) -> Resu
     Ok(())
 }
 
-// -- recording a play -----------------------------------------------------
 
-/// Port of add_history_item: ping the playback tracker the player endpoint
-/// hands out for this video, which is what puts the play in the history.
-///
-/// Answers with the track as YouTube describes it, so the caller can put the
-/// play at the top of the cache before the server-side roll-up catches up.
 pub async fn record_play(api: &dyn Browse, http: &reqwest::Client, auth: Option<&HttpAuth>, video_id: &str) -> Result<Track, NetError> {
     let song = api.post("player", json!({ "videoId": video_id })).await?;
     let Some(url) = owned_at(&song, "/playbackTracking/videostatsPlaybackUrl/baseUrl") else {
         return Err(NetError::Message(format!("{video_id} has no playback tracker")));
     };
 
-    // The tracker URL already carries a query string, so the three parameters
-    // ytmusicapi adds go on the end of it.
     let separator = if url.contains('?') { '&' } else { '?' };
     let url = format!("{url}{separator}ver=2&c={CLIENT_NAME}&cpn={}", cpn());
     let mut request = http.get(&url);
@@ -118,12 +89,10 @@ pub async fn record_play(api: &dyn Browse, http: &reqwest::Client, auth: Option<
     Ok(track_from_player(&song, video_id))
 }
 
-/// A 16-character playback id. YouTube only needs it to be different each time.
 fn cpn() -> String {
     let mut seed = glib::monotonic_time() as u64 ^ 0x9e37_79b9_7f4a_7c15;
     (0..16)
         .map(|_| {
-            // xorshift: a throwaway id needs no more than this.
             seed ^= seed << 13;
             seed ^= seed >> 7;
             seed ^= seed << 17;
@@ -132,7 +101,6 @@ fn cpn() -> String {
         .collect()
 }
 
-/// What the player endpoint says about the video, as a queue entry.
 fn track_from_player(song: &Value, video_id: &str) -> Track {
     let details = song.pointer("/videoDetails").unwrap_or(&Value::Null);
     let author = owned_at(details, "/author").unwrap_or_default();
@@ -148,10 +116,7 @@ fn track_from_player(song: &Value, video_id: &str) -> Track {
     }
 }
 
-// -- the shared cache -----------------------------------------------------
 
-/// One cached play. The field names are ytmusicapi's, because the Python app
-/// reads and writes this same row.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct CachedPlay {
     #[serde(rename = "videoId")]
@@ -224,7 +189,6 @@ impl From<CachedPlay> for HistoryEntry {
     }
 }
 
-/// "3:42" or "1:02:03" to seconds, what _normalize_durations filled in.
 fn parse_clock(text: &str) -> Option<u32> {
     let mut total = 0u32;
     for part in text.split(':') {
@@ -252,7 +216,6 @@ pub fn cache_history(store: &Store, entries: &[HistoryEntry]) {
     }
 }
 
-/// Drop one play from the cache, after it was removed upstream.
 pub fn forget_cached(store: &Store, video_id: &str) {
     let mut entries = cached_history(store);
     let before = entries.len();
@@ -262,8 +225,6 @@ pub fn forget_cached(store: &Store, video_id: &str) {
     }
 }
 
-/// Put a play at the top of the cache, so the page shows it before YouTube's
-/// own history catches up. Port of _prepend_to_history_cache.
 pub fn prepend_cached(store: &Store, track: &Track) {
     let mut entries = cached_history(store);
     entries.retain(|entry| entry.track.video_id != track.video_id);
@@ -275,7 +236,6 @@ pub fn prepend_cached(store: &Store, track: &Track) {
 mod tests {
     use super::*;
 
-    /// Hits the network. `cargo test -- --ignored live_history --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_history() {
@@ -384,7 +344,6 @@ mod tests {
             feedback_token: Some("tok".into()),
         };
         let json = serde_json::to_string(&[CachedPlay::from(&entry)]).unwrap();
-        // The Python app reads these keys; keep them spelled its way.
         assert!(json.contains("\"videoId\""), "{json}");
         assert!(json.contains("\"likeStatus\":\"LIKE\""), "{json}");
         assert!(json.contains("\"isExplicit\":true"), "{json}");
@@ -399,7 +358,6 @@ mod tests {
 
     #[test]
     fn a_python_written_row_reads_back() {
-        // What the Python app leaves in the table, duration only as a clock.
         let json = r#"[{"videoId":"abc","title":"A Song","artists":[{"name":"An Artist","id":"UC1"}],"album":{"name":"An Album","id":null},"duration":"1:02:03","thumbnails":[{"url":"small"},{"url":"large"}],"played":"Today","likeStatus":"INDIFFERENT"}]"#;
         let entry: HistoryEntry = serde_json::from_str::<Vec<CachedPlay>>(json).unwrap().remove(0).into();
         assert_eq!(entry.track.duration_seconds, Some(3723));

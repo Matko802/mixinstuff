@@ -1,7 +1,3 @@
-//! In-memory caches MusicClient kept: full playlist track lists, the
-//! view-count and date-added maps behind the sort dropdown, and the ids of
-//! everything saved in the library for the Add to Library toggle. Shared by
-//! the GTK thread and tokio tasks, hence the mutexes.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -19,21 +15,16 @@ pub struct LibraryIds {
 }
 
 impl LibraryIds {
-    /// Port of MusicClient.is_in_library's lookup once the cache is warm.
     pub fn contains(&self, id: &str) -> bool {
         let pid = id.strip_prefix("VL").unwrap_or(id);
         self.playlists.contains(pid) || self.albums.contains(pid)
     }
 }
 
-/// `{videoId: number}` behind a metric sort.
 pub type SortMetric = HashMap<String, i64>;
 
-/// Album track counts, one row each, in a small SQLite file. It used to be one
-/// JSON map rewritten whole on the GTK thread every time an album was opened.
 const ALBUM_TRACKS_DB: &str = "cache.db";
 const ALBUM_TRACKS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS album_track_counts (album_id TEXT PRIMARY KEY, track_count INTEGER NOT NULL)";
-/// The JSON file the counts lived in before, read once and folded in.
 const ALBUM_TRACKS_LEGACY: &str = "album_track_counts.json";
 
 fn open_album_tracks(paths: &Paths) -> (Option<rusqlite::Connection>, HashMap<String, u32>) {
@@ -67,7 +58,6 @@ pub struct Caches {
     library_ids: Mutex<Option<LibraryIds>>,
     library_playlists: Mutex<Vec<MediaItem>>,
     subscribed_artists: Mutex<HashSet<String>>,
-    /// Track counts of albums that were opened, by browse id. Saved to disk.
     album_tracks: Mutex<HashMap<String, u32>>,
     album_tracks_db: Mutex<Option<rusqlite::Connection>>,
 }
@@ -78,7 +68,6 @@ impl Caches {
         Self { disk: PlaylistDiskCache::new(paths), playlist_tracks: Mutex::default(), sort_metrics: Mutex::default(), library_ids: Mutex::default(), library_playlists: Mutex::default(), subscribed_artists: Mutex::default(), album_tracks: Mutex::new(counts), album_tracks_db: Mutex::new(db) }
     }
 
-    /// "Single", "EP" or "Album" by track count, the rule the album page uses.
     pub fn release_kind(track_count: u32) -> &'static str {
         match track_count {
             1 => "Single",
@@ -87,8 +76,6 @@ impl Caches {
         }
     }
 
-    /// The label for an album card. YouTube files a six-track EP under
-    /// "Single" on artist pages, so a count learned from the album itself wins.
     pub fn release_kind_for(&self, album_id: &str) -> Option<&'static str> {
         self.album_tracks.lock().unwrap().get(album_id).copied().map(Self::release_kind)
     }
@@ -104,7 +91,6 @@ impl Caches {
         }
     }
 
-    /// The on-disk playlist store, what DownloadDB's library_cache table was.
     pub fn disk(&self) -> &PlaylistDiskCache {
         &self.disk
     }
@@ -141,12 +127,10 @@ impl Caches {
         self.library_ids.lock().unwrap().replace(ids);
     }
 
-    /// Forget the saved ids so the next check refetches, as after a rating change.
     pub fn clear_library_ids(&self) {
         self.library_ids.lock().unwrap().take();
     }
 
-    /// The library playlists from the last fetch, what get_editable_playlists filtered.
     pub fn library_playlists(&self) -> Vec<MediaItem> {
         self.library_playlists.lock().unwrap().clone()
     }
@@ -155,7 +139,6 @@ impl Caches {
         *self.library_playlists.lock().unwrap() = playlists;
     }
 
-    /// Port of is_subscribed_artist against the local subscription set.
     pub fn is_subscribed(&self, channel_id: &str) -> bool {
         self.subscribed_artists.lock().unwrap().contains(channel_id)
     }
@@ -174,9 +157,7 @@ impl Caches {
     }
 }
 
-// -- on-disk playlist cache -----------------------------------------------
 
-/// Header fields beyond title and author, what DownloadDB stored as meta_json.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CachedMeta {
     #[serde(default)]
@@ -199,8 +180,6 @@ pub struct CachedMeta {
     pub album_type: Option<String>,
 }
 
-/// One playlist or album as the page last saw it, rendered on the next open
-/// before the live fetch and used as the whole page offline.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CachedPlaylist {
     pub playlist_id: String,
@@ -217,9 +196,6 @@ pub struct CachedPlaylist {
     pub meta: CachedMeta,
 }
 
-/// Port of DownloadDB.cache_playlist, get_cached_playlist and
-/// invalidate_playlist_cache as one JSON file per playlist under the data
-/// directory. Blocking file IO: call from a blocking task.
 pub struct PlaylistDiskCache {
     dir: PathBuf,
 }
@@ -235,7 +211,6 @@ impl PlaylistDiskCache {
     }
 
     fn rejects(playlist_id: &str) -> bool {
-        // A mix that changes on every fetch is never cached.
         playlist_id.is_empty() || playlist_id.starts_with("RDTMAK")
     }
 
@@ -247,12 +222,10 @@ impl PlaylistDiskCache {
         serde_json::from_str(&text).ok()
     }
 
-    /// Whether a cached copy with rows exists, what the library's offline greying asks.
     pub fn has_tracks(&self, playlist_id: &str) -> bool {
         self.get(playlist_id).is_some_and(|c| !c.tracks.is_empty())
     }
 
-    /// Write unless it would replace a richer copy with a partial fetch.
     pub fn put(&self, entry: &CachedPlaylist) {
         if Self::rejects(&entry.playlist_id) {
             return;

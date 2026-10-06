@@ -1,6 +1,3 @@
-//! The provider chain: walk the listener's queue, settle on a result, and give it a second line. Port of `_run_lyrics_chain`, `augment_result` and the match browser from api/client.py.
-//!
-//! The queue comes from `LyricsPrefs`, with disabled providers already out of it. Each provider declares the richest shape it can produce, so one that cannot beat the result in hand is skipped without a network call.
 
 use std::sync::{Arc, Mutex};
 
@@ -11,16 +8,13 @@ use super::providers::{Cooldowns, Provider, Request, Source};
 use super::romanize::{fill_romanization_gaps, merge_romanization_by_text, romanize_locally};
 use super::script::{is_non_latin_char, needs_reading};
 
-/// How many opening lines decide which script the lyrics are in.
 const SCRIPT_SAMPLE_LINES: usize = 12;
 
-/// The track lyrics are wanted for. An empty string or a zero means unknown.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct TrackQuery {
     pub video_id: String,
     pub title: String,
     pub artist: String,
-    /// Seconds.
     pub duration: u32,
 }
 
@@ -41,7 +35,6 @@ impl From<&crate::model::Track> for TrackQuery {
     }
 }
 
-/// The last romanization a provider handed over, so switching sources on one track does not search for the same reading again.
 struct RomaMemo {
     provider: Provider,
     track: TrackQuery,
@@ -60,9 +53,6 @@ impl Chain {
         Self { source, prefs, cooldowns, roma_memo: Mutex::new(None) }
     }
 
-    /// The result quality that ends the search.
-    ///
-    /// `strict` takes the first provider that returns anything at all. `quality`, the default, treats a plain hit as a fallback and keeps walking the queue for something synced, so a provider high in the order still wins whenever it has timed lyrics.
     pub fn accept_rank(&self) -> u8 {
         if self.prefs.match_mode() == MATCH_STRICT { RANK_PLAIN } else { RANK_LINE }
     }
@@ -71,7 +61,6 @@ impl Chain {
         self.cooldowns.ready(provider)
     }
 
-    /// One provider's answer for a track: the first title variant that has anything, or the video id for the provider that takes nothing else.
     pub async fn fetch_one(&self, provider: Provider, track: &TrackQuery) -> Option<LyricsResult> {
         if provider.takes_video_id_only() {
             return self.source.fetch(provider, track.request("", "", true)).await;
@@ -85,16 +74,12 @@ impl Chain {
         None
     }
 
-    /// Walk the queue and answer the result it settles on, second line included.
-    ///
-    /// YouTube Music titles for international tracks often arrive as `Original - Translation` or carry `(feat. X)` and `(Remastered)` suffixes the lyrics databases do not, so a few variants are tried.
     pub async fn run(&self, track: &TrackQuery) -> Option<LyricsResult> {
         let variants = title_variants(&track.title);
         let accept_rank = self.accept_rank();
         let mut best: Option<LyricsResult> = None;
 
         'queue: for provider in self.prefs.provider_order().iter().filter_map(|name| Provider::from_name(name)) {
-            // This provider's ceiling is no better than what is already held.
             if rank_of(best.as_ref()) >= provider.native_rank() || !self.provider_ready(provider) {
                 continue;
             }
@@ -114,18 +99,12 @@ impl Chain {
         Some(self.augment(best?, track).await)
     }
 
-    /// Give a result its second line.
-    ///
-    /// Every path that puts lyrics on screen goes through this, not only the chain: switching provider in the picker, or choosing one of a provider's other matches, has to produce the second line the automatic pick would have had.
     pub async fn augment(&self, mut result: LyricsResult, track: &TrackQuery) -> LyricsResult {
         self.augment_romanization(&mut result, track).await;
         fill_romanization_gaps(&mut result);
         result
     }
 
-    /// Fill in a romanization when the provider that won the lyrics has none.
-    ///
-    /// The provider with the best timing is often not the one with the reading: LRCLIB has the synced Senbonzakura and no romaji, NetEase has the romaji. Only runs when the second line is set to show a romanization, and only for non-Latin lyrics.
     async fn augment_romanization(&self, result: &mut LyricsResult, track: &TrackQuery) {
         if result.lines.is_empty() || !matches!(self.prefs.second_line_mode().as_str(), "auto" | "romanization") || result.any_romanization() {
             return;
@@ -135,7 +114,6 @@ impl Chain {
             return;
         }
 
-        // What can be transliterated here goes first: exact, instant, no network, and it covers every track rather than the ones a provider happened to romanize.
         let mut generated = 0;
         for line in &mut result.lines {
             if let Some(roman) = romanize_locally(&line.text).filter(|r| *r != line.text) {
@@ -148,7 +126,6 @@ impl Chain {
             return;
         }
 
-        // What is left needs a reading. Any other script has nothing a provider could answer, so no round trip is spent finding that out.
         if !sample.chars().any(needs_reading) {
             return;
         }
@@ -169,7 +146,6 @@ impl Chain {
                 continue;
             }
 
-            // The artist is whatever YouTube Music credits, which is often not how the romanization source spells it: NetEase finds nothing for the kanji title plus "Hatsune Miku" and everything for the title alone. A second pass without the artist is safe here in a way it would not be for the lyrics themselves, because the merge only copies a reading onto a line whose text matches, so a wrong song contributes nothing.
             let variants = title_variants(&track.title);
             let attempts = variants.iter().map(|v| (v, track.artist.as_str())).chain(variants.iter().map(|v| (v, "")));
             for (variant, artist) in attempts {
@@ -189,7 +165,6 @@ impl Chain {
         memo.as_ref().filter(|m| m.provider == provider && m.track.title == track.title && m.track.artist == track.artist && m.track.duration == track.duration).map(|m| m.lines.clone())
     }
 
-    /// Every usable match one provider has for this track, best guess first.
     pub async fn provider_matches(&self, provider: Provider, title: &str, artist: &str, duration: u32, limit: usize) -> Vec<LyricsMatch> {
         if !provider.supports_matches() {
             return Vec::new();
@@ -202,9 +177,6 @@ impl Chain {
         found
     }
 
-    /// Search every browsable provider for a query the listener typed.
-    ///
-    /// Titles that carry their credits inline defeat automatic matching, and no amount of cleaning catches every shape. Typing the name is the reliable answer.
     pub async fn search_manually(&self, query: &str, artist: &str, duration: u32, per_provider: usize) -> Vec<LyricsMatch> {
         let enabled = self.prefs.provider_order();
         let mut out = Vec::new();
@@ -227,10 +199,8 @@ pub(crate) mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    /// One recorded fetch: provider, title tried, artist sent, strict flag.
     pub type Call = (Provider, String, String, bool);
 
-    /// Answers from a table keyed by provider and title, and records every call.
     #[derive(Default)]
     pub struct Scripted {
         pub answers: Mutex<HashMap<(Provider, String), LyricsResult>>,
@@ -313,7 +283,6 @@ pub(crate) mod tests {
         rig.source.answer(Provider::AppleMusic, "Song", plain("Apple Music", "la"));
         rig.source.answer(Provider::Lrclib, "Song", synced("LRCLIB", "la"));
         assert_eq!(rig.chain.run(&track("Song")).await.unwrap().source, "LRCLIB");
-        // YouTube Music can only be plain, which is already held, so it is never asked.
         assert!(!rig.source.called().contains(&Provider::YouTubeMusic));
 
         let lonely = self::rig();
@@ -406,7 +375,6 @@ pub(crate) mod tests {
         let romanization_calls: Vec<Call> = rig.source.calls.lock().unwrap().iter().filter(|c| c.0 == Provider::NetEase).cloned().collect();
         assert_eq!(romanization_calls, [(Provider::NetEase, "千本桜".to_owned(), "Artist".to_owned(), false)], "the first attempt already merged");
 
-        // The same track again answers from the memo, with no new request.
         let before = rig.source.calls.lock().unwrap().len();
         let again = rig.chain.augment(synced("LRCLIB", "千本桜　夜ニ紛レ"), &track("千本桜")).await;
         assert_eq!(again.lines[0].romanization.as_deref(), Some("senbonzakura yoru ni magire"));

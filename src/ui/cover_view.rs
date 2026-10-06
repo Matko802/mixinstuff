@@ -1,6 +1,3 @@
-//! Port of ui/desktop_cover_view.py: the full-window desktop player with a
-//! Player / Lyrics toggle, a big cover, transport over the visualizer, and a
-//! lyrics sidebar in an overlay split view.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -29,9 +26,7 @@ pub struct DesktopCoverView {
     #[allow(dead_code)]
     transport: Rc<Transport>,
     visualizer: Rc<Visualizer>,
-    /// A metadata update is already queued for the next idle.
     metadata_pending: Cell<bool>,
-    /// Kept alive here. The widget tree only holds its root box.
     #[allow(dead_code)]
     lyrics_view: Rc<LyricsView>,
     more_btn: gtk::MenuButton,
@@ -75,7 +70,6 @@ impl DesktopCoverView {
         );
         toolbar.add_top_bar(&toggle_nav);
 
-        // -- cover with the hover-revealed lyrics toggle -----------------
         let cover = CoverPicture::new(ctx.net.clone());
         cover.widget().add_css_class("cover-desktop");
         cover.widget().set_hexpand(true);
@@ -92,7 +86,6 @@ impl DesktopCoverView {
             .child(&cover_overlay)
             .build();
 
-        // -- metadata ----------------------------------------------------
         let meta_row = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(12)
@@ -121,7 +114,6 @@ impl DesktopCoverView {
         meta_row.append(&text_box);
         meta_row.append(like.widget());
 
-        // -- transport over the visualizer -------------------------------
         let visualizer = Visualizer::new(&ctx, 80);
         visualizer.widget().set_hexpand(true);
         visualizer.widget().set_vexpand(true);
@@ -208,7 +200,6 @@ impl DesktopCoverView {
             .build();
         cover_outer.append(&cover_clamp);
 
-        // -- lyrics sidebar ----------------------------------------------
         let lyrics_outer = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .hexpand(true)
@@ -231,7 +222,6 @@ impl DesktopCoverView {
             .max_sidebar_width(900.0)
             .build();
 
-        // Flat and square-cornered, both of them, like the player bar's buttons.
         let collapse_btn = gtk::Button::builder()
             .icon_name("go-down-symbolic")
             .css_classes(["flat"])
@@ -241,7 +231,6 @@ impl DesktopCoverView {
             .margin_end(24)
             .margin_bottom(24)
             .build();
-        // A toggle, so it lights up while the queue is open, as the player bar's does.
         let queue_btn = gtk::ToggleButton::builder()
             .icon_name("music-queue-symbolic")
             .css_classes(["flat"])
@@ -349,7 +338,6 @@ impl DesktopCoverView {
         }
     }
 
-    // -- lyrics split -----------------------------------------------------
 
     fn connect_lyrics(self: &Rc<Self>, _cover_overlay: &gtk::Overlay) {
         let weak = Rc::downgrade(self);
@@ -436,7 +424,6 @@ impl DesktopCoverView {
         self.suppress_sync.set(false);
     }
 
-    // -- state ------------------------------------------------------------
 
     fn bind_state(self: &Rc<Self>) {
         let state = self.ctx.player.state();
@@ -448,8 +435,6 @@ impl DesktopCoverView {
             "like-status",
         ] {
             let weak = Rc::downgrade(self);
-            // A track change moves all five properties in a row. One update on the
-            // next idle covers them, where each used to rebuild the labels and the menu.
             state.connect_notify_local(Some(prop), move |_, _| {
                 let Some(v) = weak.upgrade() else { return };
                 if v.metadata_pending.replace(true) {
@@ -546,9 +531,6 @@ impl DesktopCoverView {
         }
     }
 
-    /// The menu is rebuilt whenever the track changes, like the Python view.
-    /// A menu button with no model is insensitive, so a menu built on activate
-    /// could never be opened.
     fn refresh_more_menu(self: &Rc<Self>) {
         let Some(track) = self.ctx.player.current_track() else {
             self.more_btn.set_menu_model(gtk::gio::MenuModel::NONE);
@@ -568,8 +550,6 @@ impl DesktopCoverView {
         self.more_btn.set_menu_model(model.as_ref());
     }
 
-    /// Port of _show_stream_info: what is playing and how the pipeline sees it.
-    /// Mirror the queue sidebar into the toggle, without re-firing its click.
     pub fn set_queue_active(&self, active: bool) {
         if self.queue_btn.is_active() != active {
             self.queue_btn.set_active(active);

@@ -1,6 +1,3 @@
-//! Port of ui/pages/artist.py: banner header with the action row, the top
-//! songs list, card strips for albums, singles, videos, playlists, featured
-//! appearances and related artists, each with its View All or Load More.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -100,7 +97,6 @@ impl ArtistPage {
             .margin_end(12)
             .build();
 
-        // -- header grid: banner and info share one cell -----------------
         let header_grid = gtk::Grid::builder().column_homogeneous(true).build();
         content_box.append(&header_grid);
         let banner_overlay = gtk::Overlay::builder()
@@ -122,7 +118,6 @@ impl ArtistPage {
         banner_wrapper.set_size_request(-1, BANNER_HEIGHT);
         banner_wrapper.append(avatar.widget());
         banner_overlay.set_child(Some(&banner_wrapper));
-        // The fade follows the window's blur mode, read off the root's classes.
         {
             let wrapper = banner_wrapper.clone();
             banner_wrapper.connect_map(move |w| {
@@ -301,7 +296,6 @@ impl ArtistPage {
         &self.stack
     }
 
-    /// Demo hook: what the radio button does.
     pub fn press_radio(&self) {
         self.on_radio_clicked();
     }
@@ -397,7 +391,6 @@ impl ArtistPage {
         });
     }
 
-    // -- loading ----------------------------------------------------------
 
     pub fn load_artist(self: &Rc<Self>, channel_id: &str, initial_name: Option<&str>) {
         self.channel_id.replace(channel_id.to_owned());
@@ -432,7 +425,6 @@ impl ArtistPage {
         });
     }
 
-    /// Port of update_ui: header from the data, then every section in order.
     fn update_ui(self: &Rc<Self>) {
         let Some(data) = self.data.borrow().clone() else {
             return;
@@ -449,7 +441,6 @@ impl ArtistPage {
         self.description_expanded.set(false);
         match data.description.as_deref().filter(|d| !d.is_empty()) {
             Some(description) => {
-                // Strip the Wikipedia attribution, collapse runs of spaces and blank lines.
                 let clean = WIKIPEDIA_RE.replace_all(description, "").trim().to_owned();
                 let clean = SPACES_RE.replace_all(&clean, " ").into_owned();
                 let clean = NEWLINES_RE.replace_all(&clean, "\n\n").into_owned();
@@ -493,10 +484,8 @@ impl ArtistPage {
         {
             subscribed = true;
         }
-        // Signed out, following lives on this device.
         if !self.ctx.net.client().is_authenticated() {
             subscribed = !channel_id.is_empty() && self.ctx.local.is_subscribed(&channel_id);
-            // The saved card follows the page, so its count does not go stale.
             if subscribed {
                 self.ctx.local.refresh_subscription(&self.artist_card());
             }
@@ -551,7 +540,6 @@ impl ArtistPage {
         }
     }
 
-    /// The section box for a title: cleared when it exists, created otherwise.
     fn section_container(&self, title: &str, inner: bool) -> gtk::Box {
         if let Some(existing) = self.section_widgets.borrow().get(title).cloned() {
             let target = if inner {
@@ -595,7 +583,6 @@ impl ArtistPage {
             .unwrap_or(default)
     }
 
-    // -- top songs --------------------------------------------------------
 
     fn add_songs_section(self: &Rc<Self>, title: &str, section: &SongSection) {
         if section.results.is_empty() {
@@ -657,7 +644,6 @@ impl ArtistPage {
         }
     }
 
-    /// The inline row the Python page built: art, title with badge, artists and album, duration, like.
     fn build_song_row(self: &Rc<Self>, track: &Track) -> gtk::ListBoxRow {
         let row = gtk::ListBoxRow::new();
         let inner = gtk::Box::builder()
@@ -800,8 +786,6 @@ impl ArtistPage {
             .play_tracks(queue, start, false, None, false);
     }
 
-    /// Port of _build_queue_tracks: the top songs with the page's artist
-    /// filled in wherever a row lacks one.
     fn build_queue_tracks(&self) -> Vec<Track> {
         let data = self.data.borrow();
         let Some(songs) = data.as_ref().and_then(|d| d.songs.as_ref()) else {
@@ -848,8 +832,6 @@ impl ArtistPage {
             .collect()
     }
 
-    /// Port of the Top Songs branch of on_load_more_clicked: more rows inline,
-    /// then the full playlist behind the shelf.
     fn on_load_more_songs(
         self: &Rc<Self>,
         title: &str,
@@ -905,7 +887,6 @@ impl ArtistPage {
         });
     }
 
-    // -- card sections ----------------------------------------------------
 
     fn add_grid_section(self: &Rc<Self>, title: &str, section: &CardSection) {
         if section.results.is_empty() {
@@ -1010,8 +991,6 @@ impl ArtistPage {
         card
     }
 
-    /// Port of the grid branch of on_load_more_clicked: the discography page
-    /// when the shelf has a browse id, everything inline otherwise.
     fn on_view_all(self: &Rc<Self>, title: &str, section: &CardSection) {
         match &section.browse_id {
             None => {
@@ -1033,7 +1012,6 @@ impl ArtistPage {
         }
     }
 
-    /// Port of on_grid_child_activated: videos play, artists open, the rest opens as a playlist.
     fn on_grid_child_activated(&self, item: &MediaItem) {
         match item.kind {
             ItemKind::Song | ItemKind::Video => {
@@ -1060,14 +1038,12 @@ impl ArtistPage {
         }
     }
 
-    // -- actions ----------------------------------------------------------
 
     fn on_radio_clicked(&self) {
         let radio_id = self.data.borrow().as_ref().and_then(|d| d.radio_id.clone());
         match radio_id {
             Some(id) => self.ctx.player.start_radio(None, Some(id)),
             None => {
-                // Fall back to a radio from the first top song.
                 let first = self
                     .data
                     .borrow()
@@ -1121,7 +1097,6 @@ impl ArtistPage {
         });
     }
 
-    /// This artist as a library card, for the subscriptions kept on this device.
     fn artist_card(&self) -> MediaItem {
         let data = self.data.borrow();
         MediaItem {
@@ -1234,7 +1209,6 @@ fn read_more_label(text: &str) -> gtk::Label {
     label
 }
 
-/// The first 280 characters cut at a word, with an ellipsis.
 fn preview_of(text: &str) -> String {
     let head: String = text.chars().take(DESCRIPTION_PREVIEW).collect();
     match head.rfind(' ') {

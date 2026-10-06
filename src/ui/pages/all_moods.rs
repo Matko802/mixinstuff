@@ -1,5 +1,3 @@
-//! Port of ui/pages/all_moods.py: every pill of one category row as a list,
-//! for when the row on Explore had more than it could show.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -53,7 +51,6 @@ impl AllMoodsPage {
         &self.root
     }
 
-    /// Hide rows whose pill does not contain the query, like filter_content.
     pub fn filter_content(&self, text: &str) {
         let query = text.trim().to_lowercase();
         for (row, title) in self.rows.borrow().iter() {
@@ -62,7 +59,6 @@ impl AllMoodsPage {
     }
 }
 
-/// The page and its navigation entry are both named after the row.
 pub fn display_title(title: &str) -> String {
     format!("All {title}")
 }

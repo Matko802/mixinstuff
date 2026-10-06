@@ -1,10 +1,3 @@
-//! `PlayerState`: the single UI-facing store.
-//!
-//! Lives on the GTK thread only. Widgets bind to its properties with
-//! `bind_property` / `PropertyExpression` and read the queue through its
-//! `gio::ListStore`. Nothing outside the GTK thread ever holds a reference.
-//! Only `player::Player` writes to it, in response to events from the audio
-//! thread and results from the network runtime.
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::sync::OnceLock;
@@ -42,12 +35,10 @@ mod imp {
         pub thumbnail_url: RefCell<String>,
         #[property(get, set)]
         pub video_id: RefCell<String>,
-        /// The id the listener picked when the audio-version swap replaced it, else empty.
         #[property(get, set)]
         pub source_video_id: RefCell<String>,
         #[property(get, set)]
         pub like_status: RefCell<String>,
-        /// The playing track is a live stream: no length, no seeking.
         #[property(get, set)]
         pub live: Cell<bool>,
 
@@ -60,7 +51,6 @@ mod imp {
         #[property(get, set, builder(RepeatMode::Off))]
         pub repeat: Cell<RepeatMode>,
 
-        /// Index of the playing track in `queue`, or -1.
         #[property(get, set, default = -1)]
         pub current_index: Cell<i32>,
         #[property(get, set)]
@@ -90,15 +80,11 @@ mod imp {
             static SIGNALS: OnceLock<Vec<Signal>> = OnceLock::new();
             SIGNALS.get_or_init(|| {
                 vec![
-                    // video_id, title, message
                     Signal::builder("track-error")
                         .param_types([String::static_type(), String::static_type(), String::static_type()])
                         .build(),
-                    // Structural queue change: the ListStore was rebuilt.
                     Signal::builder("queue-changed").build(),
-                    // Short message for a toast (rating failed, and similar).
                     Signal::builder("notice").param_types([String::static_type()]).build(),
-                    // The position jumped somewhere clients cannot predict.
                     Signal::builder("seeked").param_types([f64::static_type()]).build(),
                 ]
             })
@@ -126,13 +112,10 @@ impl PlayerState {
         glib::Object::new()
     }
 
-    /// Queue as a list model of `QueueEntry`. Rows bind to its properties.
     pub fn queue_model(&self) -> gio::ListStore {
         self.imp().queue.get_or_init(gio::ListStore::new::<QueueEntry>).clone()
     }
 
-    /// Whether `video_id` is what plays now. A row that holds a music video's
-    /// id still counts after the swap to its audio version.
     pub fn is_playing_id(&self, video_id: &str) -> bool {
         !video_id.is_empty() && (self.video_id() == video_id || self.source_video_id() == video_id)
     }
@@ -149,7 +132,6 @@ impl PlayerState {
         self.emit_by_name::<()>("notice", &[&message]);
     }
 
-    /// Announce a seek, which MPRIS reports separately from position ticks.
     pub fn emit_seeked(&self, position: f64) {
         self.emit_by_name::<()>("seeked", &[&position]);
     }

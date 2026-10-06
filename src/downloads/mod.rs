@@ -1,13 +1,3 @@
-//! Offline downloads: what is on disk, and the queue that puts it there.
-//!
-//! Port of downloads.py. A job is a track plus the album it came from. The
-//! manager fills in whatever metadata the row was missing, hands the audio to
-//! yt-dlp, writes tags and cover art, moves the file into the music folder and
-//! records it in the shared library. Three downloads run at once, as in Python.
-//!
-//! Everything here runs on the tokio runtime. The GTK thread reads `Store`
-//! answers straight away (they are in memory) and hears about progress through
-//! the event channel.
 
 pub mod m3u;
 pub mod naming;
@@ -30,38 +20,26 @@ use naming::{codec_for, disambiguated_name, download_dir, file_name, preferred_f
 use store::{Entry, Store};
 use tags::Tags;
 
-/// How many downloads run at once, like the Python thread pool.
 const WORKERS: usize = 3;
 
-/// Scratch directories older than this are crash debris, not a running job.
 const STALE_TMP: Duration = Duration::from_secs(3600);
 
-/// What the header button and the pages listen to.
 #[derive(Debug, Clone)]
 pub enum Event {
-    /// A track joined the queue.
     Queued { video_id: String },
-    /// How far the file itself is, 0 to 1.
     Progress { video_id: String, fraction: f64 },
-    /// One track finished, for better or worse.
     Item { video_id: String, ok: bool, message: String },
-    /// Queue position, for the header pie.
     Advanced { done: usize, total: usize, title: String },
-    /// A download was deleted from disk.
     Removed { video_id: String },
-    /// The queue drained.
     Idle { downloaded: usize },
 }
 
-/// What every download in one run shares: the chosen format, the cookie jar
-/// written once for the whole queue, and the session it belongs to.
 struct Run {
     format: String,
     cookies: Option<PathBuf>,
     auth: Option<HttpAuth>,
 }
 
-/// One track waiting to be downloaded.
 #[derive(Debug, Clone)]
 struct Job {
     track: Track,
@@ -70,7 +48,6 @@ struct Job {
     track_number: Option<u32>,
 }
 
-/// A playlist to mirror as .m3u8 once its tracks land.
 struct Mirror {
     id: String,
     title: String,
@@ -98,7 +75,6 @@ pub struct Downloads {
 }
 
 impl Downloads {
-    /// Open the library and get a channel of what happens next.
     pub fn new(paths: Paths, net: NetHandle) -> (Arc<Self>, async_channel::Receiver<Event>) {
         let (events, receiver) = async_channel::unbounded();
         let store = Store::open(&paths.music_dir());
@@ -108,9 +84,7 @@ impl Downloads {
         (downloads, receiver)
     }
 
-    // -- what is on disk --------------------------------------------------
 
-    /// The download library itself, which also holds the shared history cache.
     pub fn store(&self) -> &Store {
         &self.store
     }
@@ -119,7 +93,6 @@ impl Downloads {
         self.store.is_downloaded(video_id)
     }
 
-    /// The file to play instead of a stream. Works offline, needs no resolve.
     pub fn local_path(&self, video_id: &str) -> Option<PathBuf> {
         self.store.local_path(video_id)
     }
@@ -128,21 +101,15 @@ impl Downloads {
         self.store.count()
     }
 
-    /// Everything downloaded, newest first.
     pub fn all(&self) -> Vec<Entry> {
         self.store.all()
     }
 
-    /// The cover of a downloaded track, kept beside the stream cache so rows
-    /// render offline. Present only after a download or an extraction.
     pub fn cached_cover(&self, video_id: &str) -> Option<PathBuf> {
         let path = self.cover_file(video_id);
         path.is_file().then_some(path)
     }
 
-    /// Pull the cover out of the file itself, for songs downloaded before this
-    /// cache existed or by the Python app. Reads a file, so keep it off the
-    /// GTK thread.
     pub fn extract_cover(&self, video_id: &str) -> Option<PathBuf> {
         if let Some(path) = self.cached_cover(video_id) {
             return Some(path);
@@ -163,21 +130,17 @@ impl Downloads {
         Some(path)
     }
 
-    // -- the queue --------------------------------------------------------
 
     pub fn is_queued(&self, video_id: &str) -> bool {
         let queue = self.queue.lock().unwrap();
         queue.in_flight.contains(video_id) || queue.waiting.iter().any(|job| job.track.video_id.0 == video_id)
     }
 
-    /// Queue position while something is downloading.
     pub fn progress(&self) -> Option<(usize, usize)> {
         let queue = self.queue.lock().unwrap();
         queue.running.then_some((queue.done, queue.total))
     }
 
-    /// Queue tracks and start working. Already downloaded rows are skipped,
-    /// so pressing Download All twice costs nothing.
     pub fn queue_tracks(self: &Arc<Self>, tracks: Vec<Track>, _album_title: &str, album_id: &str) {
         let numbered = tracks.len() > 1;
         for (index, track) in tracks.into_iter().enumerate() {
@@ -197,8 +160,6 @@ impl Downloads {
             if queue.in_flight.contains(&video_id) || queue.waiting.iter().any(|job| job.track.video_id.0 == video_id) {
                 return;
             }
-            // The album is the track's own. A playlist title never becomes one,
-            // or every playlist would turn into a folder full of albums.
             let album = track.album.as_ref();
             let job = Job {
                 album_title: album.map(|a| a.name.clone()).unwrap_or_default(),
@@ -212,7 +173,6 @@ impl Downloads {
         self.emit(Event::Queued { video_id });
     }
 
-    /// Remember a playlist so its .m3u8 mirror is rewritten as tracks land.
     pub fn register_playlist(&self, playlist_id: &str, title: &str, tracks: Vec<Track>) {
         if title.is_empty() {
             return;
@@ -228,7 +188,6 @@ impl Downloads {
         }
     }
 
-    /// Take a track out of the queue. Returns false when it already started.
     pub fn cancel(&self, video_id: &str) -> bool {
         let removed = {
             let mut queue = self.queue.lock().unwrap();
@@ -246,7 +205,6 @@ impl Downloads {
         removed
     }
 
-    /// Delete the file and forget the track. Empty folders go with it.
     pub fn delete(&self, video_id: &str) -> bool {
         let Some(path) = self.store.local_path(video_id) else {
             self.store.forget(video_id);
@@ -265,15 +223,10 @@ impl Downloads {
         true
     }
 
-    /// Move every download to match the current folder preference.
-    ///
-    /// For when the layout setting changes. Returns how many moved and how
-    /// many could not, which is what the settings page reports.
     pub fn migrate_layout(&self) -> (usize, usize) {
         relayout(&self.paths, &self.store)
     }
 
-    // -- running the queue ------------------------------------------------
 
     fn start(self: &Arc<Self>) {
         {
@@ -360,7 +313,6 @@ impl Downloads {
         Some(job)
     }
 
-    /// One track, start to finish. The message is what the row shows.
     async fn fetch(&self, job: Job, run: &Run) -> Result<String, String> {
         let video_id = job.track.video_id.0.clone();
         let details = self.describe(job).await;
@@ -409,7 +361,6 @@ impl Downloads {
             self.write_cover(video_id, bytes);
         }
 
-        // The extension follows what yt-dlp actually produced, not what was asked for.
         let target = match produced.extension().and_then(|e| e.to_str()) {
             Some(extension) if Some(extension) != target.extension().and_then(|e| e.to_str()) => target.with_extension(extension),
             _ => target.to_path_buf(),
@@ -420,8 +371,6 @@ impl Downloads {
 
     async fn run_ytdlp(&self, scratch: &Path, video_id: &str, run: &Run) -> Result<(), String> {
         let mut command = helper_command(&self.binary);
-        // Same token the resolver needs: an uploaded song is served to the
-        // web_music client alone, and that client is gated behind one.
         if let Some(token) = self.net.tokens().for_video(video_id).await {
             command.arg("--extractor-args").arg(crate::net::potoken::extractor_arg(&token));
         }
@@ -465,10 +414,6 @@ impl Downloads {
         Ok(())
     }
 
-    /// Fill in what the row did not carry: album, artists, cover, track number.
-    ///
-    /// A song opened from search has no album, and without one the file would
-    /// land in the wrong folder with no album tag.
     async fn describe(&self, job: Job) -> Details {
         let api = self.net.client().api();
         let track = &job.track;
@@ -485,9 +430,6 @@ impl Downloads {
             ..Details::default()
         };
 
-        // An uploaded track carries its own tags. The watch panel answers with
-        // whatever catalogue song YouTube matched it to, which is a different
-        // name and album.
         let uploaded = track.entity_id.is_some();
         if !uploaded && (details.album.is_empty() || details.thumbnail.is_empty() || details.artist.is_empty()) {
             if let Ok(watch) = crate::net::playlists::get_watch_playlist(&api, Some(&track.video_id.0), None, 1, false).await {
@@ -557,7 +499,6 @@ impl Downloads {
         });
     }
 
-    /// Rewrite the mirror of every playlist holding this track.
     fn refresh_mirrors(&self, video_id: &str) {
         let mirrors: Vec<(String, String, Vec<Track>)> = {
             let queue = self.queue.lock().unwrap();
@@ -577,7 +518,6 @@ impl Downloads {
         self.paths.cache_dir.join("downloads").join(video_id)
     }
 
-    /// Clear scratch directories a crash left behind, never one in use.
     fn sweep_scratch(&self) {
         let root = self.paths.cache_dir.join("downloads");
         let Ok(entries) = std::fs::read_dir(&root) else { return };
@@ -598,8 +538,6 @@ impl Downloads {
     }
 }
 
-/// Port of migrate_folder_structure: move every download to match the current
-/// folder preference. Files whose destination is taken stay where they are.
 pub fn relayout(paths: &Paths, store: &Store) -> (usize, usize) {
     let mut moves: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut errors = 0;
@@ -642,7 +580,6 @@ pub fn relayout(paths: &Paths, store: &Store) -> (usize, usize) {
     (moves.len(), errors)
 }
 
-/// Remove folders left empty by a move or a deletion, stopping at the music folder.
 fn prune_empty(paths: &Paths, start: &Path) {
     let music = paths.music_dir();
     let mut dir = start.to_path_buf();
@@ -655,7 +592,6 @@ fn prune_empty(paths: &Paths, start: &Path) {
     }
 }
 
-/// Everything known about a track by the time it is written to disk.
 #[derive(Debug, Default, Clone)]
 struct Details {
     title: String,
@@ -688,7 +624,6 @@ impl Details {
     }
 }
 
-/// Keeps the first non-empty of two strings, for filling gaps in metadata.
 trait OrElseEmpty {
     fn or_else_empty(self, other: Option<String>) -> String;
 }
@@ -704,12 +639,10 @@ fn join_artists(track: &Track) -> String {
     if joined.is_empty() { track.artist.clone() } else { joined }
 }
 
-/// Local time, the format Python wrote into downloaded_at.
 pub(crate) fn timestamp() -> String {
     glib::DateTime::now_local().ok().and_then(|t| t.format("%Y-%m-%dT%H:%M:%S").ok()).map(|s| s.to_string()).unwrap_or_default()
 }
 
-/// yt-dlp progress lines, as asked for by the progress template.
 fn parse_progress(line: &str) -> Option<f64> {
     let rest = line.strip_prefix("MUSISHARK ")?;
     let mut parts = rest.split_whitespace();
@@ -720,7 +653,6 @@ fn parse_progress(line: &str) -> Option<f64> {
     Some((done / total).clamp(0.0, 1.0))
 }
 
-/// Rename, falling back to a copy when the music folder is another filesystem.
 fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
     match std::fs::rename(from, to) {
         Ok(()) => Ok(()),
@@ -752,7 +684,6 @@ mod tests {
         assert_eq!(join_artists(&track), "A, B");
     }
 
-    /// A layout change moves files and rewrites the mirrors that point at them.
     #[test]
     fn changing_the_layout_moves_files_and_fixes_the_mirrors() {
         let home = tempfile::tempdir().unwrap();
@@ -783,7 +714,6 @@ mod tests {
         assert!(std::fs::read_to_string(&mirror).unwrap().contains("../One.opus"));
     }
 
-    /// The second copy of a name keeps its own file rather than overwriting.
     #[test]
     fn a_taken_destination_is_left_alone() {
         let home = tempfile::tempdir().unwrap();

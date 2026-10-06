@@ -1,12 +1,3 @@
-//! Disk cache for lyrics, port of player/lyrics_cache.py.
-//!
-//! One JSON file per video id at `<cache>/lyrics/<video_id>.json`, the same place and shape the Python app uses, so either app reads what the other left:
-//!
-//! ```json
-//! {"preferred_source": "NetEase" | null, "results": {"<source>": {...}}, "pipeline": 12}
-//! ```
-//!
-//! `preferred_source` is the provider the listener pinned for the track. Lyrics never change once written, so entries live until the soft cap evicts the least recently written file.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -20,17 +11,13 @@ use serde_json::Value;
 use super::model::LyricsResult;
 use crate::paths::Paths;
 
-/// Bumped whenever the pipeline starts producing better data for input it already handled. Older entries are dropped on read and refetched. Kept in step with PIPELINE_VERSION in lyrics_cache.py, since the file is shared.
 pub const PIPELINE_VERSION: u64 = 12;
 
-/// Soft cap on cached files. The oldest mtimes are evicted on insert.
 const MAX_ENTRIES: usize = 2000;
 
-/// One track's cache file.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Entry {
     pub preferred_source: Option<String>,
-    /// Source name and result, in the order they were first cached.
     pub results: Vec<(String, LyricsResult)>,
 }
 
@@ -47,7 +34,6 @@ impl Entry {
     }
 }
 
-/// The file as written. Results stay raw so one unreadable result does not cost the rest.
 #[derive(Serialize, Deserialize)]
 struct Stored {
     #[serde(default)]
@@ -58,7 +44,6 @@ struct Stored {
     pipeline: Option<u64>,
 }
 
-/// A JSON object in file order. Python dicts keep insertion order and the alternatives list breaks rank ties by it, so a sorted map would not do.
 #[derive(Default)]
 struct Ordered(Vec<(String, Value)>);
 
@@ -90,7 +75,6 @@ impl<'de> Deserialize<'de> for Ordered {
                 Ok(Ordered(out))
             }
 
-            // A null here reads as no results rather than a broken file.
             fn visit_unit<E>(self) -> Result<Ordered, E> {
                 Ok(Ordered::default())
             }
@@ -101,15 +85,12 @@ impl<'de> Deserialize<'de> for Ordered {
 
 pub struct LyricsCache {
     dir: PathBuf,
-    /// In-memory mirror, so repeated reads from the view stay off the disk.
     mem: Mutex<HashMap<String, Entry>>,
-    /// Held across each read-modify-write, so providers finishing together do not lose a result.
     writer: Mutex<()>,
     max_entries: usize,
     writes: std::sync::atomic::AtomicUsize,
 }
 
-/// Writes between two eviction scans of the cache folder.
 const EVICT_EVERY: usize = 25;
 
 #[allow(dead_code)]
@@ -126,7 +107,6 @@ impl LyricsCache {
         self.dir.join(format!("{video_id}.json"))
     }
 
-    /// The whole entry for a track, or None when nothing was ever written.
     pub fn load(&self, video_id: &str) -> Option<Entry> {
         if video_id.is_empty() {
             return None;
@@ -142,11 +122,6 @@ impl LyricsCache {
         Some(entry)
     }
 
-    /// The cached result to show, or None.
-    ///
-    /// A pinned `preferred_source` always wins. Otherwise this mirrors the live chain: walk `order` and take the first source whose result is at least `accept_rank`, holding a weaker one as the fallback.
-    ///
-    /// With an order given and none of its providers cached this answers None on purpose: the caller then runs the chain, which is right when the only cached sources are ones the listener has since switched off.
     pub fn get_result(&self, video_id: &str, order: Option<&[String]>, accept_rank: u8) -> Option<LyricsResult> {
         let entry = self.load(video_id)?;
         if entry.results.is_empty() {
@@ -160,9 +135,6 @@ impl LyricsCache {
         if let Some(order) = order.filter(|o| !o.is_empty()) {
             let mut fallback: Option<&LyricsResult> = None;
             for name in order {
-                // YouTube Music files its lyrics under the credit it reports, such as
-                // "Musixmatch". No queue entry has that name, so a track only YouTube
-                // Music covers used to miss here and refetch on every play.
                 let credited = || (name == "YouTube Music").then(|| entry.results.iter().find(|(source, _)| !crate::lyrics::prefs::DEFAULT_PROVIDER_ORDER.contains(&source.as_str())).map(|(_, result)| result)).flatten();
                 let Some(result) = entry.get(name).or_else(credited).filter(|r| !r.lines.is_empty()) else { continue };
                 if result.rank() >= accept_rank {
@@ -177,10 +149,8 @@ impl LyricsCache {
         self.get_alternatives(video_id).into_iter().next().map(|(_, result)| result)
     }
 
-    /// Every cached provider for a track, richest first.
     pub fn get_alternatives(&self, video_id: &str) -> Vec<(String, LyricsResult)> {
         let mut items = self.load(video_id).map(|e| e.results).unwrap_or_default();
-        // Stable, so equal ranks keep the order they were cached in.
         items.sort_by_key(|(_, result)| std::cmp::Reverse(result.rank()));
         items
     }
@@ -193,9 +163,6 @@ impl LyricsCache {
         self.load(video_id).is_some_and(|e| e.get(source).is_some())
     }
 
-    /// Save one provider's result under the source name it carries.
-    ///
-    /// `user_choice` marks a result the listener selected themselves, which survives the pipeline-version wipe that clears everything else.
     pub fn add_result(&self, video_id: &str, result: &LyricsResult, user_choice: bool) {
         if video_id.is_empty() || result.lines.is_empty() {
             return;
@@ -210,7 +177,6 @@ impl LyricsCache {
         self.write(video_id, entry);
     }
 
-    /// Add several provider results with one write at the end.
     pub fn add_results(&self, video_id: &str, results: &[LyricsResult]) {
         if video_id.is_empty() || results.is_empty() {
             return;
@@ -223,7 +189,6 @@ impl LyricsCache {
         self.write(video_id, entry);
     }
 
-    /// Pin the provider to show for this track. None goes back to ranked order.
     pub fn set_preferred(&self, video_id: &str, source: Option<&str>) {
         if video_id.is_empty() {
             return;
@@ -234,7 +199,6 @@ impl LyricsCache {
         self.write(video_id, entry);
     }
 
-    /// Undo a hand-picked source: drop the pin and any result the listener selected. What the chain had cached stays, so undoing is instant.
     pub fn clear_user_choice(&self, video_id: &str) {
         let _writing = self.writer.lock().unwrap();
         let Some(mut entry) = self.load(video_id) else { return };
@@ -243,7 +207,6 @@ impl LyricsCache {
         self.write(video_id, entry);
     }
 
-    /// Forget one track, for an explicit refresh.
     pub fn invalidate(&self, video_id: &str) {
         if video_id.is_empty() {
             return;
@@ -252,7 +215,6 @@ impl LyricsCache {
         let _ = std::fs::remove_file(self.path_for(video_id));
     }
 
-    /// Wipe every cached track and answer how many files went. Settings calls this after the provider queue changes, since a track cached from a provider that is now lower needs the chain re-run.
     pub fn clear_all(&self) -> usize {
         self.mem.lock().unwrap().clear();
         let Ok(dir) = std::fs::read_dir(&self.dir) else { return 0 };
@@ -278,8 +240,6 @@ impl LyricsCache {
             mem.insert(video_id.to_owned(), entry);
             mem.len()
         };
-        // A scan of the folder per write is waste. Every so often is enough to hold
-        // the cap, and at once when this session alone has written past it.
         let nth = self.writes.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if nth % EVICT_EVERY == 0 || in_memory > self.max_entries {
             self.evict_old();
@@ -309,12 +269,10 @@ impl LyricsCache {
     }
 }
 
-/// The key a result is filed under: the source name it carries.
 fn source_key(result: &LyricsResult) -> String {
     if result.source.is_empty() { "Unknown".to_owned() } else { result.source.clone() }
 }
 
-/// A stale pipeline drops the cached lyrics so the chain refetches them, but keeps the pin and anything picked by hand: those are deliberate choices.
 fn entry_from(stored: Stored) -> Entry {
     let current = stored.pipeline == Some(PIPELINE_VERSION);
     let results = stored
@@ -421,17 +379,12 @@ mod tests {
     fn the_order_walk_mirrors_the_chain() {
         let (_dir, cache) = cache();
         cache.add_results("v", &[plain("Apple Music"), synced("LRCLIB"), word("BiniLyrics")]);
-        // Quality mode walks past the plain hit to the first synced one in the queue.
         let queue = order(&["Apple Music", "LRCLIB", "BiniLyrics"]);
         assert_eq!(cache.get_result("v", Some(&queue), 2).unwrap().source, "LRCLIB");
-        // Strict mode takes the first provider with anything at all.
         assert_eq!(cache.get_result("v", Some(&queue), 1).unwrap().source, "Apple Music");
-        // A weaker hit is the fallback when nothing reaches the bar.
         let only_plain = order(&["Apple Music", "NetEase"]);
         assert_eq!(cache.get_result("v", Some(&only_plain), 2).unwrap().source, "Apple Music");
-        // None of the enabled providers cached: run the chain.
         assert!(cache.get_result("v", Some(&order(&["NetEase"])), 1).is_none());
-        // No order: the richest.
         assert_eq!(cache.get_result("v", None, 1).unwrap().source, "BiniLyrics");
     }
 
@@ -444,7 +397,6 @@ mod tests {
         assert_eq!(cache.get_result("v", Some(&queue), 2).unwrap().source, "LRCLIB");
         cache.set_preferred("v", None);
         assert_eq!(cache.get_result("v", Some(&queue), 2).unwrap().source, "Apple Music");
-        // A pin on a source that was never cached is ignored.
         cache.set_preferred("v", Some("NetEase"));
         assert_eq!(cache.get_result("v", Some(&queue), 2).unwrap().source, "Apple Music");
     }

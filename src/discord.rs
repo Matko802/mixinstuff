@@ -1,7 +1,3 @@
-//! Discord Rich Presence over the raw IPC protocol. Port of player/discord_rpc.py.
-//!
-//! All socket I/O is pinned to one worker thread. The GTK thread builds the
-//! activity payload from `PlayerState` and the shared prefs, then hands it over.
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -14,10 +10,7 @@ use serde_json::{Map, Value, json};
 use crate::model::PlaybackStatus;
 
 const DISCORD_APP_ID: &str = "1492500060087255231";
-/// Reconnect delays in seconds while the IPC socket is unreachable. The tail
-/// is short so opening Discord later lights presence up within half a minute.
 const RECONNECT_BACKOFF: [u64; 5] = [3, 5, 10, 15, 30];
-/// Below Discord's limit of about five updates per 20 seconds.
 const MIN_UPDATE_INTERVAL: Duration = Duration::from_millis(400);
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
 const MUSISHARK_LOGO: &str = "https://raw.githubusercontent.com/Matko802/musishark/main/screenshots/omori-musishark.png";
@@ -25,7 +18,6 @@ const MUSISHARK_LOGO: &str = "https://raw.githubusercontent.com/Matko802/musisha
 const OP_HANDSHAKE: u32 = 0;
 const OP_FRAME: u32 = 1;
 
-/// Keys of the `discord_rpc_status_display` pref, in the order the settings row lists them.
 pub const STATUS_DISPLAY_KEYS: [&str; 3] = ["app_name", "artist", "song_title"];
 pub const STATUS_DISPLAY_DEFAULT: &str = "artist";
 
@@ -37,7 +29,6 @@ fn status_display_type(key: &str) -> u8 {
     }
 }
 
-/// What the activity is built from, read off the player on the GTK thread.
 #[derive(Clone, Debug, Default)]
 pub struct Snapshot {
     pub status: PlaybackStatus,
@@ -50,7 +41,6 @@ pub struct Snapshot {
     pub duration: f64,
 }
 
-/// The four Discord prefs, read from prefs.json at build time like Python did.
 #[derive(Clone, Debug)]
 pub struct Options {
     pub status_display: String,
@@ -72,7 +62,6 @@ pub fn enabled_pref(prefs: &Map<String, Value>) -> bool {
     prefs.get("discord_rpc_enabled").and_then(Value::as_bool).unwrap_or(true)
 }
 
-/// Discord wants 2 to 128 characters.
 fn field(text: &str) -> String {
     let mut out: String = text.chars().take(128).collect();
     if out.chars().count() < 2 {
@@ -81,7 +70,6 @@ fn field(text: &str) -> String {
     out
 }
 
-/// Port of _build_activity. None clears the presence.
 pub fn build_activity(snap: &Snapshot, options: &Options, now_ms: i64) -> Option<Value> {
     let playing = snap.status == PlaybackStatus::Playing;
     let paused = snap.status == PlaybackStatus::Paused;
@@ -98,7 +86,6 @@ pub fn build_activity(snap: &Snapshot, options: &Options, now_ms: i64) -> Option
         json!({"large_image": MUSISHARK_LOGO, "large_text": "Musishark"})
     };
     if options.small_icon {
-        // The icon mirrors the transport button, like the Python app.
         assets["small_image"] = json!(if playing { "pause" } else { "play" });
         assets["small_text"] = json!(if playing { "Playing" } else { "Paused" });
     }
@@ -125,7 +112,6 @@ pub fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
-/// The IPC connection: a Unix socket. The frames are the same on both.
 type IpcStream = std::os::unix::net::UnixStream;
 
 fn open_ipc(path: &std::path::Path) -> std::io::Result<IpcStream> {
@@ -135,12 +121,10 @@ fn open_ipc(path: &std::path::Path) -> std::io::Result<IpcStream> {
     Ok(stream)
 }
 
-/// The socket's own read timeout covers this.
 fn wait_for_reply(_stream: &IpcStream) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Every path a Discord client exposes, Flatpak and Snap variants included.
 fn candidate_ipc_paths() -> Vec<PathBuf> {
     let mut bases: Vec<PathBuf> = Vec::new();
     if let Some(xdg) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from) {
@@ -158,7 +142,6 @@ fn candidate_ipc_paths() -> Vec<PathBuf> {
 
 enum Op {
     Connect,
-    /// The newest activity, None to clear the presence.
     Update(Option<Value>),
     Stop,
 }
@@ -184,7 +167,6 @@ impl Discord {
         this
     }
 
-    /// "Connected", "Disconnected" or "Disabled", for the settings row.
     pub fn status(&self) -> String {
         self.status.lock().map(|s| s.clone()).unwrap_or_default()
     }
@@ -219,7 +201,6 @@ impl Discord {
         }
     }
 
-    /// Publish a new activity. Dropped when presence is switched off.
     pub fn update(&self, activity: Option<Value>) {
         if let Ok(worker) = self.worker.lock() {
             if let Some(w) = worker.as_ref() {
@@ -244,7 +225,6 @@ struct Connection {
     status: Arc<Mutex<String>>,
     attempt: usize,
     reconnect_at: Option<Instant>,
-    /// The last activity asked for, sent again after a reconnect.
     latest: Option<Value>,
     last_update: Option<Instant>,
 }
@@ -262,7 +242,6 @@ impl Connection {
                 Err(RecvTimeoutError::Timeout) => None,
                 Err(RecvTimeoutError::Disconnected) => Some(Op::Stop),
             };
-            // Coalesce: keep only the newest update, and let a stop win.
             let (mut stop, mut connect, mut update) = (false, false, false);
             let mut absorb = |op: Op, latest: &mut Option<Value>| match op {
                 Op::Stop => stop = true,
@@ -286,12 +265,10 @@ impl Connection {
                 connect = true;
             }
             if (connect || update) && self.stream.is_none() {
-                // Connecting sends the latest activity itself.
                 self.connect();
                 continue;
             }
             if update {
-                // During rapid skips this lets more events pile up, so only the newest goes out.
                 if let Some(rest) = self.last_update.and_then(|at| MIN_UPDATE_INTERVAL.checked_sub(at.elapsed())) {
                     std::thread::sleep(rest);
                     while let Ok(op) = rx.try_recv() {
@@ -312,7 +289,6 @@ impl Connection {
             return;
         }
         for path in candidate_ipc_paths() {
-            // A missing socket path is not a Discord client; opening it is the test otherwise.
             if !path.exists() {
                 continue;
             }
@@ -333,8 +309,6 @@ impl Connection {
         self.schedule_reconnect();
     }
 
-    /// Discord answers a good handshake with a READY event. Anything else,
-    /// usually a CLOSE frame carrying a code and message, is a failure.
     fn handshake(&self, path: &std::path::Path) -> std::io::Result<IpcStream> {
         let mut stream = open_ipc(path)?;
         send_frame(&mut stream, OP_HANDSHAKE, &json!({"v": 1, "client_id": DISCORD_APP_ID}))?;
@@ -367,7 +341,6 @@ impl Connection {
         let sent = send_frame(stream, OP_FRAME, &frame).and_then(|()| wait_for_reply(stream)).and_then(|()| recv_frame(stream));
         self.last_update = Some(Instant::now());
         match sent {
-            // Discord refuses a bad activity with an ERROR event, not a closed pipe.
             Ok((_, Some(reply))) if reply.get("evt").and_then(Value::as_str) == Some("ERROR") => {
                 let message = reply.pointer("/data/message").and_then(Value::as_str).unwrap_or("no message");
                 tracing::warn!(message, "discord rejected the activity");
@@ -399,7 +372,6 @@ impl Connection {
     }
 }
 
-/// A frame is two little-endian u32s, opcode and length, then the JSON body.
 fn encode_frame(op: u32, payload: &Value) -> Vec<u8> {
     let body = payload.to_string().into_bytes();
     let mut frame = Vec::with_capacity(8 + body.len());
@@ -418,7 +390,6 @@ fn recv_frame(stream: &mut impl Read) -> std::io::Result<(u32, Option<Value>)> {
     stream.read_exact(&mut header)?;
     let op = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
     let length = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
-    // A presence reply is a few hundred bytes. Anything huge is not Discord.
     if length > 1 << 20 {
         return Err(std::io::Error::other("oversized discord frame"));
     }

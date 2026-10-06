@@ -1,14 +1,7 @@
-//! Port of ui/color_utils.py: perceptual color math for cover-derived colors.
-//! OkLCh changes a color, since its lightness is perceptual and hue and chroma
-//! survive the edit. WCAG relative luminance checks a color.
-//! The float operations mirror Python's one for one, so both apps land on the
-//! same numbers for the same cover.
 #![allow(dead_code)]
 
-/// An (r, g, b) color, channels in 0..1.
 pub type Rgb = (f64, f64, f64);
 
-/// WCAG 2.x targets. High-contrast mode uses AAA.
 pub const WCAG_AA: f64 = 4.5;
 pub const WCAG_AAA: f64 = 7.0;
 
@@ -27,25 +20,21 @@ fn linear_to_srgb(c: f64) -> f64 {
     if c <= 0.0031308 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
 }
 
-/// WCAG relative luminance. Channels linearize first.
 pub fn relative_luminance(rgb: Rgb) -> f64 {
     let (r, g, b) = (srgb_to_linear(unit(rgb.0)), srgb_to_linear(unit(rgb.1)), srgb_to_linear(unit(rgb.2)));
     0.2126 * r + 0.7152 * g + 0.0722 * b
 }
 
-/// WCAG contrast ratio between two opaque colors, 1.0 to 21.0.
 pub fn contrast_ratio(a: Rgb, b: Rgb) -> f64 {
     let (la, lb) = (relative_luminance(a), relative_luminance(b));
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
 }
 
-// Bjorn Ottosson's Oklab, the space behind CSS oklch() and color-mix(in oklab).
 fn rgb_to_oklab(rgb: Rgb) -> (f64, f64, f64) {
     let (r, g, b) = (srgb_to_linear(unit(rgb.0)), srgb_to_linear(unit(rgb.1)), srgb_to_linear(unit(rgb.2)));
     let l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
     let m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
     let s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b;
-    // powf, not cbrt, is what Python's ** (1 / 3) computes.
     let root = |v: f64| v.abs().powf(1.0 / 3.0).copysign(v);
     let (l, m, s) = (root(l), root(m), root(s));
     (
@@ -67,7 +56,6 @@ fn oklab_to_rgb(lab: (f64, f64, f64)) -> Rgb {
     )
 }
 
-/// (r, g, b) to (L, C, h): lightness 0..1, chroma about 0..0.4, hue in radians.
 pub fn rgb_to_oklch(rgb: Rgb) -> (f64, f64, f64) {
     let (ll, aa, bb) = rgb_to_oklab(rgb);
     (ll, aa.hypot(bb), bb.atan2(aa))
@@ -82,8 +70,6 @@ fn clipped(rgb: Rgb) -> Rgb {
     (unit(rgb.0), unit(rgb.1), unit(rgb.2))
 }
 
-/// (L, C, h) to an in-gamut (r, g, b).
-/// Walks chroma down until the color fits. Clipping channels would shift the hue.
 pub fn oklch_to_rgb(lightness: f64, chroma: f64, hue: f64) -> Rgb {
     let lightness = unit(lightness);
     let at = |c: f64| oklab_to_rgb((lightness, c * hue.cos(), c * hue.sin()));
@@ -103,9 +89,6 @@ pub fn oklch_to_rgb(lightness: f64, chroma: f64, hue: f64) -> Rgb {
     clipped(at(lo))
 }
 
-/// Label color for something drawn on `background`. Python's default minimum is 3.0.
-/// White while white clears `minimum`, black below. libadwaita does the same:
-/// white on a mid blue, even though black scores higher.
 pub fn best_foreground(background: Rgb, minimum: f64) -> Rgb {
     if contrast_ratio(WHITE, background) >= minimum {
         return WHITE;
@@ -113,8 +96,6 @@ pub fn best_foreground(background: Rgb, minimum: f64) -> Rgb {
     if contrast_ratio(BLACK, background) >= contrast_ratio(WHITE, background) { BLACK } else { WHITE }
 }
 
-/// Twenty halvings of an OkLCh lightness range, returning the bound that passes `ok`.
-/// `passes_low` says which end of the range passes: the dark one, or the light one.
 fn bisect_lightness(mut lo: f64, mut hi: f64, passes_low: bool, ok: impl Fn(f64) -> bool) -> f64 {
     for _ in 0..20 {
         let mid = (lo + hi) / 2.0;
@@ -127,19 +108,14 @@ fn bisect_lightness(mut lo: f64, mut hi: f64, passes_low: bool, ok: impl Fn(f64)
     if passes_low { lo } else { hi }
 }
 
-/// Move `color` far enough to clear `target` on `background`. Python's default target is WCAG_AA.
-/// Only OkLCh lightness moves, away from the background, by the smallest step
-/// reaching the target. Hue survives. Black or white when neither reaches it.
 pub fn ensure_contrast(color: Rgb, background: Rgb, target: f64) -> Rgb {
     if contrast_ratio(color, background) >= target {
         return color;
     }
     let (lightness, chroma, hue) = rgb_to_oklch(color);
-    // Darken on light surfaces, lighten on dark ones.
     let darken = relative_luminance(background) > relative_luminance(color);
     let (lo, hi) = if darken { (0.0, lightness) } else { (lightness, 1.0) };
 
-    // Unreachable this way: the highest-contrast endpoint, by ratio, first one on a tie.
     let extreme = oklch_to_rgb(if darken { lo } else { hi }, chroma, hue);
     if contrast_ratio(extreme, background) < target {
         let mut best = extreme;
@@ -154,7 +130,6 @@ pub fn ensure_contrast(color: Rgb, background: Rgb, target: f64) -> Rgb {
     oklch_to_rgb(found, chroma, hue)
 }
 
-/// Clamp a color's OkLCh lightness, preserving hue and chroma. Python's defaults are 0.0 and 1.0.
 pub fn clamp_lightness(color: Rgb, minimum: f64, maximum: f64) -> Rgb {
     let (lightness, chroma, hue) = rgb_to_oklch(color);
     let clamped = maximum.min(minimum.max(lightness));
@@ -164,27 +139,19 @@ pub fn clamp_lightness(color: Rgb, minimum: f64, maximum: f64) -> Rgb {
     oklch_to_rgb(clamped, chroma, hue)
 }
 
-/// Neutral gray with the given WCAG relative luminance.
 pub fn gray(luminance: f64) -> Rgb {
     let channel = linear_to_srgb(unit(luminance));
     (channel, channel, channel)
 }
 
-/// Overlay standing `target` contrast from `base` once composited at `alpha`.
-/// Takes `hue_source`'s hue and chroma. `lighter` sets the direction:
-/// highlights lift, chrome panels recede. Python's default is lighter.
 pub fn overlay_for_contrast(base: Rgb, hue_source: Rgb, alpha: f64, target: f64, lighter: bool) -> Rgb {
     let (_, chroma, hue) = rgb_to_oklch(hue_source);
     let base_lightness = rgb_to_oklch(base).0;
     let (lo, hi) = if lighter { (base_lightness, 1.0) } else { (0.0, base_lightness) };
-    // Far from the base passes here, so the passing end is the light one when lifting.
     let found = bisect_lightness(lo, hi, !lighter, |mid| contrast_ratio(mix(base, oklch_to_rgb(mid, chroma, hue), alpha), base) >= target);
     oklch_to_rgb(found, chroma, hue)
 }
 
-/// Overlay that still stands `target` contrast from `foreground` once composited on `base` at `alpha`.
-/// The counterpart to overlay_for_contrast: sized by what is drawn on top, not by what sits behind.
-/// Moves only lightness, away from `foreground`. Returns `hue_source` untouched when it already clears.
 pub fn overlay_clear_of(base: Rgb, hue_source: Rgb, alpha: f64, foreground: Rgb, target: f64) -> Rgb {
     if contrast_ratio(mix(base, hue_source, alpha), foreground) >= target {
         return hue_source;
@@ -193,7 +160,6 @@ pub fn overlay_clear_of(base: Rgb, hue_source: Rgb, alpha: f64, foreground: Rgb,
     let darken = relative_luminance(foreground) > relative_luminance(mix(base, hue_source, alpha));
     let clears = |l: f64| contrast_ratio(mix(base, oklch_to_rgb(l, chroma, hue), alpha), foreground) >= target;
 
-    // Unreachable this way: the endpoint is the closest this hue gets.
     let extreme = if darken { 0.0 } else { 1.0 };
     if !clears(extreme) {
         return oklch_to_rgb(extreme, chroma, hue);
@@ -202,20 +168,16 @@ pub fn overlay_clear_of(base: Rgb, hue_source: Rgb, alpha: f64, foreground: Rgb,
     oklch_to_rgb(bisect_lightness(lo, hi, darken, clears), chroma, hue)
 }
 
-/// Composite `other` over `base` at `amount` alpha, in sRGB. Matches GTK's mix() and alpha().
 pub fn mix(base: Rgb, other: Rgb, amount: f64) -> Rgb {
     let blend = |b: f64, o: f64| b * (1.0 - amount) + o * amount;
     (blend(base.0, other.0), blend(base.1, other.1), blend(base.2, other.2))
 }
 
-/// Format as `rgb(r, g, b)` for a GTK stylesheet.
 pub fn to_css(rgb: Rgb) -> String {
-    // Python's round() sends ties to even.
     let byte = |c: f64| (unit(c) * 255.0).round_ties_even() as u8;
     format!("rgb({}, {}, {})", byte(rgb.0), byte(rgb.1), byte(rgb.2))
 }
 
-/// Parse `#rrggbb`. None where Python raised.
 pub fn from_hex(value: &str) -> Option<Rgb> {
     let value = value.trim_start_matches('#');
     let channel = |i: usize| value.get(i..i + 2).and_then(|pair| u8::from_str_radix(pair, 16).ok()).map(|v| f64::from(v) / 255.0);
@@ -226,7 +188,6 @@ pub fn from_hex(value: &str) -> Option<Rgb> {
 mod tests {
     use super::*;
 
-    // Every expected value below is what ui/color_utils.py returns for the same input.
     const RED: Rgb = (0.9, 0.1, 0.1);
     const YELLOW: Rgb = (0.95, 0.9, 0.2);
     const BLUE: Rgb = (0.1, 0.2, 0.8);
@@ -287,7 +248,6 @@ mod tests {
         ];
         for (color, want) in cases {
             let got = rgb_to_oklch(color);
-            // Hue is noise on a neutral, where chroma is about 1e-8.
             let hue_ok = want.1 < 1e-6 || (got.2 - want.2).abs() < EPS;
             assert!((got.0 - want.0).abs() < EPS && (got.1 - want.1).abs() < EPS && hue_ok, "{color:?}: {got:?}");
         }

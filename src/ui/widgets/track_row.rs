@@ -1,7 +1,3 @@
-//! Port of the ListView row PlaylistPage builds in _setup_list_item: a flat
-//! button holding cover, title with badges, artist line and duration, with
-//! the like button overlaid on the right. Lazily created children (check
-//! box, track number, explicit badge, download icon) appear on first use.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -16,7 +12,6 @@ use crate::ui::like_button::LikeButton;
 
 const THUMB_SIZE: i32 = 56;
 
-/// What a row asks its page for. Weak so rows never keep a page alive.
 pub trait TrackRowHost {
     fn multi_select(&self) -> bool;
     fn is_selected(&self, video_id: &str) -> bool;
@@ -53,7 +48,6 @@ impl TrackRow {
     pub fn new(ctx: &Rc<UiContext>, host: Weak<dyn TrackRowHost>) -> Rc<Self> {
         let bin = adw::Bin::builder().css_classes(["list-item-bin"]).build();
         let overlay = gtk::Overlay::builder().hexpand(true).build();
-        // The row is its own button, so .activatable would double the hover highlight.
         let button = gtk::Button::builder()
             .css_classes(["song-row", "song-row-button", "flat"])
             .hexpand(true)
@@ -148,7 +142,6 @@ impl TrackRow {
             host,
             ctx: ctx.clone(),
         });
-        // Tree walks (compact mode, selection refresh) find the row through its bin.
         unsafe { row.bin.set_data("track-row", Rc::downgrade(&row)) };
 
         let weak = Rc::downgrade(&row);
@@ -181,12 +174,10 @@ impl TrackRow {
         row
     }
 
-    /// The list item's child. Holds the track UI, or the header container for the header item.
     pub fn bin(&self) -> &adw::Bin {
         &self.bin
     }
 
-    /// The button the context menu anchors to.
     pub fn widget(&self) -> &gtk::Button {
         &self.button
     }
@@ -203,7 +194,6 @@ impl TrackRow {
             .filter(|v| !v.is_empty())
     }
 
-    /// Recover the row from a bin found by walking the list view.
     pub fn from_bin(bin: &adw::Bin) -> Option<Rc<Self>> {
         unsafe { bin.data::<Weak<TrackRow>>("track-row") }
             .and_then(|p| unsafe { p.as_ref() }.upgrade())
@@ -213,7 +203,6 @@ impl TrackRow {
         self.bin.set_child(Some(header));
     }
 
-    // -- lazy children ----------------------------------------------------
 
     fn ensure_track_num(&self) -> gtk::Label {
         if let Some(l) = self.track_num.borrow().as_ref() {
@@ -237,7 +226,6 @@ impl TrackRow {
         let check = gtk::CheckButton::builder()
             .valign(gtk::Align::Center)
             .build();
-        // Claim the press so the row button under it does not also fire.
         let gesture = gtk::GestureClick::new();
         gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
         gesture.connect_pressed(|g, _, _, _| {
@@ -264,7 +252,6 @@ impl TrackRow {
     }
 
     #[allow(dead_code)]
-    /// The cover kept beside a downloaded file, extracting it the first time.
     fn local_cover(self: &Rc<Self>, video_id: &str) -> Option<String> {
         if video_id.is_empty() || !self.ctx.downloads.is_downloaded(video_id) {
             return None;
@@ -287,8 +274,6 @@ impl TrackRow {
         None
     }
 
-    /// The badge at the end of the row: downloaded, waiting in the queue, or
-    /// nothing at all.
     pub fn show_download_state(&self, video_id: &str) {
         let downloads = &self.ctx.downloads;
         let (icon_name, queued) = match video_id {
@@ -335,10 +320,7 @@ impl TrackRow {
         icon
     }
 
-    // -- bind / unbind ----------------------------------------------------
 
-    /// Port of _bind_list_item. `position` is the row's place in the flattened
-    /// model, where 0 is the header, so it doubles as the album track number.
     pub fn bind(self: &Rc<Self>, track: &Track, position: u32) {
         self.bin.set_child(Some(&self.overlay));
         let Some(host) = self.host.upgrade() else {
@@ -387,9 +369,6 @@ impl TrackRow {
                 num.set_visible(false);
             }
             self.img.widget().set_visible(true);
-            // A downloaded track carries its own cover, which is what offline
-            // rows render. Extraction only happens for files this app did not
-            // download itself.
             match self.local_cover(&video_id).or_else(|| thumb_url.clone()) {
                 Some(url) => self.img.load(&url),
                 None => self.img.set_placeholder("media-optical-symbolic"),
@@ -398,7 +377,6 @@ impl TrackRow {
 
         let dur_text = track
             .duration_seconds
-            // An episode or a long mix runs past the hour: "3:36:56", not "216:56".
             .map(|d| if d >= 3600 { format!("{}:{:02}:{:02}", d / 3600, (d % 3600) / 60, d % 60) } else { format!("{}:{:02}", d / 60, d % 60) })
             .unwrap_or_default();
         self.duration.set_label(&dur_text);
@@ -429,7 +407,6 @@ impl TrackRow {
             self.button.set_opacity(1.0);
         }
 
-        // Follow the current track. One handler per bound row, dropped on unbind.
         self.disconnect_state();
         self.sync_playing(has_id && self.ctx.player.state().is_playing_id(&video_id));
         if has_id {
@@ -447,8 +424,6 @@ impl TrackRow {
         }
     }
 
-    /// Port of _unbind_list_item.
-    /// Only the handlers go: bind sets everything again in the same frame.
     pub fn unbind(&self) {
         self.disconnect_state();
         self.disconnect_check();
@@ -465,7 +440,6 @@ impl TrackRow {
         }
     }
 
-    /// Port of _apply_row_selection: tint the row and mirror the checkbox.
     pub fn apply_selection(self: &Rc<Self>, selected: bool) {
         if selected {
             self.button.add_css_class("selected");
@@ -490,7 +464,6 @@ impl TrackRow {
         }
     }
 
-    /// Port of the per-row part of _refresh_all_row_visuals.
     pub fn refresh_visuals(self: &Rc<Self>, multi: bool, selected: bool) {
         let has_id = self.video_id().is_some();
         if multi {
@@ -502,7 +475,6 @@ impl TrackRow {
             }
             self.button.remove_css_class("selected");
         }
-        // Right-side widgets hide in multi-select to give the checkbox and titles room.
         self.like.widget().set_visible(has_id && !multi);
         let has_dur = !self.duration.label().is_empty();
         self.duration.set_visible(has_dur && !multi);

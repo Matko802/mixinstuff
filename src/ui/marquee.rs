@@ -1,5 +1,3 @@
-//! Port of ui.utils.MarqueeLabel: a label that scrolls when the text
-//! is wider than the space it gets, looping with a second copy.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

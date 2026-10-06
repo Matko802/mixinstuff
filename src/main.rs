@@ -1,10 +1,3 @@
-//! Musishark entry point.
-//!
-//! Boot order matters and mirrors src/main.py:
-//! 1. process tunables (malloc arenas, fd limit) before any thread exists,
-//! 2. logging and the GSK renderer preference before GTK loads,
-//! 3. GStreamer init, the tokio runtime and the audio thread,
-//! 4. the libadwaita application, which owns the GTK main loop.
 
 mod audio;
 mod bootstrap;
@@ -43,26 +36,18 @@ use crate::ui::window::MainWindow;
 const APP_ID: &str = "io.github.matko802.Musishark";
 const APP_NAME: &str = "Musishark";
 
-/// Everything the UI layer receives. Cloned into signal handlers as `Rc`.
 pub struct App {
     pub player: Rc<Player>,
     pub net: net::NetHandle,
-    /// Offline downloads: the library on disk and the queue filling it.
     pub downloads: Arc<downloads::Downloads>,
-    /// Handed to the window, which pumps it on the GTK thread.
     pub download_events: RefCell<Option<async_channel::Receiver<downloads::Event>>>,
     pub paths: Paths,
     pub demo: Option<demo::Demo>,
     pub window: RefCell<Option<Rc<MainWindow>>>,
-    /// System media controls. None when the bus name could not be taken.
     pub mpris: RefCell<Option<Rc<Mpris>>>,
-    /// Last.fm and ListenBrainz. Idle until a service is connected in Preferences.
     pub scrobbler: Arc<scrobbler::Scrobbler>,
-    /// Lyrics providers, their cache and the display prefs.
     pub lyrics: lyrics::Lyrics,
-    /// Discord Rich Presence. A no-op while Discord is not running.
     pub discord: discord::Discord,
-    /// Playlists and likes kept on this device, for listeners without an account.
     pub local: Arc<local_library::LocalLibrary>,
 }
 
@@ -74,7 +59,6 @@ fn main() -> glib::ExitCode {
     bootstrap::init_logging(&paths);
     bootstrap::apply_gsk_renderer_pref(&paths);
 
-    // The stylesheet and icons, compiled in by build.rs.
     if let Err(err) = gio::resources_register_include!("musishark.gresource") {
         eprintln!("resource bundle failed to load: {err}");
         return glib::ExitCode::FAILURE;
@@ -85,7 +69,6 @@ fn main() -> glib::ExitCode {
         return glib::ExitCode::FAILURE;
     }
 
-    // Network runtime. Worker threads only run reqwest, yt-dlp subprocesses and file IO.
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
         .thread_name("musishark-net")
@@ -121,7 +104,6 @@ fn main() -> glib::ExitCode {
     };
 
     let (downloads, download_events) = downloads::Downloads::new(paths.clone(), net.clone());
-    // A demo run plays scratch tracks. MUSISHARK_DEMO_PRESENCE=1 lets them through on purpose.
     let publish = demo.is_none() || std::env::var_os("MUSISHARK_DEMO_PRESENCE").is_some();
     let scrobbler = scrobbler::Scrobbler::start(&paths, runtime.handle());
     let lyrics = lyrics::Lyrics::new(&paths, net.client().http().clone(), net.client().clone());
@@ -144,10 +126,6 @@ fn main() -> glib::ExitCode {
 
     let app = adw::Application::builder()
         .application_id(APP_ID)
-        // A demo run is its own instance. As a unique application it handed off to
-        // whatever Musishark was already open and exited, so testing meant closing
-        // the instance the listener was using.
-        // HANDLES_OPEN: `musishark <link>` hands the link to the running window.
         .flags(if app_ctx.demo.is_some() { gio::ApplicationFlags::NON_UNIQUE } else { gio::ApplicationFlags::FLAGS_NONE } | gio::ApplicationFlags::HANDLES_OPEN)
         .build();
 
@@ -198,7 +176,6 @@ fn main() -> glib::ExitCode {
 fn on_startup(ctx: &Rc<App>) {
     if let Some(display) = gdk::Display::default() {
         let theme = gtk::IconTheme::for_display(&display);
-        // GTK looks under <path>/scalable/actions and so on, so the path names the theme folder.
         theme.add_resource_path("/io/github/matko802/musishark/icons/hicolor");
     }
     gtk::Window::set_default_icon_name(APP_ID);
@@ -207,7 +184,6 @@ fn on_startup(ctx: &Rc<App>) {
     let (downloaded, cached, extract) = (ctx.downloads.clone(), ctx.downloads.clone(), ctx.downloads.clone());
     ui::cover::set_track_art_lookup(move |id| downloaded.is_downloaded(id), move |id| cached.cached_cover(id), move |id| extract.extract_cover(id));
 
-    // Event pumps must attach to the running GTK main context.
     ctx.player.start();
     ctx.mpris.replace(Some(Mpris::start(ctx)));
     tray::start(ctx);

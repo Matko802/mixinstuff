@@ -1,6 +1,3 @@
-//! Transport controls shared by the expanded player and the desktop cover
-//! view: seek scale, time labels, play stack with spinner, skip buttons and
-//! a vertical volume popover. All bound to PlayerState.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -31,7 +28,6 @@ pub struct Transport {
 }
 
 impl Transport {
-    /// `play_size` is the play button's square size, `icon_px` its icon size.
     pub fn new(player: Rc<Player>, play_size: i32, icon_px: i32, skip_size: i32) -> Rc<Self> {
         let scale = gtk::Scale::builder().orientation(gtk::Orientation::Horizontal).hexpand(true).valign(gtk::Align::Center).css_classes(["progress-scale"]).build();
         scale.set_range(0.0, 100.0);
@@ -129,7 +125,6 @@ impl Transport {
         let duration = state.duration();
         let (child, icon, sensitive) = match status {
             PlaybackStatus::Loading => ("spinner", "media-playback-start-symbolic", false),
-            // A live stream never reports a length. That is not still loading.
             PlaybackStatus::Playing if state.live() => ("icon", "media-playback-pause-symbolic", true),
             PlaybackStatus::Playing if duration <= 0.0 => ("spinner", "media-playback-pause-symbolic", false),
             PlaybackStatus::Playing => ("icon", "media-playback-pause-symbolic", true),

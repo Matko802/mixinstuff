@@ -1,6 +1,3 @@
-//! YouTube Music's own lyrics, port of ytmusicapi's `get_lyrics` as `_fetch_lyrics_ytm` called it.
-//!
-//! The watch panel names the lyrics page of a video. The web client only gets plain text for it. The Android client gets line timestamps, so that is asked first, the way `get_lyrics(timestamps=True)` did under `as_mobile`.
 
 use std::time::Duration;
 
@@ -15,7 +12,6 @@ const SOURCE: &str = "YouTube Music";
 const API: &str = "https://music.youtube.com/youtubei/v1/";
 const ORIGIN: &str = "https://music.youtube.com";
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:88.0) Gecko/20100101 Firefox/88.0";
-/// The client ytmusicapi's as_mobile() switches to.
 const MOBILE_CLIENT: &str = "ANDROID_MUSIC";
 const MOBILE_VERSION: &str = "7.21.50";
 const TIMEOUT: Duration = Duration::from_secs(8);
@@ -24,9 +20,6 @@ const WATCH_TABS: &str = "/contents/singleColumnMusicWatchNextResultsRenderer/ta
 const TIMED_LYRICS: &str = "/contents/elementRenderer/newElement/type/componentType/model/timedLyricsModel/lyricsData";
 const DESCRIPTION_SHELF: &str = "/contents/sectionListRenderer/contents/0/musicDescriptionShelfRenderer";
 
-/// InnerTube as the Android client. The crate client writes its own WEB_REMIX context over whatever the body carries, so this posts by hand.
-///
-/// The request is anonymous on purpose. Lyrics are the same for every account, and InnerTube answers 400 when a browser session's cookie and SAPISIDHASH arrive with the Android client.
 pub struct MobileClient {
     http: reqwest::Client,
 }
@@ -41,7 +34,6 @@ impl Browse for MobileClient {
     fn post<'a>(&'a self, endpoint: &'a str, mut body: Value) -> Response<'a> {
         Box::pin(async move {
             body["context"] = json!({"client": {"clientName": MOBILE_CLIENT, "clientVersion": MOBILE_VERSION, "hl": "en"}, "user": {}});
-            // SOCS=CAI is the consent cookie the crate client adds to every request.
             let request = self.http.post(format!("{API}{endpoint}?alt=json")).timeout(TIMEOUT).header("User-Agent", USER_AGENT).header("Accept", "*/*").header("Origin", ORIGIN).header("Cookie", "SOCS=CAI").json(&body);
             let response = request.send().await?;
             let status = response.status();
@@ -53,7 +45,6 @@ impl Browse for MobileClient {
     }
 }
 
-/// The browse id of a video's lyrics page, from its watch panel. None when the Lyrics tab is greyed out.
 pub fn lyrics_browse_id(watch: &Value) -> Option<String> {
     let tab = watch.pointer(WATCH_TABS)?.get(1)?.get("tabRenderer")?;
     if tab.get("unselectable").is_some() {
@@ -62,9 +53,6 @@ pub fn lyrics_browse_id(watch: &Value) -> Option<String> {
     tab.pointer("/endpoint/browseEndpoint/browseId").and_then(Value::as_str).map(str::to_owned)
 }
 
-/// A lyrics page as a result: timed lines from the Android shape, plain text from the web one.
-///
-/// The source is the credit YouTube shows ("Source: Musixmatch") with its prefix removed, as the Python app labelled it.
 pub fn parse_lyrics(response: &Value) -> Option<LyricsResult> {
     if let Some(data) = response.pointer(TIMED_LYRICS) {
         let rows = data.get("timedLyricsData")?.as_array()?;
@@ -78,7 +66,6 @@ pub fn parse_lyrics(response: &Value) -> Option<LyricsResult> {
         if lines.is_empty() {
             return None;
         }
-        // Reported synced as a whole, like the Python app did for this shape.
         return Some(LyricsResult { lines, synced: true, source: credit(data.get("sourceMessage")), user_choice: false });
     }
     let shelf = response.pointer(DESCRIPTION_SHELF)?;
@@ -96,7 +83,6 @@ fn credit(value: Option<&Value>) -> String {
     }
 }
 
-/// InnerTube sends these stamps as strings.
 fn milliseconds(value: Option<&Value>) -> Option<f64> {
     match value? {
         Value::Number(n) => n.as_f64(),
@@ -106,7 +92,6 @@ fn milliseconds(value: Option<&Value>) -> Option<f64> {
     .map(|ms| ms / 1000.0)
 }
 
-/// The body get_watch_playlist(videoId=..., limit=1) posts to `next`.
 fn watch_body(video_id: &str) -> Value {
     json!({
         "enablePersistentPlaylistPanel": true,
@@ -134,7 +119,6 @@ pub async fn fetch(web: &dyn Browse, mobile: &dyn Browse, video_id: &str) -> Opt
     let page = match mobile.post("browse", body.clone()).await {
         Ok(page) => page,
         Err(err) => {
-            // Timed lyrics are a bonus. The web client still has the plain text.
             tracing::debug!(%err, "timed lyrics request failed, asking for plain text");
             web.post("browse", body).await.inspect_err(|err| tracing::debug!(%err, "lyrics page failed")).ok()?
         }
@@ -147,7 +131,6 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    /// Answers each endpoint from a script and records what was asked.
     struct Scripted {
         next: Option<Value>,
         browse: Option<Value>,

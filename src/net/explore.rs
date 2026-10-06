@@ -1,7 +1,3 @@
-//! Explore endpoints: the feed, the mood and genre categories, the charts, and
-//! the page behind a category pill. Ports of ytmusicapi's `get_explore`,
-//! `get_mood_categories` and `get_charts` plus MusicClient.get_category_page,
-//! kept row for row so the page sees what the Python page saw.
 
 use std::sync::Arc;
 
@@ -12,32 +8,25 @@ use super::items::{MRLIR, MTRIR, THUMBNAIL_RENDERER, THUMBNAILS, array_at, detec
 use crate::model::{ItemKind, MediaItem, Person};
 use crate::net::ytmusic::NetError;
 
-/// Where every browse response in this module keeps its shelves.
 const SECTIONS: &str = "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents";
-/// The browse id on a carousel's own heading, which is what names the shelf.
 const CAROUSEL_BROWSE_ID: &str = "/musicCarouselShelfRenderer/header/musicCarouselShelfBasicHeaderRenderer/title/runs/0/navigationEndpoint/browseEndpoint/browseId";
 const CAROUSEL_TITLE: &str = "/header/musicCarouselShelfBasicHeaderRenderer/title/runs/0/text";
 const CUSTOM_INDEX: &str = "/customIndexColumn/musicCustomIndexColumnRenderer";
 
-/// One mood or genre pill: what it says and the params that open its page.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Category {
     pub title: String,
     pub params: String,
 }
 
-/// What `FEmusic_explore` returns. Podcast shelves and the premium-only top
-/// songs chart are dropped: the Python page never drew them.
 #[derive(Clone, Debug, Default)]
 pub struct ExploreFeed {
     pub new_releases: Vec<MediaItem>,
     pub new_videos: Vec<MediaItem>,
     pub trending: Vec<MediaItem>,
-    /// The feed's own pill row, shown when the categories call failed.
     pub moods_and_genres: Vec<Category>,
 }
 
-/// Which way a charted artist moved since the last ranking.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Trend {
     Up,
@@ -46,8 +35,6 @@ pub enum Trend {
     Neutral,
 }
 
-/// A charted artist: the artist, plus where the chart put them.
-/// Rank and trend are absent for an unauthenticated request.
 #[derive(Clone, Debug)]
 pub struct ChartArtist {
     pub item: MediaItem,
@@ -57,40 +44,30 @@ pub struct ChartArtist {
 
 #[derive(Clone, Debug, Default)]
 pub struct Charts {
-    /// Country codes the chart menu offers, in the order YouTube listed them.
     pub countries: Vec<String>,
     pub videos: Vec<MediaItem>,
-    /// A premium account gets daily and weekly carousels in place of `videos`.
     pub daily: Vec<MediaItem>,
     pub weekly: Vec<MediaItem>,
-    /// US charts only.
     pub genres: Vec<MediaItem>,
     pub artists: Vec<ChartArtist>,
 }
 
-/// Everything the Explore page draws.
 #[derive(Clone, Debug, Default)]
 pub struct ExploreData {
     pub feed: ExploreFeed,
-    /// The account's own row, which YouTube puts ahead of the other two.
     pub for_you: Vec<Category>,
     pub moods: Vec<Category>,
     pub genres: Vec<Category>,
     pub charts: Option<Charts>,
 }
 
-/// One carousel of a category page.
 #[derive(Clone, Debug)]
 pub struct CategorySection {
     pub title: String,
     pub items: Vec<MediaItem>,
 }
 
-// -- endpoints ------------------------------------------------------------
 
-/// Port of _fetch_explore. The feed decides whether the page has anything to
-/// show; the categories and the charts ride alongside it and are dropped if
-/// they fail, exactly as the Python threads did.
 pub async fn load_explore(api: Arc<dyn Browse>, country: String) -> Result<ExploreData, NetError> {
     let categories = {
         let api = api.clone();
@@ -124,13 +101,11 @@ pub async fn get_explore(api: &dyn Browse) -> Result<ExploreFeed, NetError> {
     Ok(parse_explore(&response))
 }
 
-/// The "Moods & moments", "Genres" and "For you" grids, in response order.
 pub async fn get_mood_categories(api: &dyn Browse) -> Result<Vec<(String, Vec<Category>)>, NetError> {
     let response = api.post("browse", json!({ "browseId": "FEmusic_moods_and_genres" })).await?;
     Ok(parse_mood_categories(&response))
 }
 
-/// Charts for one country. An empty code leaves the choice to YouTube.
 pub async fn get_charts(api: &dyn Browse, country: &str) -> Result<Charts, NetError> {
     let mut body = json!({ "browseId": "FEmusic_charts" });
     if !country.is_empty() {
@@ -140,19 +115,16 @@ pub async fn get_charts(api: &dyn Browse, country: &str) -> Result<Charts, NetEr
     Ok(parse_charts(&response, country))
 }
 
-/// The carousels behind one mood or genre pill.
 pub async fn get_category_page(api: &dyn Browse, params: &str) -> Result<Vec<CategorySection>, NetError> {
     let body = json!({ "browseId": "FEmusic_moods_and_genres_category", "params": params });
     let response = api.post("browse", body).await?;
     Ok(parse_category_page(&response))
 }
 
-/// The pills of one named grid, empty when the grid is not in the response.
 pub fn section(sections: &[(String, Vec<Category>)], name: &str) -> Vec<Category> {
     sections.iter().find(|(title, _)| title == name).map(|(_, items)| items.clone()).unwrap_or_default()
 }
 
-// -- parsing --------------------------------------------------------------
 
 pub fn parse_explore(response: &Value) -> ExploreFeed {
     let mut feed = ExploreFeed::default();
@@ -163,8 +135,6 @@ pub fn parse_explore(response: &Value) -> ExploreFeed {
             "FEmusic_new_releases_albums" => feed.new_releases = contents.iter().filter_map(|c| c.get(MTRIR)).map(parse_album_card).collect(),
             "FEmusic_new_releases_videos" => feed.new_videos = contents.iter().filter_map(|c| c.get(MTRIR)).filter_map(parse_video_card).collect(),
             "FEmusic_moods_and_genres" => feed.moods_and_genres = contents.iter().filter_map(parse_category).collect(),
-            // The trending shelf is addressed by the playlist behind it.
-            // Trending is a music chart. An episode that slips in stays out of it.
             id if id.starts_with("VLOLA") => feed.trending = contents.iter().filter_map(|c| c.get(MRLIR)).filter_map(|row| parse_song_row(row, "Trending")).filter(|item| item.item_type.as_deref() != Some("Episode")).collect(),
             _ => {}
         }
@@ -189,10 +159,6 @@ pub fn parse_charts(response: &Value, country: &str) -> Charts {
         ..Charts::default()
     };
 
-    // Shelf order, after the country menu in the first shelf: the video
-    // playlists, a genre row on US only, then the artists. A premium account
-    // gets daily and weekly playlists in place of the one video row, which is
-    // the extra shelf this counts.
     let mut names: Vec<&str> = vec!["videos"];
     if country == "US" {
         names.push("genres");
@@ -231,16 +197,10 @@ fn parse_category_shelf(shelf: &Value) -> Option<CategorySection> {
     (!items.is_empty()).then_some(CategorySection { title, items })
 }
 
-/// What the category page is handed to show podcasts instead of a mood.
 pub const PODCASTS_KEY: &str = "podcasts";
-/// Home's Podcasts chip as read on 2026-09-27, for when the chip is not found by name.
 const PODCASTS_CHIP: &str = "ggNCSgQIDBADSgQIBxABSgQICRABSgQICBABSgQIDhABSgQIBBABSgQIDRABSgQIAxABSgQIChABSgQIBhABSgQIBRAB";
-/// Shelves of the podcasts feed, paged in the way Home pages its own.
 const PODCAST_SHELVES: usize = 20;
 
-/// The podcasts feed YouTube Music shows behind Home's Podcasts chip: shelves
-/// of episodes and shows by topic. The chip's params come from Home itself,
-/// so a change on YouTube's side is followed. The saved params are the fallback.
 pub async fn get_podcasts_page(api: &dyn Browse) -> Result<Vec<CategorySection>, NetError> {
     let home = api.post("browse", json!({ "browseId": "FEmusic_home" })).await?;
     let chips = array_at(&home, "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/header/chipCloudRenderer/chips");
@@ -257,9 +217,6 @@ pub async fn get_podcasts_page(api: &dyn Browse) -> Result<Vec<CategorySection>,
     Ok(sections)
 }
 
-/// Port of MusicClient.get_category_page's per-item read: the title, the one
-/// endpoint the item carries, its picture, and only the runs that point at an
-/// artist. A view count sits in the same column and is not one.
 fn parse_category_item(entry: &Value, section_title: &str) -> Option<MediaItem> {
     if let Some(data) = entry.get(super::items::MMRLIR) {
         return super::items::parse_episode_card(data);
@@ -293,7 +250,6 @@ fn parse_category_item(entry: &Value, section_title: &str) -> Option<MediaItem> 
         }
     }
 
-    // What the item opens decides what it is, the way _detect_kind reads it.
     let endpoint = endpoint?;
     if let Some(video_id) = owned_at(endpoint, "/watchEndpoint/videoId") {
         let video_type = str_at(endpoint, "/watchEndpoint/watchEndpointMusicSupportedConfigs/watchEndpointMusicConfig/musicVideoType");
@@ -323,8 +279,6 @@ fn parse_category(entry: &Value) -> Option<Category> {
     })
 }
 
-/// Port of parse_chart_playlist: a chart carousel card is a playlist and
-/// nothing else, its browse id carrying the usual VL prefix.
 fn parse_chart_playlist(data: &Value) -> Option<MediaItem> {
     let browse_id = str_at(data, "/title/runs/0/navigationEndpoint/browseEndpoint/browseId")?;
     Some(MediaItem {
@@ -336,13 +290,11 @@ fn parse_chart_playlist(data: &Value) -> Option<MediaItem> {
     })
 }
 
-/// Port of parse_chart_artist plus parse_ranking.
 fn parse_chart_artist(data: &Value) -> ChartArtist {
     let item = MediaItem {
         kind: ItemKind::Artist,
         id: owned_at(data, "/navigationEndpoint/browseEndpoint/browseId").unwrap_or_default(),
         title: owned_at(data, "/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text").unwrap_or_default(),
-        // "9.62M subscribers" is shown as the count alone.
         subscribers: str_at(data, "/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text").map(|text| text.split(' ').next().unwrap_or_default().to_owned()),
         thumb: last_thumbnail_url(array_at(data, THUMBNAILS)),
         ..MediaItem::default()
@@ -358,10 +310,7 @@ fn parse_chart_artist(data: &Value) -> ChartArtist {
     }
 }
 
-// -- country menu ---------------------------------------------------------
 
-/// The country names search.py spells out for the chart menu. A code with no
-/// name here shows as the code itself.
 const COUNTRY_NAMES: &[(&str, &str)] = &[
     ("ZZ", "Global"), ("AR", "Argentina"), ("AU", "Australia"), ("AT", "Austria"),
     ("BE", "Belgium"), ("BO", "Bolivia"), ("BR", "Brazil"), ("CA", "Canada"),
@@ -382,7 +331,6 @@ const COUNTRY_NAMES: &[(&str, &str)] = &[
     ("UY", "Uruguay"), ("VE", "Venezuela"), ("VN", "Vietnam"), ("ZW", "Zimbabwe"),
 ];
 
-/// Chart countries as (code, name), Global first and the rest by name.
 pub fn country_options(codes: &[String]) -> Vec<(String, String)> {
     let mut options: Vec<(String, String)> = codes
         .iter()
@@ -535,7 +483,6 @@ mod tests {
         assert!(charts.videos.is_empty());
     }
 
-    /// Hits the network. `cargo test -- --ignored live_explore --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_explore() {
@@ -575,7 +522,6 @@ mod tests {
         assert!(!sections.is_empty());
     }
 
-    /// `cargo test -- --ignored live_mood_sections --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_mood_sections() {
@@ -594,7 +540,6 @@ mod tests {
         assert_eq!(names, ["Global", "Germany", "United States", "XX"]);
     }
 
-    /// `cargo test -- --ignored the_podcasts_page_loads --nocapture`
     #[tokio::test]
     #[ignore]
     async fn the_podcasts_page_loads() {

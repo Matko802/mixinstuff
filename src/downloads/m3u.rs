@@ -1,9 +1,3 @@
-//! Playlist mirrors under <music>/Playlists.
-//!
-//! Port of _write_playlist_m3u and _prune_m3us_missing_files: a downloaded
-//! playlist gets an .m3u8 next to the audio so other players can open it.
-//! Only tracks that are actually on disk are listed, and paths are relative
-//! so the music folder can move.
 
 use std::path::{Path, PathBuf};
 
@@ -13,8 +7,6 @@ use crate::paths::Paths;
 use super::naming::{name_max, playlists_dir, safe_component};
 use super::store::Store;
 
-/// Write or rewrite one playlist mirror. Albums are skipped: they already
-/// live in their own folder.
 pub fn write(paths: &Paths, store: &Store, playlist_id: &str, title: &str, tracks: &[Track]) {
     if playlist_id.starts_with("MPRE") || playlist_id.starts_with("OLAK") {
         return;
@@ -29,8 +21,6 @@ pub fn write(paths: &Paths, store: &Store, playlist_id: &str, title: &str, track
 
     let mut body = format!("#EXTM3U\n#PLAYLIST:{title}\n");
     for track in tracks {
-        // The row a page passed may be bare, so the library fills the gaps:
-        // after a download it holds the real title, artist and length.
         let Some(entry) = store.entry(&track.video_id.0) else { continue };
         let Some(relative) = relative_to(&dir, &entry.file_path) else { continue };
         let seconds = track.duration_seconds.or(entry.duration_seconds).unwrap_or(0);
@@ -43,7 +33,6 @@ pub fn write(paths: &Paths, store: &Store, playlist_id: &str, title: &str, track
     }
 }
 
-/// Drop entries whose file is gone, after a download is deleted.
 pub fn prune(paths: &Paths) {
     let dir = playlists_dir(paths);
     let Ok(entries) = std::fs::read_dir(&dir) else { return };
@@ -79,7 +68,6 @@ pub fn prune(paths: &Paths) {
     }
 }
 
-/// Point mirrors at files that moved, after a folder layout change.
 pub fn repoint(paths: &Paths, moves: &[(PathBuf, PathBuf)]) {
     let dir = playlists_dir(paths);
     let Ok(entries) = std::fs::read_dir(&dir) else { return };
@@ -108,19 +96,14 @@ pub fn repoint(paths: &Paths, moves: &[(PathBuf, PathBuf)]) {
     }
 }
 
-/// A path as a playlist line: forward slashes on every platform, which every
-/// player reads, so a mirror written on Windows still opens elsewhere.
 fn entry_line(relative: &Path) -> String {
     relative.to_string_lossy().replace('\\', "/")
 }
 
-/// The first of the two that has something in it.
 fn first_filled<'a>(preferred: &'a str, fallback: &'a str) -> &'a str {
     if preferred.is_empty() { fallback } else { preferred }
 }
 
-/// A path with `.` and `..` folded away, so two spellings of one file match.
-/// Lexical only: the file may already have moved.
 fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for part in path.components() {
@@ -135,7 +118,6 @@ fn normalize(path: &Path) -> PathBuf {
     out
 }
 
-/// `file` seen from `dir`, walking up with `..` when they share a root.
 fn relative_to(dir: &Path, file: &Path) -> Option<PathBuf> {
     let mut shared = 0;
     let base: Vec<_> = dir.components().collect();

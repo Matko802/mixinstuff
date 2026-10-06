@@ -1,10 +1,3 @@
-//! System media controls over MPRIS. Port of player/mpris.py, which handed
-//! mprisify an adapter onto the player.
-//!
-//! The split follows the rest of the app: the D-Bus server runs on the tokio
-//! runtime, so its implementation must be Send and never touches the player.
-//! It answers from a snapshot the GTK thread writes, and posts commands back
-//! over a channel the GTK thread drains, the same shape the audio thread uses.
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -29,15 +22,12 @@ use crate::player::Player;
 use crate::state::PlayerState;
 use crate::ui::cover::fetch_cover_bytes;
 
-/// Owns `org.mpris.MediaPlayer2.Musishark`, the name the Python app took.
 const BUS_SUFFIX: &str = "Musishark";
 const IDENTITY: &str = "Musishark";
 const DESKTOP_ENTRY: &str = "io.github.matko802.Musishark";
 const TRACK_ID_PREFIX: &str = "/io/github/matko802/Musishark/track";
-/// Art below this is upscaled: some clients render small covers badly.
 const MIN_ART_SIZE: i32 = 512;
 
-/// What the desktop shell asked for. Applied on the GTK thread.
 #[derive(Debug, Clone)]
 enum Command {
     Play,
@@ -46,9 +36,7 @@ enum Command {
     Next,
     Previous,
     Stop,
-    /// Relative seek in microseconds, what the spec's Seek carries.
     SeekBy(i64),
-    /// Absolute position in seconds, from SetPosition.
     SetPosition(f64),
     SetVolume(f64),
     SetShuffle(bool),
@@ -57,7 +45,6 @@ enum Command {
     Quit,
 }
 
-/// Everything the D-Bus side answers with. The GTK thread is the only writer.
 #[derive(Debug, Clone, Default)]
 struct Snapshot {
     status: PlaybackStatus,
@@ -65,37 +52,28 @@ struct Snapshot {
     title: String,
     artists: Vec<String>,
     album: String,
-    /// The address the track carries. Used until the local file is written.
     art_url: String,
-    /// The squared-off file and the track it belongs to, so a later metadata
-    /// refresh cannot put the remote address back.
     art_file: String,
     art_file_video_id: String,
     duration: f64,
     position: f64,
-    /// When `position` was sampled, so a poll between ticks reads a live value.
     position_at: Option<Instant>,
     volume: f64,
     shuffle: bool,
     repeat: RepeatMode,
     can_next: bool,
-    /// Index of the playing track, or -1. CanGoPrevious reads it live, since
-    /// Previous restarts the track once it is past the threshold.
     index: i32,
 }
 
 impl Snapshot {
     fn playback_status(&self) -> MprisStatus {
         match self.status {
-            // Loading reports as Playing, as get_playstate did, so the shell
-            // does not blink to paused between tracks.
             PlaybackStatus::Playing | PlaybackStatus::Loading => MprisStatus::Playing,
             PlaybackStatus::Paused => MprisStatus::Paused,
             PlaybackStatus::Stopped => MprisStatus::Stopped,
         }
     }
 
-    /// Position now: the last sample plus the time since, while playing.
     fn live_position(&self) -> f64 {
         let drift = match (self.status, self.position_at) {
             (PlaybackStatus::Playing, Some(at)) => at.elapsed().as_secs_f64(),
@@ -105,7 +83,6 @@ impl Snapshot {
         if self.duration > 0.0 { position.min(self.duration) } else { position }
     }
 
-    /// A local file if one was written for this track, else the remote address.
     fn art(&self) -> &str {
         if !self.art_file.is_empty() && self.art_file_video_id == self.video_id {
             return &self.art_file;
@@ -117,13 +94,10 @@ impl Snapshot {
         self.index > 0 || self.live_position() > PREVIOUS_RESTART_THRESHOLD
     }
 
-    /// `NO_TRACK` has a reserved meaning on the track list, so an idle player
-    /// gets its own path, as the Python adapter did.
     fn track_id(&self) -> TrackId {
         if self.video_id.is_empty() {
             return TrackId::try_from(format!("{TRACK_ID_PREFIX}/none")).unwrap_or(TrackId::NO_TRACK);
         }
-        // D-Bus path elements take only [A-Za-z0-9_] and cannot start with a digit.
         let mut safe: String = self.video_id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
         if safe.starts_with(|c: char| c.is_ascii_digit()) {
             safe.insert(0, 'v');
@@ -153,7 +127,6 @@ impl Snapshot {
     }
 }
 
-/// The server's implementation. Lives on the tokio runtime.
 struct Imp {
     shared: Arc<Mutex<Snapshot>>,
     commands: async_channel::Sender<Command>,
@@ -249,7 +222,6 @@ impl PlayerInterface for Imp {
     }
 
     async fn set_position(&self, track_id: TrackId, position: Time) -> fdo::Result<()> {
-        // The spec says to ignore a position meant for a track that moved on.
         if track_id != self.read().track_id() {
             return Ok(());
         }
@@ -349,29 +321,22 @@ impl PlayerInterface for Imp {
     }
 }
 
-/// The GTK-thread half: mirrors `PlayerState` into the snapshot and applies
-/// what the shell sends back.
 pub struct Mpris {
     shared: Arc<Mutex<Snapshot>>,
     server: RefCell<Option<Arc<Server<Imp>>>>,
-    /// Property changes waiting for the next idle, so a track change sends one signal.
     pending: RefCell<Vec<Property>>,
     flush_queued: Cell<bool>,
     net: NetHandle,
     paths: Paths,
     player: Rc<Player>,
-    /// Track and cover address whose art file is written or being written.
     art_key: RefCell<Option<(String, String)>>,
     art_queued: Cell<bool>,
     art_task: RefCell<Option<tokio::task::AbortHandle>>,
-    /// Handed to each server, which forwards what the shell asks for.
     commands: async_channel::Sender<Command>,
-    /// Whether the bus name is held or being taken.
     published: Cell<bool>,
 }
 
 impl Mpris {
-    /// Publish the player on D-Bus. Failure is logged and the app carries on.
     pub fn start(ctx: &Rc<App>) -> Rc<Self> {
         let (tx, rx) = async_channel::unbounded::<Command>();
         let shared = Arc::new(Mutex::new(Snapshot::default()));
@@ -391,8 +356,6 @@ impl Mpris {
         });
         this.refresh_all();
 
-        // Published on the first play, as the Python app did, and withdrawn
-        // when the queue empties: an idle shell player reads "Unknown title".
         this.sync_published();
         let weak = Rc::downgrade(&this);
         ctx.player.state().connect_notify_local(Some("status"), move |_, _| {
@@ -412,7 +375,6 @@ impl Mpris {
         this
     }
 
-    /// Hold the bus name while there is a track to show, and only then.
     fn sync_published(self: &Rc<Self>) {
         let state = self.player.state();
         let active = matches!(state.status(), PlaybackStatus::Playing | PlaybackStatus::Loading | PlaybackStatus::Paused);
@@ -436,7 +398,6 @@ impl Mpris {
             match handle.await {
                 Ok(Ok(server)) => {
                     let Some(this) = weak.upgrade() else { return };
-                    // Withdrawn again while the name was being taken.
                     if !this.published.get() {
                         this.net.spawn(async move {
                             let _ = server.release_bus_name().await;
@@ -452,8 +413,6 @@ impl Mpris {
         });
     }
 
-    /// Apply what the shell sends. Runs on the GTK thread, so it calls the
-    /// controller directly; seeks and volume reach GStreamer through it.
     fn pump_commands(self: &Rc<Self>, ctx: &Rc<App>, rx: async_channel::Receiver<Command>) {
         let weak_ctx = Rc::downgrade(ctx);
         let player = self.player.clone();
@@ -462,9 +421,6 @@ impl Mpris {
             while let Ok(command) = rx.recv().await {
                 tracing::debug!(?command, "mpris command");
                 match command {
-                    // Play on a stopped player starts the staged track, which
-                    // the shell expects; the controller's plain play() only
-                    // resumes a pipeline that already holds a stream.
                     Command::Play => match player.state().status() {
                         PlaybackStatus::Stopped => player.toggle_play(),
                         _ => player.play(),
@@ -506,7 +462,6 @@ impl Mpris {
         });
     }
 
-    /// Every property the shell cares about, mirrored as the state changes.
     fn watch_state(self: &Rc<Self>, state: &PlayerState) {
         let connect = |name: &str, f: fn(&Rc<Mpris>)| {
             let weak = Rc::downgrade(self);
@@ -551,7 +506,6 @@ impl Mpris {
             connect(name, |this| this.refresh_queue_bounds());
         }
 
-        // A seek moves the position in a way clients cannot predict.
         let weak = Rc::downgrade(self);
         state.connect_seeked(move |position| {
             let Some(this) = weak.upgrade() else { return };
@@ -582,7 +536,6 @@ impl Mpris {
         let status = self.player.state().status();
         let mut snapshot = self.shared.lock().unwrap();
         snapshot.status = status;
-        // Freeze the drift baseline whenever playback stops advancing.
         snapshot.position_at = (status == PlaybackStatus::Playing).then(Instant::now);
     }
 
@@ -594,8 +547,6 @@ impl Mpris {
     }
 
     fn refresh_queue_bounds(self: &Rc<Self>) {
-        // The queue decides. The snapshot still answers CanGoPrevious from the
-        // live position, because it crosses the restart threshold between ticks.
         let can_next = self.player.bounds().can_next;
         let can_previous = {
             let mut snapshot = self.shared.lock().unwrap();
@@ -607,8 +558,6 @@ impl Mpris {
         self.queue(Property::CanGoPrevious(can_previous));
     }
 
-    /// Title, artists, album and art for the playing track. The album and the
-    /// artist list come off the queue entry, which keeps more than the bar shows.
     fn refresh_metadata(self: &Rc<Self>) {
         let state = self.player.state();
         let track = self.player.current_track();
@@ -633,14 +582,6 @@ impl Mpris {
         self.sync_art();
     }
 
-    /// Port of _sync_mpris_art: shells want a local file, and the address the
-    /// app carries is often a dead ytimg quality, so the art is downloaded,
-    /// squared off and written to the cache. The remote address stays in the
-    /// metadata until the file lands.
-    ///
-    /// Run once the track change has settled: the id moves before the cover
-    /// address, and art taken in between was the previous song's cover saved
-    /// under the new song's name.
     fn sync_art(self: &Rc<Self>) {
         if self.art_queued.replace(true) {
             return;
@@ -665,7 +606,6 @@ impl Mpris {
             return;
         }
         self.art_key.replace(Some(key.clone()));
-        // A newer cover supersedes one still downloading, so a slow stale file cannot land last.
         if let Some(task) = self.art_task.borrow_mut().take() {
             task.abort();
         }
@@ -675,7 +615,6 @@ impl Mpris {
         let net = self.net.clone();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            // A downloaded track's own cover first: offline the remote one cannot be fetched.
             let address = crate::ui::cover::track_cover_address(&net, &video_id, &thumbnail).await;
             let current = |this: &Rc<Mpris>| this.art_key.borrow().as_ref() == Some(&key);
             if weak.upgrade().is_none_or(|this| !current(&this)) || address.is_empty() {
@@ -693,7 +632,6 @@ impl Mpris {
                 return;
             }
             let Some(path) = written else {
-                // Forgotten, so the next metadata change tries again.
                 this.art_key.replace(None);
                 return;
             };
@@ -707,8 +645,6 @@ impl Mpris {
         });
     }
 
-    /// Hold a change until the next idle: a track change touches four
-    /// properties and the shell only needs one signal.
     fn queue(self: &Rc<Self>, property: Property) {
         self.pending.borrow_mut().push(property);
         if self.flush_queued.replace(true) {
@@ -728,7 +664,6 @@ impl Mpris {
         if properties.is_empty() {
             return;
         }
-        // Keep the last of each kind: four metadata rewrites are one signal.
         let mut seen = Vec::new();
         properties.reverse();
         properties.retain(|p| {
@@ -748,7 +683,6 @@ impl Mpris {
         });
     }
 
-    /// Release the bus name and drop the server, which ends the command pump.
     pub fn shutdown(&self) {
         let Some(server) = self.server.borrow_mut().take() else { return };
         self.net.spawn(async move {
@@ -761,12 +695,8 @@ impl Mpris {
     }
 }
 
-/// Fetch the art, centre-crop it to a square, upscale anything small and
-/// write it as JPEG under the cache. Returns the file it wrote.
 async fn write_art_file(http: reqwest::Client, auth: Option<HttpAuth>, dir: PathBuf, video_id: String, thumbnail: String) -> Option<PathBuf> {
-    // None: the media controls want the largest copy, not a row-sized one.
     let bytes = fetch_cover_bytes(&http, auth.as_ref(), &thumbnail, None).await?;
-    // A unique name per track: clients cache art by address.
     let safe: String = video_id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
     let path = dir.join(format!("mpris_art_{safe}.jpg"));
     let result = tokio::task::spawn_blocking(move || save_square_jpeg(&dir, &path, &bytes).map(|()| path)).await;
@@ -780,8 +710,6 @@ async fn write_art_file(http: reqwest::Client, auth: Option<HttpAuth>, dir: Path
     }
 }
 
-/// Blocking half: the pixbuf work and the file write. Older art goes first,
-/// so the cache holds one cover rather than one per track ever played.
 fn save_square_jpeg(dir: &Path, path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     use gtk::gdk_pixbuf::{InterpType, PixbufLoader};
     use gtk::prelude::PixbufLoaderExt;
@@ -800,7 +728,6 @@ fn save_square_jpeg(dir: &Path, path: &Path, bytes: &[u8]) -> anyhow::Result<()>
     loader.write(bytes)?;
     loader.close()?;
     let pixbuf = loader.pixbuf().ok_or_else(|| anyhow::anyhow!("art did not decode"))?;
-    // Video thumbnails are 16:9 and MPRIS wants a square.
     let (width, height) = (pixbuf.width(), pixbuf.height());
     let size = width.min(height);
     let mut pixbuf = pixbuf.new_subpixbuf((width - size) / 2, (height - size) / 2, size, size);

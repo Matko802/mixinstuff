@@ -1,19 +1,3 @@
-#!/usr/bin/env python3
-"""Turn MUSISHARK_DEMO_SAMPLE output into a profile.
-
-usage: symbolize_samples.py PREFIX ROOTMAP... [--top N] [--focus NAME] [--debug-dir DIR]
-
-DIR holds usr/lib/<triplet>/<lib>.debug files from the runtime's .Debug extension.
-
-PREFIX.samples holds one sample per line, leaf first, as hex addresses.
-PREFIX.maps is the /proc/self/maps of the sampled process.
-ROOTMAP is remote=local, a path prefix as the process saw it and where the
-same files sit here, for example /usr=/path/to/sdk/files.
-
-Prints functions by self time and by total time (once per sample), and with
---focus the callers and callees of every sample that passes through NAME.
-"""
-
 import bisect
 import collections
 import subprocess
@@ -33,7 +17,6 @@ def load_maps(path):
 
 
 def load_segments(path):
-    """(file offset, vaddr) of each executable PT_LOAD, to map offsets to addresses."""
     out = subprocess.run(["llvm-readelf", "-lW", path], capture_output=True, text=True).stdout
     segs = []
     for line in out.splitlines():
@@ -72,7 +55,6 @@ def main():
                 return here + path[len(remote) :]
         return path
 
-    # Group addresses per object as virtual addresses inside that object.
     per_obj = collections.defaultdict(set)
     where = {}
     seg_cache = {}

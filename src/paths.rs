@@ -1,5 +1,3 @@
-//! On-disk locations. Identical to the Python app so an upgrade keeps the
-//! saved session, preferences and stream cache.
 
 use std::path::{Path, PathBuf};
 
@@ -7,20 +5,12 @@ use serde_json::{Map, Value};
 
 #[derive(Clone, Debug)]
 pub struct Paths {
-    /// $XDG_DATA_HOME/musishark
     pub data_dir: PathBuf,
-    /// $XDG_CACHE_HOME/musishark
     pub cache_dir: PathBuf,
-    /// $XDG_CACHE_HOME/musishark/streams, one JSON file per video id.
     pub stream_cache_dir: PathBuf,
-    /// Browser headers captured at login.
     pub auth_file: PathBuf,
-    /// User preferences (renderer, download format, appearance).
     pub prefs_file: PathBuf,
-    /// Developer config (debug_logs).
     pub config_file: PathBuf,
-    /// Where downloads live, when something other than ~/Music/Musishark.
-    /// Tests set it, and MUSISHARK_MUSIC_DIR sets it for a demo run.
     music_override: Option<PathBuf>,
 }
 
@@ -45,8 +35,6 @@ impl Paths {
         }
     }
 
-    /// Paths rooted in a temporary directory, so a test never touches the
-    /// real music folder or preferences.
     #[cfg(test)]
     pub fn for_tests(root: &Path) -> Self {
         let data_dir = root.join("data");
@@ -63,7 +51,6 @@ impl Paths {
         }
     }
 
-    /// ~/Music/Musishark, where downloads and mirrored playlist covers live.
     pub fn music_dir(&self) -> PathBuf {
         if let Some(dir) = &self.music_override {
             return dir.clone();
@@ -71,7 +58,6 @@ impl Paths {
         glib::user_special_dir(glib::UserDirectory::Music).unwrap_or_else(|| glib::home_dir().join("Music")).join("Musishark")
     }
 
-    /// <music_dir>/Playlists/<title>.jpg, a playlist's mirrored cover. None for an empty title.
     pub fn playlist_cover_path(&self, title: &str) -> Option<PathBuf> {
         if title.is_empty() {
             return None;
@@ -79,7 +65,6 @@ impl Paths {
         Some(self.music_dir().join("Playlists").join(format!("{}.jpg", sanitize_filename(title))))
     }
 
-    /// The mirrored cover when a copy exists on disk.
     pub fn local_playlist_cover(&self, title: &str) -> Option<PathBuf> {
         self.playlist_cover_path(title).filter(|p| p.is_file())
     }
@@ -92,7 +77,6 @@ impl Paths {
         read_object(&self.config_file)
     }
 
-    /// Merge changes into prefs.json, creating the file if needed.
     pub fn update_prefs(&self, apply: impl FnOnce(&mut Map<String, Value>)) {
         let mut prefs = self.read_prefs();
         apply(&mut prefs);
@@ -113,7 +97,6 @@ fn read_object(path: &Path) -> Map<String, Value> {
     }
 }
 
-/// Port of downloads._sanitize_filename: strip characters filesystems reject and cap the length.
 pub fn sanitize_filename(name: &str) -> String {
     let cleaned: String = name.chars().filter(|c| !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')).collect();
     let mut trimmed = cleaned.trim_matches(|c| c == '.' || c == ' ').to_owned();

@@ -1,6 +1,3 @@
-//! BiniLyrics (lyrics-api.binimum.org), the open TTML database behind the BetterLyrics extension, with good word-level coverage for Western pop and Japanese tracks.
-//!
-//! The endpoint takes a free-text query and returns matches with their timing type and a `lyricsUrl` pointing at the TTML.
 
 use std::time::Duration;
 
@@ -16,7 +13,6 @@ const URL: &str = "https://lyrics-api.binimum.org/getLyrics";
 const USER_AGENT: &str = "BetterLyrics/1.0";
 const TIMEOUT: Duration = Duration::from_secs(6);
 
-/// One search row.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Hit {
     name: String,
@@ -51,9 +47,7 @@ pub fn parse_search(data: &Value) -> Vec<Hit> {
         .collect()
 }
 
-/// The row to fetch. None when nothing is plausibly this recording.
 pub fn pick(mut hits: Vec<Hit>, request: &Request) -> Option<Hit> {
-    // Hard-filter to artist matches before scoring, so "Intro" from one album cannot claim to be the lyrics of an unrelated track of the same name.
     if !request.artist.is_empty() {
         if hits.iter().any(|h| artist_matches(request.artist, &h.artist)) {
             hits.retain(|h| artist_matches(request.artist, &h.artist));
@@ -61,7 +55,6 @@ pub fn pick(mut hits: Vec<Hit>, request: &Request) -> Option<Hit> {
             return None;
         }
     }
-    // The same recording gate as Apple Music: the search is fuzzy and the score below rewards word-level timing, so an unrelated hit that has it would win outright.
     let mut hits = gate(hits, request.title, request.artist, request.duration);
     hits.sort_by_key(|hit| {
         let mut score = if hit.word_level { 100i64 } else { 0 };
@@ -73,7 +66,6 @@ pub fn pick(mut hits: Vec<Hit>, request: &Request) -> Option<Hit> {
     hits.into_iter().next()
 }
 
-/// The fetched TTML as a result. When the search promised word-level timing and the document has none, this answers None so a line-synced provider gets its turn.
 pub fn result_from(ttml: &str, promised_word_level: bool) -> Option<LyricsResult> {
     let lines = ttml_to_lines(ttml);
     if lines.is_empty() {
@@ -88,7 +80,6 @@ pub fn result_from(ttml: &str, promised_word_level: bool) -> Option<LyricsResult
 
 pub async fn fetch(http: &reqwest::Client, request: Request<'_>) -> Option<LyricsResult> {
     let headers = [("User-Agent", USER_AGENT)];
-    // The backend does a fuzzy lookup, so "title artist" is enough.
     let query = title_and_artist(request.title, request.artist);
     let body = match get_text(http, URL, &[("q", query.as_str())], &headers, TIMEOUT).await {
         Ok(body) => body,

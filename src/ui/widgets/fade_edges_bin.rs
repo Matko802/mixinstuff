@@ -1,6 +1,3 @@
-//! Port of ui/widgets/fade_edges_bin.py: a box whose content fades out at the
-//! top and bottom edges through a mask node in its snapshot. The lyrics column
-//! uses it so scrolling lines dissolve instead of cropping at the chrome.
 
 use std::cell::Cell;
 
@@ -29,12 +26,10 @@ mod imp {
             let widget = self.obj();
             let (w, h) = (widget.width() as f32, widget.height() as f32);
             let (top, bottom) = (self.fade_top.get(), self.fade_bottom.get());
-            // Content shorter than both bands would be dimmed everywhere, so it goes unfaded.
             if w <= 0.0 || h <= 0.0 || (top <= 0.0 && bottom <= 0.0) || h <= top + bottom + 1.0 {
                 self.parent_snapshot(snapshot);
                 return;
             }
-            // Masked in the two bands only. A full-area mask rendered everything offscreen each frame.
             let content = gtk::Snapshot::new();
             self.parent_snapshot(&content);
             let Some(node) = content.to_node() else { return };
@@ -68,7 +63,6 @@ glib::wrapper! {
 }
 
 impl FadeEdgesBin {
-    /// Fade band sizes in CSS pixels, per edge.
     pub fn new(fade_top_px: f32, fade_bottom_px: f32) -> Self {
         let bin: Self = glib::Object::new();
         bin.imp().fade_top.set(fade_top_px.max(0.0));

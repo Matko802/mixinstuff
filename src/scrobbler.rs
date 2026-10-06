@@ -1,9 +1,3 @@
-//! Scrobbling to Last.fm and ListenBrainz. Port of player/scrobbler.py.
-//!
-//! The GTK thread feeds the listening clock and reads state for the
-//! preferences rows. One tokio task owns every network call. Scrobbles that
-//! fail are kept on disk and retried, so a dropped connection loses no plays.
-//! Files are shared with the Python app: scrobbler.json and scrobble_queue.json.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -16,8 +10,6 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::paths::Paths;
 
-// Committed on purpose, like the Python app: builds run on the user's machine
-// and a key inside a shipped binary is extractable anyway. Env vars override.
 const EMBEDDED_LASTFM_API_KEY: &str = "1aa73ecd8d085e53977fc8e781afa2fa";
 const EMBEDDED_LASTFM_API_SECRET: &str = "51523d91a6e58babdb0b06b130f5ec45";
 
@@ -26,21 +18,13 @@ const LASTFM_AUTH_URL: &str = "https://www.last.fm/api/auth/";
 const LISTENBRAINZ_API_ROOT: &str = "https://api.listenbrainz.org";
 const USER_AGENT: &str = "Musishark (https://matko802.com/#!/musishark)";
 
-/// Last.fm never takes a track under 30 seconds.
 const MIN_TRACK_LENGTH: f64 = 30.0;
-/// Submit once half the track or 4 minutes has played, whichever is first.
 const SCROBBLE_CAP_SECONDS: f64 = 240.0;
-/// Streams that never report a length fall back to a flat threshold.
 const UNKNOWN_DURATION_THRESHOLD: f64 = 120.0;
-/// Cap on the offline backlog per service.
 const MAX_PENDING: usize = 500;
-/// Give up on an entry that keeps being refused.
 const MAX_ATTEMPTS: u32 = 10;
-/// Retry the backlog on this cadence while the worker is idle.
 const RETRY_INTERVAL: Duration = Duration::from_secs(300);
-/// Last.fm's per-request scrobble limit.
 const BATCH_SIZE: usize = 50;
-/// Refresh "now playing" no more often than this.
 const NOW_PLAYING_INTERVAL: Duration = Duration::from_secs(30);
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
 const IDLE_WAKE: Duration = Duration::from_secs(30);
@@ -54,7 +38,6 @@ pub enum Service {
 pub const SERVICES: [Service; 2] = [Service::LastFm, Service::ListenBrainz];
 
 impl Service {
-    /// Key in scrobbler.json and scrobble_queue.json.
     pub fn key(self) -> &'static str {
         match self {
             Service::LastFm => "lastfm",
@@ -72,20 +55,16 @@ impl Service {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScrobbleError {
-    /// Worth retrying: network down, rate limit, 5xx.
     #[error("{0}")]
     Transient(String),
-    /// Retrying will not fix it.
     #[error("{0}")]
     Permanent(String),
-    /// The stored credential was rejected. The user has to reconnect.
     #[error("{0}")]
     Auth(String),
 }
 
 use ScrobbleError::{Auth, Permanent, Transient};
 
-/// One listen, as it sits in scrobble_queue.json.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Entry {
     #[serde(default)]
@@ -104,7 +83,6 @@ pub struct Entry {
     pub attempts: u32,
 }
 
-/// The play in flight and its listening clock.
 #[derive(Clone, Debug)]
 struct Current {
     video_id: String,
@@ -112,7 +90,6 @@ struct Current {
     artist: String,
     album: String,
     duration: f64,
-    /// Filled when playback reaches Playing, so it reflects the listen and not the load.
     timestamp: Option<i64>,
     elapsed: Duration,
     playing_since: Option<Instant>,
@@ -134,7 +111,6 @@ impl Current {
     }
 }
 
-/// What a progress tick asks the worker to send.
 #[derive(Debug, Default, PartialEq)]
 struct Due {
     now_playing: Option<Entry>,
@@ -145,7 +121,6 @@ fn threshold(duration: f64) -> f64 {
     if duration <= 0.0 { UNKNOWN_DURATION_THRESHOLD } else { (duration / 2.0).min(SCROBBLE_CAP_SECONDS) }
 }
 
-/// Advance the clock for one position tick. Pure apart from the wall clock stamp.
 fn tick(cur: &mut Current, duration: f64, is_playing: bool, now: Instant) -> Due {
     let mut due = Due::default();
     if is_playing {
@@ -155,7 +130,6 @@ fn tick(cur: &mut Current, duration: f64, is_playing: bool, now: Instant) -> Due
         if cur.timestamp.is_none() {
             cur.timestamp = Some(unix_now());
         }
-        // Last.fm expires a now-playing update on its own, so refresh it while the track runs.
         if cur.now_playing_at.is_none_or(|sent| now.duration_since(sent) > NOW_PLAYING_INTERVAL) {
             cur.now_playing_at = Some(now);
             due.now_playing = Some(cur.entry());
@@ -165,7 +139,6 @@ fn tick(cur: &mut Current, duration: f64, is_playing: bool, now: Instant) -> Due
     }
 
     if !cur.scrobbled {
-        // GStreamer often learns the real length a few ticks in.
         if duration > cur.duration {
             cur.duration = duration;
         }
@@ -197,7 +170,6 @@ struct Inner {
     enabled: bool,
     now_playing_enabled: bool,
     stopping: bool,
-    /// Demo runs play throwaway tracks, which must never reach a real profile.
     muted: bool,
     last_error: String,
 }
@@ -212,7 +184,6 @@ pub struct Scrobbler {
 }
 
 impl Scrobbler {
-    /// Load credentials and the backlog, and start the worker on `rt`.
     pub fn start(paths: &Paths, rt: &tokio::runtime::Handle) -> Arc<Self> {
         let (tx, rx) = unbounded_channel();
         let prefs = paths.read_prefs();
@@ -246,9 +217,7 @@ impl Scrobbler {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    // -- state the preferences rows read ----------------------------------
 
-    /// False when the build ships without Last.fm API credentials.
     pub fn lastfm_configured(&self) -> bool {
         !self.api_key.is_empty() && !self.api_secret.is_empty()
     }
@@ -284,7 +253,6 @@ impl Scrobbler {
         self.lock().now_playing_enabled = enabled;
     }
 
-    /// Keep everything working except the submissions. Not saved anywhere.
     pub fn set_muted(&self, muted: bool) {
         self.lock().muted = muted;
     }
@@ -294,9 +262,7 @@ impl Scrobbler {
         let _ = self.tx.send(Op::Stop);
     }
 
-    // -- player events ------------------------------------------------------
 
-    /// A new play began. Resets the listening clock.
     pub fn on_track_started(&self, video_id: &str, title: &str, artist: &str, album: &str, duration: f64) {
         self.lock().cur = Some(Current {
             video_id: video_id.to_owned(),
@@ -312,8 +278,6 @@ impl Scrobbler {
         });
     }
 
-    /// Correct the in-flight track's metadata without touching the clock.
-    /// The audio-version swap lands after playback starts.
     pub fn refine_current_track(&self, video_id: &str, title: &str, artist: &str, album: &str) {
         let mut inner = self.lock();
         let Some(cur) = inner.cur.as_mut().filter(|c| !c.scrobbled) else { return };
@@ -331,7 +295,6 @@ impl Scrobbler {
         }
     }
 
-    /// Only ever stops the clock. Starting it is the progress tick's job.
     pub fn on_state_changed(&self, playing: bool) {
         if playing {
             return;
@@ -344,7 +307,6 @@ impl Scrobbler {
         }
     }
 
-    /// Drives the listening clock. Called on every position tick.
     pub fn on_progress(&self, duration: f64, is_playing: bool) {
         let due = {
             let mut inner = self.lock();
@@ -374,14 +336,12 @@ impl Scrobbler {
         if entry.track.is_empty() || entry.artist.is_empty() {
             return false;
         }
-        // A missing duration is unknown, not short.
         if entry.duration > 0 && (entry.duration as f64) < MIN_TRACK_LENGTH {
             return false;
         }
         SERVICES.iter().any(|s| self.is_connected(*s))
     }
 
-    // -- worker ---------------------------------------------------------------
 
     async fn run(self: Arc<Self>, mut rx: UnboundedReceiver<Op>) {
         let mut last_flush = Instant::now();
@@ -425,7 +385,6 @@ impl Scrobbler {
             match sent {
                 Ok(()) => {}
                 Err(Auth(message)) => self.handle_auth_error(service, &message),
-                // Cosmetic and it expires anyway, so a failure is logged and dropped.
                 Err(err) => tracing::warn!(service = service.key(), %err, "now-playing failed"),
             }
         }
@@ -496,8 +455,6 @@ impl Scrobbler {
         }
     }
 
-    /// Count a failed attempt and drop entries that keep being refused, so
-    /// one bad play cannot wedge the backlog forever.
     fn penalize(&self, service: Service, count: usize) {
         let snapshot = {
             let mut inner = self.lock();
@@ -530,7 +487,6 @@ impl Scrobbler {
     fn handle_auth_error(&self, service: Service, message: &str) {
         tracing::warn!(service = service.key(), %message, "credentials rejected");
         self.disconnect(service);
-        // Set after disconnect, which clears it, so the row can say why the service dropped out.
         self.lock().last_error = format!("{}: {message}", service.label());
     }
 
@@ -538,7 +494,6 @@ impl Scrobbler {
         credential_of(&self.lock().creds, service, self.lastfm_configured())
     }
 
-    // -- Last.fm ----------------------------------------------------------------
 
     async fn lastfm_call(&self, method: &str, params: BTreeMap<String, String>, post: bool, session_key: Option<&str>) -> Result<Value, ScrobbleError> {
         let mut payload = params;
@@ -583,8 +538,6 @@ impl Scrobbler {
         Ok(())
     }
 
-    /// Log whatever Last.fm accepted then dropped. Without this a discarded
-    /// scrobble looks the same as a successful one.
     fn report_ignored(&self, data: &Value) {
         for (artist, track, reason) in ignored_listens(data) {
             tracing::warn!(%artist, %track, %reason, "lastfm discarded a listen");
@@ -592,7 +545,6 @@ impl Scrobbler {
         }
     }
 
-    /// Start the desktop auth flow. Returns (token, url) for the caller to open in a browser.
     pub async fn lastfm_request_token(&self) -> Result<(String, String), ScrobbleError> {
         if !self.lastfm_configured() {
             return Err(Permanent("This build has no Last.fm API credentials".into()));
@@ -608,8 +560,6 @@ impl Scrobbler {
         Ok((token, url))
     }
 
-    /// Trade an authorized token for a session key. Fails with Auth while the
-    /// user has not pressed Allow yet, so the caller polls this.
     pub async fn lastfm_finish_auth(&self, token: &str) -> Result<String, ScrobbleError> {
         let mut params = BTreeMap::new();
         params.insert("token".to_owned(), token.to_owned());
@@ -624,7 +574,6 @@ impl Scrobbler {
         Ok(name)
     }
 
-    // -- ListenBrainz -------------------------------------------------------------
 
     async fn listenbrainz_post(&self, body: Value) -> Result<(), ScrobbleError> {
         let token = self.credential(Service::ListenBrainz);
@@ -661,7 +610,6 @@ impl Scrobbler {
         self.listenbrainz_post(listenbrainz_body(batch)).await
     }
 
-    /// Validate a user token and store it. Returns the ListenBrainz username.
     pub async fn listenbrainz_connect(&self, token: &str) -> Result<String, ScrobbleError> {
         let token = token.trim();
         if token.is_empty() {
@@ -691,7 +639,6 @@ impl Scrobbler {
         Ok(name)
     }
 
-    // -- credential storage ---------------------------------------------------------
 
     fn store_credentials(&self, service: Service, entry: Value) {
         let snapshot = {
@@ -717,7 +664,6 @@ impl Scrobbler {
     }
 }
 
-// -- pure helpers ---------------------------------------------------------------------
 
 fn env_or(name: &str, fallback: &str) -> String {
     std::env::var(name).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| fallback.to_owned())
@@ -736,7 +682,6 @@ fn credential_of(creds: &Map<String, Value>, service: Service, lastfm_configured
     creds.get(service.key()).and_then(|e| e.get(field)).and_then(Value::as_str).unwrap_or_default().to_owned()
 }
 
-/// Last.fm api_sig: md5 of every key and value in key order, with the shared secret appended.
 fn sign(params: &BTreeMap<String, String>, secret: &str) -> String {
     let mut raw = String::new();
     for (k, v) in params {
@@ -765,7 +710,6 @@ fn lastfm_batch_params(batch: &[Entry]) -> BTreeMap<String, String> {
     params
 }
 
-/// Sort a Last.fm answer into success or the kind of failure its error code means.
 fn classify_lastfm(data: Value) -> Result<Value, ScrobbleError> {
     let code = match data.get("error") {
         Some(Value::Number(n)) => n.as_i64().unwrap_or(0),
@@ -777,9 +721,7 @@ fn classify_lastfm(data: Value) -> Result<Value, ScrobbleError> {
     }
     let message = data.get("message").and_then(Value::as_str).unwrap_or("unknown error").to_owned();
     match code {
-        // All four mean "this credential is no longer good".
         4 | 9 | 14 | 15 => Err(Auth(message)),
-        // 8 operation failed, 11 service offline, 16 unavailable, 29 rate limited.
         8 | 11 | 16 | 29 => Err(Transient(message)),
         _ => Err(Permanent(format!("{message} (code {code})"))),
     }
@@ -796,7 +738,6 @@ fn ignore_reason(code: &str) -> Option<&'static str> {
     })
 }
 
-/// (artist, track, reason) for every listen Last.fm took with HTTP 200 and then discarded.
 fn ignored_listens(data: &Value) -> Vec<(String, String, String)> {
     let Some(body) = data.get("scrobbles").or_else(|| data.get("nowplaying")).filter(|b| !b.is_null()) else {
         return Vec::new();
@@ -859,9 +800,7 @@ fn listenbrainz_body(batch: &[Entry]) -> Value {
     })
 }
 
-// -- files ------------------------------------------------------------------------------
 
-// Kept out of prefs.json on purpose: users paste that file into bug reports.
 fn creds_path(paths: &Paths) -> std::path::PathBuf {
     paths.data_dir.join("scrobbler.json")
 }
@@ -892,7 +831,6 @@ fn save_pending(paths: &Paths, pending: &Pending) {
     }
 }
 
-/// Write through a temp file so a crash never leaves half a file, 0600 for credentials.
 fn write_json(path: &std::path::Path, data: &Value, private: bool) {
     let write = || -> std::io::Result<()> {
         if let Some(dir) = path.parent() {
@@ -937,7 +875,6 @@ mod tests {
         params.insert("api_key".to_owned(), "key".to_owned());
         params.insert("token".to_owned(), "tok".to_owned());
         params.insert("format".to_owned(), "json".to_owned());
-        // md5("api_keykeymethodauth.getSessiontokentoksecret")
         assert_eq!(sign(&params, "secret"), format!("{:x}", Md5::digest(b"api_keykeymethodauth.getSessiontokentoksecret")));
     }
 
@@ -967,7 +904,6 @@ mod tests {
         let mut cur = current(100.0);
         tick(&mut cur, 100.0, true, start);
         tick(&mut cur, 100.0, false, start + Duration::from_secs(30));
-        // Ten minutes paused, then playing again: 30 s listened so far.
         let resumed = start + Duration::from_secs(630);
         assert!(tick(&mut cur, 100.0, true, resumed).scrobble.is_none());
         assert!(tick(&mut cur, 100.0, true, resumed + Duration::from_secs(19)).scrobble.is_none());
@@ -988,7 +924,6 @@ mod tests {
         let start = Instant::now();
         let mut cur = current(0.0);
         tick(&mut cur, 0.0, true, start);
-        // The pipeline reports 400 s, so half is 200 s and not the flat 120 s.
         assert!(tick(&mut cur, 400.0, true, start + Duration::from_secs(150)).scrobble.is_none());
         assert!(tick(&mut cur, 400.0, true, start + Duration::from_secs(200)).scrobble.is_some());
     }

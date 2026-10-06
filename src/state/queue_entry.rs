@@ -1,5 +1,3 @@
-//! One row of the queue list model. GObject so ListView factories can bind
-//! to its properties with expressions and survive row recycling.
 
 use std::cell::{Cell, RefCell};
 
@@ -24,7 +22,6 @@ mod imp {
         pub video_id: RefCell<String>,
         #[property(get, set)]
         pub playing: Cell<bool>,
-        /// True while the playing row's track is paused or stopped.
         #[property(get, set)]
         pub paused: Cell<bool>,
         pub track: RefCell<Track>,
@@ -62,8 +59,6 @@ impl QueueEntry {
         self.imp().track.borrow().clone()
     }
 
-    /// Bring a row that stays in the list up to date. Only what changed is set,
-    /// so a bound row redraws for a reason and not on every sync.
     pub fn update(&self, index: u32, track: &Track, playing: bool, paused: bool) {
         if self.index() != index {
             self.set_index(index);
@@ -86,8 +81,6 @@ impl QueueEntry {
     }
 }
 
-/// How many rows at the start and at the end two id lists share, never overlapping.
-/// What lies between is the only part of the list model a sync has to replace.
 pub fn shared_ends(old: &[String], new: &[String]) -> (usize, usize) {
     let prefix = old.iter().zip(new).take_while(|(a, b)| a == b).count();
     let room = old.len().min(new.len()) - prefix;

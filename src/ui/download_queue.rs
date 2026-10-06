@@ -1,8 +1,3 @@
-//! The download queue behind the header pie.
-//!
-//! Port of the popover half of window.py: one row per queued track with its
-//! own progress bar and a cancel button, the pie following the queue, and the
-//! whole list clearing itself a few seconds after the last download lands.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -15,7 +10,6 @@ use crate::downloads::Event;
 use crate::model::Track;
 use crate::ui::context::UiContext;
 
-/// How long finished rows stay up before the popover empties itself.
 const LINGER: Duration = Duration::from_secs(5);
 
 struct Row {
@@ -29,12 +23,10 @@ pub struct DownloadQueue {
     ctx: Rc<UiContext>,
     items: gtk::Box,
     rows: RefCell<HashMap<String, Row>>,
-    /// Set while a clear is pending, so a new download cancels it.
     clearing: RefCell<Option<glib::SourceId>>,
 }
 
 impl DownloadQueue {
-    /// Wire the popover box to the manager's events.
     pub fn new(ctx: Rc<UiContext>, items: gtk::Box) -> Rc<Self> {
         let queue = Rc::new(Self { ctx: ctx.clone(), items, rows: RefCell::new(HashMap::new()), clearing: RefCell::new(None) });
         let weak = Rc::downgrade(&queue);
@@ -48,8 +40,6 @@ impl DownloadQueue {
         queue
     }
 
-    /// Queue tracks and show them in the popover. This is what every Download
-    /// action in the app calls.
     pub fn start(self: &Rc<Self>, tracks: Vec<Track>, album_title: &str, album_id: &str) -> usize {
         let pending: Vec<Track> = tracks.into_iter().filter(|t| !t.video_id.0.is_empty() && !self.ctx.downloads.is_downloaded(&t.video_id.0)).collect();
         if pending.is_empty() {
@@ -129,7 +119,6 @@ impl DownloadQueue {
         }
     }
 
-    /// Empty the popover and hide the pie, a few seconds after the queue drains.
     pub fn clear_later(self: &Rc<Self>) {
         if self.clearing.borrow().is_some() {
             return;

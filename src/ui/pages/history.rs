@@ -1,7 +1,3 @@
-//! Port of ui/pages/history.py: the plays YouTube has recorded, grouped under
-//! the headings it filed them under. A row plays from there through the rest
-//! of the history, and its menu can forget it. Signed out, the page shows the
-//! play log kept on this device instead, under the same kind of headings.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -14,13 +10,10 @@ use crate::ui::context::UiContext;
 use crate::ui::context_menu::{MenuAction, Section};
 use crate::ui::widgets::song_row::SongRow;
 
-/// How far the page scrolls before the header takes over the title.
 const TITLE_HANDOVER: f64 = 50.0;
 const EMPTY_TEXT: &str = "Your listening history will appear here after you play something.";
 const LOCAL_EMPTY_TEXT: &str = "Songs you play without signing in appear here. They stay on this device.";
-/// How many local plays the page lists.
 const LOCAL_LIMIT: usize = 500;
-/// The queue a history row plays is the history itself, not a playlist.
 const QUEUE_SOURCE: &str = "HISTORY";
 
 type TitleListener = Box<dyn Fn(&str)>;
@@ -32,7 +25,6 @@ pub struct HistoryPage {
     empty_label: gtk::Label,
     loading_wrap: gtk::Box,
     ctx: Rc<UiContext>,
-    /// Every play in one flat list, which is what a row queues.
     entries: RefCell<Vec<HistoryEntry>>,
     rows: RefCell<Vec<Rc<SongRow>>>,
     loading: Cell<bool>,
@@ -57,8 +49,6 @@ impl HistoryPage {
         let clamp = adw::Clamp::builder().maximum_size(1024).tightening_threshold(600).child(&content_box).build();
         scrolled.set_child(Some(&clamp));
 
-        // Overlaid rather than packed: the same centring the library page uses,
-        // which the clamp inside a scrolled window would otherwise fight.
         let loading_wrap = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).valign(gtk::Align::Center).halign(gtk::Align::Center).build();
         let spinner = adw::Spinner::new();
         spinner.set_size_request(48, 48);
@@ -102,7 +92,6 @@ impl HistoryPage {
         &self.root
     }
 
-    /// The window sets its title from this, like the header-title-changed signal.
     pub fn set_on_header_title(&self, f: impl Fn(&str) + 'static) {
         self.on_title.replace(Some(Box::new(f)));
     }
@@ -125,8 +114,6 @@ impl HistoryPage {
         }
     }
 
-    /// Port of load: the cached plays go up straight away, then the fetch
-    /// replaces them. Without a cache the page waits on the spinner.
     pub fn load(self: &Rc<Self>) {
         if !self.ctx.player.state().authenticated() {
             self.load_local();
@@ -139,13 +126,10 @@ impl HistoryPage {
         self.refresh();
     }
 
-    /// Whether a fetch is in flight, which is what the header's refresh
-    /// button waits on before putting its icon back.
     pub fn is_loading(&self) -> bool {
         self.loading.get()
     }
 
-    /// Port of refresh_from_server.
     pub fn refresh(self: &Rc<Self>) {
         if !self.ctx.player.state().authenticated() {
             self.load_local();
@@ -184,7 +168,6 @@ impl HistoryPage {
         });
     }
 
-    /// The play log on this device, each song once per heading.
     fn load_local(self: &Rc<Self>) {
         let now = glib::DateTime::now_local().ok();
         let mut entries: Vec<HistoryEntry> = Vec::new();
@@ -214,7 +197,6 @@ impl HistoryPage {
         }
         self.empty_label.set_visible(false);
 
-        // One section per heading, in the order YouTube sent them.
         let mut sections: Vec<(String, Vec<usize>)> = Vec::new();
         for (index, entry) in entries.iter().enumerate() {
             match sections.last_mut() {
@@ -262,8 +244,6 @@ impl HistoryPage {
         section
     }
 
-    /// Port of _on_row_activated: play from here through the rest of the
-    /// history, the way a click inside a flat playlist does.
     fn play_from(&self, index: usize) {
         let tracks: Vec<Track> = self.entries.borrow().iter().map(|entry| entry.track.clone()).collect();
         if index >= tracks.len() {
@@ -272,7 +252,6 @@ impl HistoryPage {
         self.ctx.player.play_tracks(tracks, index, false, Some(QUEUE_SOURCE.to_owned()), false);
     }
 
-    /// The two entries history.py adds to a row's song menu.
     fn row_menu_extras(self: &Rc<Self>, index: usize) -> Vec<MenuAction> {
         let token = self.entries.borrow().get(index).and_then(|entry| entry.feedback_token.clone());
         let video_id = self.entries.borrow().get(index).map(|entry| entry.track.video_id.0.clone()).unwrap_or_default();
@@ -293,7 +272,6 @@ impl HistoryPage {
             }));
             return extras;
         }
-        // No token means a brand account, where YouTube offers no removal.
         if let Some(token) = token {
             let weak = Rc::downgrade(self);
             extras.push(MenuAction::new("Remove from History", Section::Remove, move || {
@@ -305,7 +283,6 @@ impl HistoryPage {
         extras
     }
 
-    /// Demo hook: what the first row's menu adds on top of the song menu.
     pub fn menu_extras_for_demo(self: &Rc<Self>) -> Vec<String> {
         if self.entries.borrow().is_empty() {
             return Vec::new();
@@ -313,8 +290,6 @@ impl HistoryPage {
         self.row_menu_extras(0).into_iter().map(|action| action.label).collect()
     }
 
-    /// Port of _remove_track_optimistic: the row goes now, the cache is
-    /// patched now, and the account is told afterwards.
     fn remove_play(self: &Rc<Self>, video_id: &str, token: &str) {
         self.entries.borrow_mut().retain(|entry| entry.track.video_id.0 != video_id);
         history::forget_cached(self.ctx.downloads.store(), video_id);
@@ -339,8 +314,6 @@ impl HistoryPage {
     }
 }
 
-/// The heading a play made at `played_at` goes under, the way YouTube files
-/// them: Today, Yesterday, This week, Last week, then the month.
 fn local_heading(played_at: i64, now: &glib::DateTime) -> Option<String> {
     let played = glib::DateTime::from_unix_local(played_at).ok()?;
     let midnight = |d: &glib::DateTime| glib::DateTime::from_local(d.year(), d.month(), d.day_of_month(), 0, 0, 0.0).ok();
@@ -358,7 +331,6 @@ fn heading_for(days_ago: i64, month: &str) -> String {
     }
 }
 
-/// Port of the row's subtitle: the artists, then the album behind a bullet.
 fn subtitle(track: &Track) -> String {
     let album = track.album.as_ref().map(|a| a.name.as_str()).unwrap_or_default();
     match (track.artist.is_empty(), album.is_empty()) {
@@ -368,7 +340,6 @@ fn subtitle(track: &Track) -> String {
     }
 }
 
-/// A history row as the boxed-list row wants it.
 fn as_item(track: &Track) -> MediaItem {
     MediaItem {
         kind: if track.video_type.as_deref().is_some_and(|t| t != "MUSIC_VIDEO_TYPE_ATV") { ItemKind::Video } else { ItemKind::Song },

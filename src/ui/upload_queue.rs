@@ -1,9 +1,3 @@
-//! Sending files to the uploaded library, and the queue behind the header pie.
-//!
-//! Port of _start_upload_queue and _process_upload_queue: one row per file with
-//! its state, uploads run one after another, and the list clears itself once
-//! the last one lands. The library's uploads tab reloads when the queue drains,
-//! since that is when the new songs turn up.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -15,10 +9,8 @@ use gtk::{gio, glib, prelude::*};
 
 use crate::ui::context::UiContext;
 
-/// Told how far the queue is, so the header pie can follow.
 type ProgressSink = Box<dyn Fn(Option<f64>)>;
 
-/// How long finished rows stay up before the popover empties itself.
 const LINGER: Duration = Duration::from_secs(8);
 
 struct Row {
@@ -53,12 +45,10 @@ impl UploadQueue {
         })
     }
 
-    /// Where the header pie listens.
     pub fn set_on_progress(&self, f: impl Fn(Option<f64>) + 'static) {
         self.on_progress.replace(Some(Box::new(f)));
     }
 
-    /// Ask for files and upload what comes back.
     pub fn pick_files(self: &Rc<Self>, parent: &impl IsA<gtk::Widget>) {
         if !self.ctx.net.client().is_authenticated() {
             crate::ui::toast(parent, "Sign in to upload songs");
@@ -81,7 +71,6 @@ impl UploadQueue {
         });
     }
 
-    /// Queue files and start working through them.
     pub fn queue(self: &Rc<Self>, files: Vec<PathBuf>) {
         if files.is_empty() {
             return;
@@ -129,8 +118,6 @@ impl UploadQueue {
         glib::spawn_future_local(async move { this.work().await });
     }
 
-    /// One file at a time, the way the Python queue worked: YouTube rejects
-    /// parallel uploads from one session often enough not to try.
     async fn work(self: Rc<Self>) {
         loop {
             let Some(file) = self.waiting.borrow_mut().pop_front() else { break };
@@ -164,7 +151,6 @@ impl UploadQueue {
         if let Some(f) = self.on_progress.borrow().as_ref() {
             f(None);
         }
-        // YouTube takes a moment to list what was just sent.
         self.ctx.nav.refresh_library();
         self.clear_later();
     }

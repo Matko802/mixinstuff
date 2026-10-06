@@ -1,4 +1,3 @@
-//! The Lyrics page of the preferences dialog. Port of _build_lyrics_page.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -11,7 +10,6 @@ use crate::lyrics::Lyrics;
 use crate::ui::preferences::{combo_row, scale_row, switch_row};
 use crate::ui::window::MainWindow;
 
-/// What each provider is good at, so ordering the queue is an informed choice.
 fn provider_blurb(name: &str) -> &'static str {
     match name {
         "Apple Music" => "Word-level timing. Best coverage for Western pop",
@@ -28,7 +26,6 @@ const MATCH_LABELS: [&str; 2] = ["Quality-aware", "Strict"];
 const SECOND_LINE_LABELS: [&str; 5] = ["Off", "Auto", "Romanization", "Translation", "Background"];
 const EFFECT_LABELS: [&str; 3] = ["Off", "Subtle", "Full"];
 
-/// The provider queue: numbered rows with move buttons and a switch each.
 struct ProviderQueue {
     group: adw::PreferencesGroup,
     rows: RefCell<Vec<adw::ActionRow>>,
@@ -47,7 +44,6 @@ impl ProviderQueue {
             let row = adw::ActionRow::builder().title(format!("{}. {name}", i + 1)).subtitle(provider_blurb(name)).build();
             for (icon, tooltip, delta, sensitive) in [("go-up-symbolic", "Move up", -1i32, i > 0), ("go-down-symbolic", "Move down", 1, i + 1 < order.len())] {
                 let button = gtk::Button::builder().icon_name(icon).tooltip_text(tooltip).valign(gtk::Align::Center).sensitive(sensitive).build();
-                // The builder would replace the image-button class the icon brings.
                 button.add_css_class("flat");
                 let this = Rc::downgrade(self);
                 let name = name.clone();
@@ -88,7 +84,6 @@ impl ProviderQueue {
     }
 
     fn toggle(self: &Rc<Self>, name: &str, enabled: bool) {
-        // An empty queue silently means no lyrics, ever, with nothing on screen to say why.
         if !enabled && self.lyrics.prefs().provider_order().len() <= 1 {
             if let Some(win) = self.win.upgrade() {
                 win.add_toast("Keep at least one lyrics provider enabled");
@@ -99,7 +94,6 @@ impl ProviderQueue {
         self.rebuild_later();
     }
 
-    /// Rebuilding removes the widget whose signal is still being delivered, so wait for idle.
     fn rebuild_later(self: &Rc<Self>) {
         let this = Rc::downgrade(self);
         glib::idle_add_local_once(move || {
@@ -124,15 +118,12 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
         }
     };
 
-    // -- search queue ---------------------------------------------------
     let queue_group = adw::PreferencesGroup::builder().title("Search Queue").description("Tried from the top down. Switch one off to skip it.").build();
     page.add(&queue_group);
     let queue = Rc::new(ProviderQueue { group: queue_group.clone(), rows: RefCell::new(Vec::new()), lyrics: ctx.lyrics.clone(), win: Rc::downgrade(win) });
     queue.rebuild();
-    // The closures above hold weak references, so the group keeps the queue alive.
     unsafe { queue_group.set_data("queue", queue) };
 
-    // -- matching ---------------------------------------------------------
     let match_group = adw::PreferencesGroup::builder()
         .title("Matching")
         .description("Quality-aware keeps looking for synced lyrics before settling for plain text. Strict takes the first hit of any kind.")
@@ -152,7 +143,6 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
     match_group.add(&match_row);
 
 
-    // -- second line ----------------------------------------------------------
     let display_group = adw::PreferencesGroup::builder()
         .title("Second Line")
         .description("An extra line under each lyric. Auto picks a romanization for non-Latin scripts and background vocals otherwise. What's available depends on the provider.")
@@ -172,7 +162,6 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
     }
     display_group.add(&second_row);
 
-    // -- effects -----------------------------------------------------------------
     let effects_group = adw::PreferencesGroup::builder()
         .title("Effects")
         .description("Subtle fades each word in over the time it's actually held and grows the active line. Full adds a glow on the active line and blurs the lines furthest from it.")
@@ -193,7 +182,6 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
     }
     effects_group.add(&sweep_row);
 
-    // -- text size -------------------------------------------------------------------
     let size_group = adw::PreferencesGroup::builder()
         .title("Text Size")
         .description("Resting size of the lyric column, and how much bigger the line being sung is drawn. The active line is scaled when it is painted, so growing it never changes the row's height or disturbs the scrolling.")
@@ -235,11 +223,8 @@ pub fn build_page(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesPage {
             }
         });
     }
-    // -- cache -------------------------------------------------------------
-    // Styled like Reset Musishark: its own group, a destructive button row.
     let cache_group = adw::PreferencesGroup::builder().description("Queue changes only apply to tracks that aren't cached yet").build();
     let clear_row = adw::ButtonRow::builder().title("Clear Cached Lyrics").end_icon_name("user-trash-symbolic").build();
-    // The builder would replace the button class the row styles itself with.
     clear_row.add_css_class("destructive-action");
     {
         let ctx = ctx.clone();

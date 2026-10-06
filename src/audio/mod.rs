@@ -1,15 +1,3 @@
-//! Audio engine: one dedicated thread that owns the playbin pipeline.
-//!
-//! The thread runs its own GLib main context. The GStreamer bus watch, the
-//! 100 ms position ticker and the command receiver all live on that context,
-//! so blocking calls such as `set_state(Null)` stall this loop and never the
-//! GTK loop. Two callbacks run on GStreamer streaming threads (about-to-finish
-//! and source-setup); they touch only `Arc<Mutex<_>>` slots and stay short.
-//!
-//! Commands flow in over an unbounded channel. Events flow out over two
-//! channels: `control` (unbounded, lossless) and `telemetry` (bounded,
-//! newest-wins). Every event is stamped with the load generation it belongs
-//! to so the controller can drop anything stale.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -32,18 +20,13 @@ const SPECTRUM_INTERVAL_NS: u64 = 33_000_000;
 
 #[derive(Debug)]
 pub enum AudioCommand {
-    /// Tear down the current stream and start `uri`. `auth` rides along for souphttpsrc.
     Load { uri: String, generation: u64, auth: Option<HttpAuth> },
-    /// Pre-set the next URI for gapless playback under a fresh generation.
     ArmNext { uri: String, generation: u64 },
-    /// Forget any armed URI. Sent on every queue mutation.
     DisarmNext,
     Play,
     Pause,
     Stop,
     Seek { seconds: f64 },
-    /// Report what the pipeline is doing, for the Stream Info panel. The
-    /// answer goes back on `reply` because only this thread may ask playbin.
     Describe { reply: async_channel::Sender<String> },
     SetVolume(f64),
     SetMute(bool),
@@ -53,30 +36,24 @@ pub enum AudioCommand {
 #[derive(Debug, Clone)]
 pub enum AudioEvent {
     StateChanged { generation: u64, status: PlaybackStatus },
-    /// The pipeline switched to an armed URI. `generation` is the armed one.
     StreamStarted { generation: u64 },
-    /// Preroll finished; duration is now queryable.
     Prerolled { generation: u64 },
     EndOfStream { generation: u64 },
     Error { generation: u64, message: String, debug: Option<String> },
-    /// External or internal volume change, in cubic (user-facing) scale.
     VolumeChanged { volume: f64, muted: bool },
 }
 
 #[derive(Debug, Clone)]
 pub enum AudioTelemetry {
     Position { generation: u64, position: f64, duration: Option<f64> },
-    /// `stream_time` is the position the frame belongs to, in ns, or -1 when the element did not tag it.
     Spectrum { generation: u64, stream_time: i64, bands: Vec<f32> },
 }
 
-/// Receivers handed to the controller exactly once.
 pub struct AudioEvents {
     pub control: Receiver<AudioEvent>,
     pub telemetry: Receiver<AudioTelemetry>,
 }
 
-/// Cheap handle held by the controller on the GTK thread.
 pub struct AudioHandle {
     cmd: Sender<AudioCommand>,
     thread: Mutex<Option<JoinHandle<()>>>,
@@ -89,7 +66,6 @@ impl AudioHandle {
         }
     }
 
-    /// Ask the thread to stop and wait for it.
     pub fn shutdown(&self) {
         self.send(AudioCommand::Shutdown);
         if let Some(handle) = self.thread.lock().unwrap().take() {
@@ -98,7 +74,6 @@ impl AudioHandle {
     }
 }
 
-/// Spawn the audio thread. Call after `gst::init()`.
 pub fn spawn() -> anyhow::Result<(AudioHandle, AudioEvents)> {
     let (cmd_tx, cmd_rx) = async_channel::unbounded::<AudioCommand>();
     let (control_tx, control_rx) = async_channel::unbounded::<AudioEvent>();
@@ -117,27 +92,21 @@ pub fn spawn() -> anyhow::Result<(AudioHandle, AudioEvents)> {
     ))
 }
 
-/// State shared with GStreamer streaming-thread callbacks.
 struct Shared {
     generation: AtomicU64,
     armed_next: Mutex<Option<(String, u64)>>,
     pending_gapless: Mutex<Option<u64>>,
     http_auth: Mutex<Option<HttpAuth>>,
-    /// The playing URI is a live HLS stream. Its about-to-finish fires per fragment and means nothing.
     live: std::sync::atomic::AtomicBool,
-    /// Set from a load until `restore_levels` has run. The new sink reports
-    /// its own defaults first, and passing those on flicked the slider to full.
     levels_settling: std::sync::atomic::AtomicBool,
 }
 
-/// A live HLS playlist, by its address. The queue's track may not know it is live.
 pub fn is_live_uri(uri: &str) -> bool {
     uri.contains("/manifest/hls_") || uri.split('?').next().is_some_and(|path| path.ends_with(".m3u8"))
 }
 
 struct Engine {
     playbin: gst::Element,
-    /// The sink playbin plays into, held so its remembered device can be cleared.
     audio_sink: Option<gst::Element>,
     shared: Arc<Shared>,
     control: Sender<AudioEvent>,
@@ -145,9 +114,6 @@ struct Engine {
     loading: Cell<bool>,
     last_status: Cell<PlaybackStatus>,
     main_loop: glib::MainLoop,
-    /// The last mute and volume asked for. Every load builds a new sink, and
-    /// a new wasapi2sink opens unmuted and carries that into the Windows
-    /// mixer, so these are applied again once the new stream is ready.
     wanted_mute: Cell<Option<bool>>,
     wanted_volume: Cell<Option<f64>>,
 }
@@ -173,8 +139,6 @@ fn run_loop(
             })?
         };
 
-        // timeout_add_local targets the global default context, which is the GTK
-        // thread. Build the source by hand and attach it to this thread's context.
         {
             let engine = glib::thread_guard::ThreadGuard::new(engine.clone());
             let ticker = glib::timeout_source_new(POSITION_TICK, Some("musishark-position-tick"), glib::Priority::DEFAULT, move || {
@@ -220,15 +184,6 @@ fn run_loop(
     tracing::info!("audio thread exited");
 }
 
-/// Tell the decoder to expose picture and video streams as they are.
-///
-/// A downloaded song carries its cover as an attached picture, which decodebin
-/// treats as a second stream and finds a decoder for. With NVIDIA's plugin
-/// installed the top-ranked JPEG decoder is `nvjpegdec`, and loading it runs
-/// `cuInit` and creates a CUDA context: 1120 samples per capture in sysprof.
-/// On battery the GPU is asleep, so every track change woke it and stalled
-/// for several hundred milliseconds. The video flag is off and nothing shows
-/// that stream, so no decoder is plugged for it at all.
 fn leave_pictures_undecoded(playbin: &gst::Element) {
     playbin.connect("element-setup", false, |values| {
         let element = values[1].get::<gst::Element>().ok()?;
@@ -244,16 +199,10 @@ fn leave_pictures_undecoded(playbin: &gst::Element) {
     });
 }
 
-/// True for a decoder of video or still images, going by its factory class.
 fn decodes_pictures(klass: &str) -> bool {
     klass.contains("Decoder") && (klass.contains("Video") || klass.contains("Image"))
 }
 
-/// Fragmented m4a, the only format upload-locker tracks come in, cannot seek
-/// while qtdemux is fed in push mode ("ignoring seek in push mode"). With the
-/// download flag queue2 keeps the stream in a temp file and the demuxer pulls
-/// from it, which makes every position reachable. Opus in WebM seeks fine
-/// without it, so those streams stay off the disk.
 fn set_download_buffering(playbin: &gst::Element, uri: &str) {
     let wanted = uri.starts_with("http") && uri.contains("mime=audio%2Fmp4");
     let flags = playbin.property_value("flags");
@@ -269,7 +218,6 @@ impl Engine {
     fn build(control: Sender<AudioEvent>, telemetry: Sender<AudioTelemetry>, main_loop: glib::MainLoop) -> anyhow::Result<Self> {
         let playbin = gst::ElementFactory::make("playbin").name("player").build()?;
 
-        // Audio only: clear the video flag so no window ever pops up.
         let flags = playbin.property_value("flags");
         if let Some(class) = glib::FlagsClass::with_type(flags.type_()) {
             if let Some(value) = class.builder_with_value(flags).and_then(|b| b.unset_by_nick("video").unset_by_nick("text").build()) {
@@ -277,7 +225,6 @@ impl Engine {
             }
         }
 
-        // Passthrough spectrum analyzer feeding the visualizer.
         match gst::ElementFactory::make("spectrum")
             .name("visualizer-spectrum")
             .property("post-messages", true)
@@ -293,8 +240,6 @@ impl Engine {
             Err(err) => tracing::warn!(%err, "spectrum element unavailable; visualizer stays inert"),
         }
 
-        // Our own sink, so `clear_remembered_device` has something to reach.
-        // What playbin would have built on its own is this same element.
         let audio_sink = match gst::ElementFactory::make("autoaudiosink").name("audio-sink").build() {
             Ok(sink) => {
                 playbin.set_property("audio-sink", &sink);
@@ -315,7 +260,6 @@ impl Engine {
             levels_settling: std::sync::atomic::AtomicBool::new(false),
         });
 
-        // Streaming thread: push cookies and UA onto every HTTP request the source makes.
         {
             let shared = shared.clone();
             playbin.connect("source-setup", false, move |values| {
@@ -328,7 +272,6 @@ impl Engine {
 
         leave_pictures_undecoded(&playbin);
 
-        // Streaming thread: hand playbin the armed URI so the switch is gapless.
         {
             let shared = shared.clone();
             playbin.connect("about-to-finish", false, move |values| {
@@ -338,11 +281,6 @@ impl Engine {
                 }
                 let armed = shared.armed_next.lock().unwrap().take();
                 if let Some((uri, generation)) = armed {
-                    // The pipeline plays the tail of the current stream for about
-                    // a second after this fires. Reporting Loading here froze the
-                    // slider and stopped the visualizer for that whole stretch,
-                    // with audio still running. The switch reports itself through
-                    // StreamStart instead.
                     set_download_buffering(&playbin, &uri);
                     playbin.set_property("uri", &uri);
                     *shared.pending_gapless.lock().unwrap() = Some(generation);
@@ -352,7 +290,6 @@ impl Engine {
             });
         }
 
-        // Volume changes from the system mixer arrive here on arbitrary threads.
         {
             let control = control.clone();
             let shared = shared.clone();
@@ -380,9 +317,6 @@ impl Engine {
         })
     }
 
-    /// Put back the mute and volume the listener chose, where the sink a load
-    /// just built came up with its own. Only a difference is written, so a
-    /// sink that kept them sees nothing.
     fn restore_levels(&self) {
         if let Some(muted) = self.wanted_mute.get() {
             if self.playbin.property::<bool>("mute") != muted {
@@ -399,8 +333,6 @@ impl Engine {
         self.release_levels();
     }
 
-    /// End the hold a load put on volume reports, and send the level that
-    /// stands now, so the slider moves once, to the right place.
     fn release_levels(&self) {
         if self.shared.levels_settling.swap(false, Ordering::AcqRel) {
             self.emit(AudioEvent::VolumeChanged { volume: cubic_volume(&self.playbin), muted: self.playbin.property::<bool>("mute") });
@@ -421,11 +353,6 @@ impl Engine {
         }
     }
 
-    /// Live pipeline state, queried at call time.
-    ///
-    /// The seeking query is the telling one: when its end is below the
-    /// position, or the source cannot do byte ranges, that is why a seek is
-    /// refused even with seekable true.
     fn describe(&self) -> String {
         let mut lines = Vec::new();
         let (_, state, _) = self.playbin.state(gst::ClockTime::ZERO);
@@ -452,14 +379,6 @@ impl Engine {
         lines.join("\n")
     }
 
-    /// Forget which output device the sink last played to, so the next stream
-    /// asks for the default again.
-    ///
-    /// `pulsesink` fills its own `device` property in with the sink it landed
-    /// on, and from then on connects there explicitly. PipeWire never moves a
-    /// stream that names its device, so plugging in headphones moved every
-    /// other app across and left this one on the speakers until it was
-    /// restarted. A stream that asks for the default is moved with the rest.
     fn clear_remembered_device(&self) {
         if let Some(sink) = &self.audio_sink {
             clear_device(sink);
@@ -479,7 +398,6 @@ impl Engine {
                 self.last_status.set(PlaybackStatus::Loading);
                 self.emit(AudioEvent::StateChanged { generation, status: PlaybackStatus::Loading });
                 self.shared.levels_settling.store(true, Ordering::Release);
-                // Null flushes the bus, so no message from the old stream survives this point.
                 let _ = self.playbin.set_state(gst::State::Null);
                 self.clear_remembered_device();
                 set_download_buffering(&self.playbin, &uri);
@@ -516,8 +434,6 @@ impl Engine {
             }
             AudioCommand::Seek { seconds } => {
                 let target = gst::ClockTime::from_seconds_f64(seconds.max(0.0));
-                // Accurate first, like Player.seek. A key-unit seek lands on the
-                // previous keyframe or cluster, which is the jump back the user sees.
                 if self.playbin.seek_simple(gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE, target).is_err() {
                     if let Err(err) = self.playbin.seek_simple(gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT, target) {
                         tracing::warn!(%err, seconds, "seek rejected by pipeline");
@@ -585,7 +501,6 @@ impl Engine {
                     self.loading.set(false);
                     self.set_status(PlaybackStatus::Playing);
                 }
-                // Preroll passes through Paused; only report it once loading is over.
                 gst::State::Paused if !self.loading.get() => self.set_status(PlaybackStatus::Paused),
                 gst::State::Null | gst::State::Ready if !self.loading.get() => self.set_status(PlaybackStatus::Stopped),
                 _ => {}
@@ -603,7 +518,6 @@ impl Engine {
         }
     }
 
-    /// 100 ms ticker: publish position and duration while a stream is up.
     fn tick(&self) {
         if self.loading.get() {
             return;
@@ -613,17 +527,11 @@ impl Engine {
             return;
         }
         let Some(position) = self.playbin.query_position::<gst::ClockTime>() else { return };
-        // Some upload streams report a zero duration; treat that as unknown.
         let duration = self.playbin.query_duration::<gst::ClockTime>().filter(|d| !d.is_zero()).map(|d| d.seconds_f64());
         let _ = self.telemetry.force_send(AudioTelemetry::Position { generation: self.generation(), position: position.seconds_f64(), duration });
     }
 }
 
-/// Reset every string `device` property under `sink`, so the next stream asks
-/// for the default output rather than the one it last used.
-///
-/// Only string properties: an integer `device` on some sinks names a card,
-/// which is not ours to reset.
 fn clear_device(sink: &gst::Element) {
     let Some(bin) = sink.dynamic_cast_ref::<gst::Bin>() else { return };
     let mut iter = bin.iterate_recurse();
@@ -646,7 +554,6 @@ fn cubic_volume(playbin: &gst::Element) -> f64 {
         .unwrap_or_else(|| playbin.property::<f64>("volume"))
 }
 
-/// Only HTTP sources carry these properties; filesrc has none of them.
 fn apply_http_auth(source: &gst::Element, auth: Option<&HttpAuth>) {
     let Some(auth) = auth else { return };
     let factory = source.factory().map(|f| f.name().to_string()).unwrap_or_default();
@@ -665,7 +572,6 @@ fn apply_http_auth(source: &gst::Element, auth: Option<&HttpAuth>) {
     }
 }
 
-/// A pipeline time as minutes and seconds, or unknown.
 fn clock(time: Option<gst::ClockTime>) -> String {
     match time {
         Some(t) => {
@@ -680,9 +586,6 @@ fn clock(time: Option<gst::ClockTime>) -> String {
 mod tests {
     use super::*;
 
-    /// A sink that has played once carries the device it landed on and
-    /// connects there explicitly from then on, which is what kept playback on
-    /// the speakers after headphones were plugged in.
     #[test]
     fn only_picture_and_video_decoders_are_left_out() {
         assert!(decodes_pictures("Codec/Decoder/Video/Hardware"), "nvjpegdec and nvh264dec");
@@ -692,8 +595,6 @@ mod tests {
         assert!(!decodes_pictures("Codec/Parser/Video"));
     }
 
-    /// A downloaded song with embedded art must play without any NVIDIA or
-    /// image decoder being created. Needs a file under the music folder.
     #[test]
     #[ignore]
     fn a_song_with_cover_art_plays_without_a_picture_decoder() {
@@ -704,7 +605,6 @@ mod tests {
             entries.sort();
             entries.iter().find(|p| p.extension().is_some_and(|x| x == "mp3" || x == "opus" || x == "m4a")).cloned().or_else(|| entries.iter().filter(|p| p.is_dir() && !p.ends_with(".musishark")).find_map(|d| first_audio(d)))
         }
-        // MUSISHARK_TEST_MEDIA points it at any file, such as one with a video track.
         let file = std::env::var_os("MUSISHARK_TEST_MEDIA").map(std::path::PathBuf::from).or_else(|| first_audio(&music)).expect("a downloaded song");
         println!("playing {}", file.display());
 
@@ -755,7 +655,6 @@ mod tests {
             println!("no autoaudiosink");
             return;
         };
-        // READY is where autoaudiosink picks and builds the real sink.
         if sink.set_state(gst::State::Ready).is_err() {
             println!("no audio output available");
             let _ = sink.set_state(gst::State::Null);

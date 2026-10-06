@@ -1,11 +1,3 @@
-//! The home feed. Port of ytmusicapi's `get_home` and `parse_mixed_content`
-//! plus the sidecar pass MusicClient.get_home_full made for the per-shelf
-//! header art.
-//!
-//! Python parsed the response twice: once through ytmusicapi for the rows,
-//! once by hand for the strapline thumbnail and the video types its parser
-//! drops, then stitched the two together by shelf title. One pass here keeps
-//! all three, so a shelf with a duplicate title cannot take another's art.
 
 use std::sync::Arc;
 
@@ -16,25 +8,16 @@ use super::items::{array_at, last_thumbnail_url, owned_at, parse_mixed_item};
 use crate::model::MediaItem;
 use crate::net::ytmusic::NetError;
 
-/// Where the first page keeps its shelves, and the node that carries the token.
 const TAB_CONTENT: &str = "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content";
 
-/// One titled row of the feed.
 #[derive(Clone, Debug, Default)]
 pub struct HomeSection {
     pub title: String,
     pub items: Vec<MediaItem>,
-    /// The seed's picture on a "Based on ..." row, which the heading shows.
     pub strapline_thumb: Option<String>,
-    /// The small line above the title: "Similar to", "Discover the hits", "Stations".
     pub strapline: Option<String>,
 }
 
-/// The feed, paged until `limit` sections have arrived.
-///
-/// YouTube answers with three rows and a token, so the limit is what decides
-/// how much of the feed there is. A page that fails keeps what came before it:
-/// a short feed beats an error screen.
 pub async fn get_home(api: Arc<dyn Browse>, limit: usize) -> Result<Vec<HomeSection>, NetError> {
     let response = api.post("browse", json!({ "browseId": "FEmusic_home" })).await?;
     let mut sections = parse_home(&response);
@@ -55,15 +38,11 @@ pub fn parse_home(response: &Value) -> Vec<HomeSection> {
     array_at(response, &format!("{TAB_CONTENT}/sectionListRenderer/contents")).iter().filter_map(parse_section).collect()
 }
 
-/// One shelf: the carousel kinds, and the description shelf that has prose
-/// where the others have cards.
 fn parse_section(shelf: &Value) -> Option<HomeSection> {
     if let Some(description) = shelf.get("musicDescriptionShelfRenderer") {
         let title = owned_at(description, "/header/runs/0/text")?;
         return Some(HomeSection { title, ..HomeSection::default() });
     }
-    // Whatever single renderer the row holds, so a shelf kind this has not
-    // seen still comes through with its title and cards.
     let renderer = shelf.as_object()?.values().find(|v| v.get("contents").is_some())?;
     let header = renderer.pointer("/header/musicCarouselShelfBasicHeaderRenderer").or_else(|| renderer.pointer("/header/musicImmersiveCarouselShelfBasicHeaderRenderer"));
     let title = header.and_then(|h| owned_at(h, "/title/runs/0/text"))?;
@@ -73,13 +52,10 @@ fn parse_section(shelf: &Value) -> Option<HomeSection> {
     Some(HomeSection { title, items, strapline_thumb, strapline })
 }
 
-/// The "Long listens" shelf: hour-long mixes, shown as rows with their length.
 pub fn is_long_listens(title: &str) -> bool {
     title.to_lowercase().contains("long listen")
 }
 
-/// Port of home.py _classify_section: the four rows that lead the feed,
-/// whatever order YouTube sent them in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Bucket {
     Library,
@@ -88,7 +64,6 @@ pub enum Bucket {
     Forgotten,
 }
 
-/// In the order they are shown.
 pub const BUCKETS: [Bucket; 4] = [Bucket::Library, Bucket::ListenAgain, Bucket::Discover, Bucket::Forgotten];
 
 impl Bucket {
@@ -107,7 +82,6 @@ pub fn classify_section(title: &str) -> Option<Bucket> {
     BUCKETS.into_iter().find(|bucket| bucket.keys().iter().any(|k| low.contains(k)))
 }
 
-/// The icon beside a heading, or none when the title says nothing.
 pub fn section_icon(title: &str) -> Option<&'static str> {
     let low = title.to_lowercase();
     const RULES: &[(&[&str], &str)] = &[
@@ -125,8 +99,6 @@ pub fn section_icon(title: &str) -> Option<&'static str> {
     RULES.iter().find(|(keys, _)| keys.iter().any(|k| low.contains(k))).map(|(_, icon)| *icon)
 }
 
-/// Port of _populate_feed's ordering: drop what no page draws, take the
-/// quick-picks row out for the dial, then lead with the four named rows.
 pub fn arrange(sections: Vec<HomeSection>) -> (Vec<MediaItem>, Vec<HomeSection>) {
     let mut sections: Vec<HomeSection> = sections.into_iter().filter(|s| !s.items.is_empty()).collect();
 
@@ -135,8 +107,6 @@ pub fn arrange(sections: Vec<HomeSection>) -> (Vec<MediaItem>, Vec<HomeSection>)
         Some(index) => sections.remove(index).items,
         None => Vec::new(),
     };
-    // Without a quick-picks row the dial borrows one: Listen again, or
-    // failing that whatever came first.
     if dial.is_empty() {
         let fallback = sections.iter().position(|s| classify_section(&s.title) == Some(Bucket::ListenAgain)).unwrap_or(0);
         dial = sections.get(fallback).map(|s| s.items.clone()).unwrap_or_default();
@@ -250,7 +220,6 @@ mod tests {
         assert_eq!(in_songs[0].items[0].kind, ItemKind::Song);
     }
 
-    /// Hits the network. `cargo test -- --ignored live_home --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_home() {

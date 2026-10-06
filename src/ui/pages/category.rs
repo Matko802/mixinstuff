@@ -1,6 +1,3 @@
-//! Port of ui/pages/category.py: the carousels behind one mood or genre pill.
-//! Song shelves become boxed lists that show five rows until View All opens
-//! the rest; everything else becomes a card strip.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -18,11 +15,8 @@ use crate::ui::widgets::media_card::{CardOptions, MediaCard, STRIP_SPACING, STRI
 use crate::ui::widgets::scroll_box::HorizontalScrollBox;
 use crate::ui::widgets::song_row::SongRow;
 
-/// Rows a song shelf shows before View All.
 const SONG_PREVIEW: usize = 5;
-/// What View All raises that limit to.
 const SONG_ALL: usize = 1000;
-/// How far the page scrolls before the header takes over the title.
 const TITLE_HANDOVER: f64 = 50.0;
 
 type TitleListener = Box<dyn Fn(&str)>;
@@ -36,7 +30,6 @@ pub struct CategoryPage {
     params: RefCell<String>,
     title: RefCell<String>,
     is_loading: Cell<bool>,
-    /// How many rows each song shelf shows, raised by that shelf's View All.
     section_limits: RefCell<HashMap<String, usize>>,
     sections: RefCell<Vec<CategorySection>>,
     cards: RefCell<Vec<Rc<MediaCard>>>,
@@ -84,7 +77,6 @@ impl CategoryPage {
             on_title: RefCell::new(None),
         });
 
-        // Past the first scroll the page title moves into the header bar.
         let weak = Rc::downgrade(&page);
         scrolled.vadjustment().connect_value_changed(move |adj| {
             let Some(p) = weak.upgrade() else { return };
@@ -106,7 +98,6 @@ impl CategoryPage {
         &self.root
     }
 
-    /// The window sets its title from this, like the header-title-changed signal.
     pub fn set_on_header_title(&self, f: impl Fn(&str) + 'static) {
         self.on_title.replace(Some(Box::new(f)));
     }
@@ -171,7 +162,6 @@ impl CategoryPage {
         });
     }
 
-    /// Everything but the title and the spinner, which the page keeps.
     fn clear_sections(&self) {
         let mut child = self.content_box.first_child();
         while let Some(widget) = child {
@@ -271,7 +261,6 @@ impl CategoryPage {
         self.content_box.append(&section);
     }
 
-    /// Card menu with the Copy JSON entry on_grid_right_click added.
     fn attach_card_menu(self: &Rc<Self>, widget: &gtk::Button, item: &MediaItem) {
         let ctx = self.ctx.clone();
         let button = widget.clone();
@@ -295,8 +284,6 @@ impl CategoryPage {
     }
 }
 
-/// Port of the shelf test in _render_sections: a shelf named Songs, or one
-/// whose first rows are all playable and whose name says nothing about video.
 fn is_song_section(section: &CategorySection) -> bool {
     let title = section.title.to_lowercase();
     if title == "songs" {
@@ -309,7 +296,6 @@ fn heading(title: &str) -> gtk::Label {
     gtk::Label::builder().label(title).css_classes(["heading"]).halign(gtk::Align::Start).build()
 }
 
-/// The artists, or for an episode its show and length.
 fn plain_subtitle(item: &MediaItem) -> String {
     if item.item_type.as_deref() != Some("Episode") {
         return item.artists_text();

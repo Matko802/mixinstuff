@@ -1,7 +1,3 @@
-//! Library endpoints on the crate's `send_request`, following ytmusicapi's
-//! `get_library_playlists`, `get_library_albums`, `get_library_subscriptions`,
-//! `get_library_upload_albums` and `get_library_upload_artists`, plus playlist
-//! contents through the crate's own parsers.
 
 use std::sync::Arc;
 
@@ -12,7 +8,6 @@ use crate::model::{ItemKind, MediaItem, Person};
 use crate::net::ytmusic::NetError;
 
 
-/// Playlists in the library, every page. Automatic playlists (two-letter ids) sort first, as the Python page did.
 pub async fn library_playlists(api: Arc<dyn Browse>) -> Result<Vec<MediaItem>, NetError> {
     let entries = browse_all(&api, "FEmusic_liked_playlists", Container::Grid).await?;
     let mut items: Vec<MediaItem> = entries.iter().filter_map(|r| parse_two_row(r, ItemKind::Playlist)).collect();
@@ -25,7 +20,6 @@ pub async fn library_albums(api: Arc<dyn Browse>) -> Result<Vec<MediaItem>, NetE
     Ok(entries.iter().filter_map(|r| parse_two_row(r, ItemKind::Album)).collect())
 }
 
-/// Subscribed artists, what library.py shows in its Artists section.
 pub async fn library_subscriptions(api: Arc<dyn Browse>) -> Result<Vec<MediaItem>, NetError> {
     let entries = browse_all(&api, "FEmusic_library_corpus_artists", Container::Shelf).await?;
     Ok(entries.iter().filter_map(parse_artist_row).collect())
@@ -47,11 +41,8 @@ enum Container {
     Shelf,
 }
 
-/// Safety cap on continuation pages, like ytmusicapi's limit=None with a sane bound.
 const MAX_PAGES: usize = 40;
 
-/// All entries of a library browse, first page here and the rest through
-/// `Continuation`, which knows both response shapes.
 async fn browse_all(api: &dyn Browse, browse_id: &str, container: Container) -> Result<Vec<Value>, NetError> {
     let response = api.post("browse", json!({ "browseId": browse_id })).await?;
     let (container_key, items_key) = match container {
@@ -76,18 +67,16 @@ fn continuation_token(node: &Value) -> Option<String> {
     node.pointer("/continuations/0/nextContinuationData/continuation").and_then(Value::as_str).map(str::to_owned)
 }
 
-// -- parsing -------------------------------------------------------------
 
-/* #[cfg(test)]
-fn grid_items(response: &Value) -> Vec<Value> {
-    let Some(sections) = response.pointer(SECTIONS).and_then(Value::as_array) else { return Vec::new() };
-    sections
-        .iter()
-        .filter_map(|s| s.pointer("/gridRenderer/items").or_else(|| s.pointer("/itemSectionRenderer/contents/0/gridRenderer/items")))
-        .filter_map(Value::as_array)
-        .flat_map(|items| items.iter().cloned())
-        .collect()
-} */
+
+
+
+
+
+
+
+
+
 
 fn last_thumbnail(node: &Value, path: &str) -> Option<String> {
     node.pointer(path).and_then(Value::as_array).and_then(|t| t.last()).and_then(|t| t.get("url")).and_then(Value::as_str).map(str::to_owned)
@@ -112,7 +101,6 @@ fn subtitle_runs(renderer: &Value) -> Vec<(String, Option<String>)> {
         .unwrap_or_default()
 }
 
-/// "41 tracks" gives "41"; "Your queued episodes" is a description, not a count.
 fn count_from_text(text: &str) -> Option<String> {
     let low = text.to_lowercase();
     if !(low.contains("song") || low.contains("track") || low.contains("episode")) {
@@ -122,7 +110,6 @@ fn count_from_text(text: &str) -> Option<String> {
     first.chars().next().filter(|c| c.is_ascii_digit()).map(|_| first.to_owned())
 }
 
-/// A `musicTwoRowItemRenderer` grid card for an album or a playlist.
 pub(crate) fn parse_two_row(entry: &Value, kind: ItemKind) -> Option<MediaItem> {
     let renderer = entry.get("musicTwoRowItemRenderer")?;
     let title = renderer.pointer("/title/runs/0/text").and_then(Value::as_str)?.to_owned();
@@ -148,7 +135,6 @@ pub(crate) fn parse_two_row(entry: &Value, kind: ItemKind) -> Option<MediaItem> 
             }
         }
         _ => {
-            // Playlist subtitle: "Auto playlist", or "Playlist • Author • N songs".
             let full = runs.iter().map(|(t, _)| t.trim()).collect::<Vec<_>>().join(" • ");
             for (text, id) in runs {
                 if let Some(count) = count_from_text(&text) {
@@ -163,7 +149,6 @@ pub(crate) fn parse_two_row(entry: &Value, kind: ItemKind) -> Option<MediaItem> 
     Some(item)
 }
 
-/// A subscribed or uploaded artist row.
 fn parse_artist_row(entry: &Value) -> Option<MediaItem> {
     let renderer = entry.get("musicResponsiveListItemRenderer")?;
     let name = renderer.pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text").and_then(Value::as_str)?.to_owned();
@@ -205,8 +190,6 @@ mod tests {
         assert_eq!(item.artists_text(), "Me");
     }
 
-    /// Prints every playlist grid entry's title and endpoint. `cargo test -- --ignored live_playlist_entries --nocapture`
-    /// `cargo test -- --ignored live_continuation --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_continuation() {
@@ -233,8 +216,6 @@ mod tests {
         }
     }
 
-    /// Do two fetches in a row return the same card addresses?
-    /// `cargo test -- --ignored live_card_stability --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_card_stability() {
@@ -276,8 +257,6 @@ mod tests {
         }
     }
 
-    /// What a library card carries, for the ownership decision.
-    /// `cargo test -- --ignored live_library_cards --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_library_cards() {
@@ -291,7 +270,6 @@ mod tests {
         }
     }
 
-    /// `cargo test -- --ignored live_library --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_library() {

@@ -1,11 +1,3 @@
-//! The download library: one SQLite table of what is on disk.
-//!
-//! The file is `<music>/.musishark/library.db`, the same database the Python
-//! app writes, so a song downloaded in either app is known to both. The
-//! `downloads` table keeps Python's columns exactly.
-//!
-//! Rows are read from any thread. `is_downloaded` answers from an in-memory
-//! map because the UI asks it once per row while a list binds.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -15,7 +7,6 @@ use rusqlite::Connection;
 
 use crate::model::{LikeStatus, Named, Person, Track, VideoId};
 
-/// One downloaded track as the database holds it.
 #[derive(Debug, Clone, Default)]
 pub struct Entry {
     pub video_id: String,
@@ -35,7 +26,6 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// The row as the rest of the app sees tracks.
     pub fn track(&self) -> Track {
         Track {
             video_id: VideoId(self.video_id.clone()),
@@ -51,14 +41,8 @@ impl Entry {
     }
 }
 
-/// The folder name a pre-rename release used.
 const LEGACY_DIR: &str = "YouTube Music";
 
-/// Rename `~/Music/YouTube Music` to the current folder, once.
-///
-/// Port of _maybe_migrate_legacy_music_dir. Only a folder holding our own
-/// library.db is touched, and only when the new one is not already in use.
-/// Rows keep absolute paths, so they are rewritten to match.
 pub fn migrate_legacy_folder(music_dir: &Path) {
     let Some(parent) = music_dir.parent() else { return };
     let legacy = parent.join(LEGACY_DIR);
@@ -70,7 +54,6 @@ pub fn migrate_legacy_folder(music_dir: &Path) {
             tracing::warn!(legacy = %legacy.display(), "both music folders hold a library, leaving the old one");
             return;
         }
-        // A stub an earlier launch created, with no library in it.
         let _ = std::fs::remove_dir_all(music_dir);
     }
     if let Err(err) = std::fs::rename(&legacy, music_dir) {
@@ -79,14 +62,12 @@ pub fn migrate_legacy_folder(music_dir: &Path) {
     }
     tracing::info!(from = %legacy.display(), to = %music_dir.display(), "renamed the music folder");
     rewrite_paths(music_dir, &legacy);
-    // The same release recased `playlists`, distinct from `Playlists` on Linux.
     let (old, new) = (music_dir.join("playlists"), music_dir.join("Playlists"));
     if old.is_dir() && !new.exists() {
         let _ = std::fs::rename(old, new);
     }
 }
 
-/// Point rows at the renamed folder.
 fn rewrite_paths(music_dir: &Path, old_root: &Path) {
     let db_path = music_dir.join(".musishark").join("library.db");
     let Ok(db) = Connection::open(&db_path) else { return };
@@ -104,17 +85,13 @@ fn rewrite_paths(music_dir: &Path, old_root: &Path) {
 pub struct Store {
     db: Mutex<Option<Connection>>,
     path: PathBuf,
-    /// video id to file path, seeded at start and kept in step with writes.
     known: RwLock<HashMap<String, PathBuf>>,
-    /// When each file was last seen on disk.
     verified: RwLock<HashMap<String, std::time::Instant>>,
 }
 
-/// How long a file seen on disk is trusted to still be there.
 const VERIFY_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl Store {
-    /// Open the library, creating the folder and table when they are missing.
     pub fn open(music_dir: &Path) -> Self {
         migrate_legacy_folder(music_dir);
         let path = music_dir.join(".musishark").join("library.db");
@@ -135,14 +112,9 @@ impl Store {
         store
     }
 
-    /// Whether the track has a file on disk.
-    ///
-    /// A row whose file was deleted behind the app's back is dropped here, so
-    /// the answer never outlives the file.
     pub fn is_downloaded(&self, video_id: &str) -> bool {
         let path = self.known.read().unwrap().get(video_id).cloned();
         let Some(path) = path else { return false };
-        // A row asks several times per bind, so a recent check stands.
         let recent = self.verified.read().unwrap().get(video_id).is_some_and(|at| at.elapsed() < VERIFY_EVERY);
         if recent {
             return true;
@@ -155,7 +127,6 @@ impl Store {
         false
     }
 
-    /// The file to play, when one is there.
     pub fn local_path(&self, video_id: &str) -> Option<PathBuf> {
         self.is_downloaded(video_id).then(|| self.known.read().unwrap().get(video_id).cloned()).flatten()
     }
@@ -164,13 +135,11 @@ impl Store {
         self.known.read().unwrap().len()
     }
 
-    /// Which track owns a file, for the name clash check.
     pub fn owner_of(&self, file_path: &Path) -> Option<String> {
         let wanted = file_path.to_string_lossy().into_owned();
         self.known.read().unwrap().iter().find(|(_, path)| path.to_string_lossy() == wanted).map(|(id, _)| id.clone())
     }
 
-    /// One track's row, when its file is still there.
     pub fn entry(&self, video_id: &str) -> Option<Entry> {
         if !self.is_downloaded(video_id) {
             return None;
@@ -178,7 +147,6 @@ impl Store {
         self.all().into_iter().find(|e| e.video_id == video_id)
     }
 
-    /// Everything downloaded, newest first, the order the Downloads page shows.
     pub fn all(&self) -> Vec<Entry> {
         let mut out = Vec::new();
         self.with_db(|db| {
@@ -211,7 +179,6 @@ impl Store {
         out
     }
 
-    /// Record a finished download.
     pub fn add(&self, entry: &Entry) {
         let path = entry.file_path.to_string_lossy().into_owned();
         self.with_db(|db| {
@@ -242,10 +209,6 @@ impl Store {
         self.known.write().unwrap().insert(entry.video_id.clone(), entry.file_path.clone());
     }
 
-    /// Drop a track from the library. The file is the caller's business.
-    /// The cached listening history, as the JSON blob both apps keep in one
-    /// row of this database. Returned raw: the shape is ytmusicapi's, and
-    /// `net::history` is what knows how to read it.
     pub fn history_cache(&self) -> Option<String> {
         let mut json = None;
         self.with_db(|db| {
@@ -256,7 +219,6 @@ impl Store {
         json
     }
 
-    /// Replace the cached history. Python writes the whole list at once too.
     pub fn set_history_cache(&self, json: &str) {
         self.with_db(|db| {
             db.execute_batch(HISTORY_SCHEMA)?;
@@ -276,7 +238,6 @@ impl Store {
         });
     }
 
-    /// Point a row at a file that moved.
     pub fn moved(&self, video_id: &str, new_path: &Path) {
         let path = new_path.to_string_lossy().into_owned();
         let id = video_id.to_owned();
@@ -290,11 +251,6 @@ impl Store {
         }
     }
 
-    /// Run one statement batch, opening the database on first use.
-    ///
-    /// A failure here is logged and swallowed: a missing music folder or a
-    /// read-only disk must not take the app down, it only means nothing is
-    /// downloaded.
     fn with_db(&self, work: impl FnOnce(&Connection) -> rusqlite::Result<()>) {
         let mut guard = self.db.lock().unwrap();
         if guard.is_none() {
@@ -320,15 +276,12 @@ impl Store {
     }
 }
 
-/// Python's history cache: one row holding the whole list as JSON.
 const HISTORY_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS history_cache (
     id INTEGER PRIMARY KEY,
     data_json TEXT,
     last_synced TEXT
 )";
 
-/// Python's table, column for column. `cover_path` stays for compatibility
-/// even though covers are embedded in the file.
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS downloads (
     video_id TEXT PRIMARY KEY,
     title TEXT,

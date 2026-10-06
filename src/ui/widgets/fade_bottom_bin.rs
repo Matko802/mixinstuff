@@ -1,6 +1,3 @@
-//! Port of ui/widgets/fade_bottom_bin.py: a box that fades its content to
-//! alpha zero towards the bottom through a mask node in its snapshot. Used
-//! by the artist banner in blur mode, where the scrim cannot go opaque.
 
 use std::cell::Cell;
 
@@ -11,7 +8,6 @@ mod imp {
 
     pub struct FadeBottomBin {
         pub fade_active: Cell<bool>,
-        /// Fraction of the height where the fade starts; above it alpha is one.
         pub fade_start: Cell<f64>,
     }
 
@@ -38,7 +34,6 @@ mod imp {
                 self.parent_snapshot(snapshot);
                 return;
             }
-            // The mask source comes first, then the content, popped once each.
             snapshot.push_mask(gsk::MaskMode::Alpha);
             let opaque = gdk::RGBA::new(0.0, 0.0, 0.0, 1.0);
             let clear = gdk::RGBA::new(0.0, 0.0, 0.0, 0.0);

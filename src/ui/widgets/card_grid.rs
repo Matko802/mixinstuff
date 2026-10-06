@@ -1,8 +1,3 @@
-//! Port of media_card.py's CardWrapLayout and CardBinLayout as layout
-//! managers. Sizing the cards inside measure() means the heights a layout
-//! pass reports already account for the new cover size, so a resize paints
-//! once, correctly. Doing it after allocation leaves the cards a frame
-//! behind the window and the grid flickers while the user drags.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -11,19 +6,12 @@ use gtk::{glib, prelude::*, subclass::prelude::*};
 
 use crate::ui::widgets::media_card::{CARD_SIZE_COMPACT, CARD_SIZE_DEFAULT, GRID_LINE_SPACING, GRID_SPACING, MediaCard};
 
-/// Padding the card's CSS adds on both sides together (.artist-horizontal-item).
 const CARD_PADDING: i32 = 20;
 const CARD_SIZE_MIN: i32 = 110;
 const CARD_SIZE_MAX: i32 = 190;
 
 pub type CardList = Rc<RefCell<Vec<Rc<MediaCard>>>>;
 
-/// Card size for the column count that suits `width` best.
-///
-/// Taking the most columns that fit and stretching them was worse than it
-/// sounds: a window one step wider dropped from three columns to two fat
-/// ones. Scoring each count by how far its card lands from the base size
-/// keeps the count rising with the width.
 pub fn column_size(width: i32, base: i32) -> Option<i32> {
     if width <= 0 {
         return None;
@@ -61,7 +49,6 @@ fn children(widget: &gtk::Widget) -> Vec<gtk::Widget> {
 mod layout_imp {
     use super::*;
 
-    /// One placed child: widget, x, y, width, height.
     type Placement = (gtk::Widget, i32, i32, i32, i32);
 
     #[derive(Default)]
@@ -87,14 +74,12 @@ mod layout_imp {
         fn measure(&self, widget: &gtk::Widget, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
             match orientation {
                 gtk::Orientation::Horizontal => {
-                    // One column at the smallest card, or every card on one line.
                     let kids = children(widget);
                     let nat: i32 = kids.iter().map(|c| c.measure(gtk::Orientation::Horizontal, -1).1).sum::<i32>() + GRID_SPACING * (kids.len() as i32 - 1).max(0);
                     let min = (CARD_SIZE_MIN + CARD_PADDING).min(nat.max(0));
                     (min, nat.max(min), -1, -1)
                 }
                 _ => {
-                    // A layout pass runs measure(H, -1), measure(V, final width), allocate.
                     self.sync(for_size);
                     let (height, _) = self.layout(widget, for_size);
                     (height, height, -1, -1)
@@ -103,7 +88,6 @@ mod layout_imp {
         }
 
         fn allocate(&self, widget: &gtk::Widget, width: i32, _height: i32, _baseline: i32) {
-            // Safety net for cards added after this pass measured.
             self.sync(width);
             for (child, x, y, w, h) in self.layout(widget, width).1 {
                 child.size_allocate(&gtk::Allocation::new(x, y, w, h), -1);
@@ -112,7 +96,6 @@ mod layout_imp {
     }
 
     impl CardGridLayout {
-        /// Size every card to the column width that suits `width`.
         fn sync(&self, width: i32) {
             let Some(cards) = self.cards.borrow().upgrade() else { return };
             let compact = self.compact.borrow().as_ref().is_some_and(|c| c.get());
@@ -123,7 +106,6 @@ mod layout_imp {
             }
         }
 
-        /// Rows of equal-width children, each row as tall as its tallest card.
         fn layout(&self, widget: &gtk::Widget, width: i32) -> (i32, Vec<Placement>) {
             let kids = children(widget);
             if kids.is_empty() {
@@ -178,7 +160,6 @@ mod grid_imp {
 }
 
 glib::wrapper! {
-    /// The grid container: what library.py's Adw.WrapBox with CardWrapLayout was.
     pub struct CardGrid(ObjectSubclass<grid_imp::CardGrid>) @extends gtk::Widget, @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
@@ -193,7 +174,6 @@ impl CardGrid {
         glib::Object::new()
     }
 
-    /// The cards the layout resizes, and the flag picking their base size.
     pub fn set_cards(&self, cards: &CardList, compact: Rc<Cell<bool>>) {
         let layout = self.layout_manager().and_downcast::<CardGridLayout>().expect("card grid layout");
         let imp = layout_imp::CardGridLayout::from_obj(&layout);
@@ -215,13 +195,6 @@ impl CardGrid {
 mod card_layout_imp {
     use super::*;
 
-    /// Bin layout that holds a card to the width it was given.
-    ///
-    /// Measured against a known height, a wrapping title asks for more width
-    /// than the card's size request, and a strip with room to spare hands it
-    /// over, pulling a short row of cards apart. Width comes from the size
-    /// request alone. Height is measured against that width, whatever
-    /// for_size says, so minimum and natural never disagree.
     #[derive(Default)]
     pub struct CardLayout;
 
@@ -285,7 +258,6 @@ mod tests {
 
     #[test]
     fn picks_five_columns_at_desktop_width() {
-        // 904 px content width like the Python page at 1000 px.
         let size = column_size(904, CARD_SIZE_DEFAULT).unwrap();
         let columns = (904 + GRID_SPACING) / (size + CARD_PADDING + GRID_SPACING);
         assert_eq!(columns, 5);

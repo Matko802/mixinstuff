@@ -1,7 +1,3 @@
-//! Bottom player bar. Port of ui/player_bar.py on top of PlayerState bindings.
-//!
-//! No signal from the audio thread reaches this file. Every visual follows a
-//! property on `PlayerState`; every button calls a method on `Player`.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -18,12 +14,10 @@ use crate::ui::format_time;
 use crate::ui::like_button::LikeButton;
 use crate::ui::marquee::MarqueeLabel;
 
-/// Position updates are ignored this long after a user seek, until the pipeline catches up.
 const SEEK_GUARD: Duration = Duration::from_millis(800);
 const SCROLL_SEEK_STEP: f64 = 2.0;
 const SWIPE_COOLDOWN: Duration = Duration::from_millis(500);
 
-/// Callbacks the window provides. Artist and album carry (id, name).
 pub struct PlayerBarCallbacks {
     pub on_artist_click: Rc<dyn Fn(Option<String>, String)>,
     pub on_album_click: Rc<dyn Fn(Option<String>, String)>,
@@ -31,7 +25,6 @@ pub struct PlayerBarCallbacks {
     pub on_expand: Rc<dyn Fn()>,
 }
 
-/// Queue and expand handlers the window swaps in once it exists.
 #[derive(Default)]
 struct LateCallbacks {
     on_queue_click: RefCell<Option<Rc<dyn Fn()>>>,
@@ -97,7 +90,6 @@ impl PlayerBar {
             .build();
         root.append(&content_box);
 
-        // Cover, click opens the album.
         let cover = CoverImage::new(net, 48);
         let cover_wrapper = gtk::Box::builder()
             .overflow(gtk::Overflow::Hidden)
@@ -111,7 +103,6 @@ impl PlayerBar {
             .build();
         content_box.append(&cover_btn);
 
-        // Title marquee plus one link button per artist.
         let meta_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(2)
@@ -130,7 +121,6 @@ impl PlayerBar {
         meta_box.append(&artists_box);
         content_box.append(&meta_box);
 
-        // Transport controls.
         let controls_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .spacing(6)
@@ -167,7 +157,6 @@ impl PlayerBar {
         let next_btn = flat_button("media-skip-forward-symbolic", "Next");
         controls_box.append(&next_btn);
 
-        // Volume: button plus a slider that slides out on hover.
         let volume_btn = flat_button("audio-volume-high-symbolic", "Mute");
         let volume_scale = gtk::Scale::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -213,7 +202,6 @@ impl PlayerBar {
         like.widget().set_visible(false);
         controls_box.append(like.widget());
 
-        // Overflow popover receives controls the responsive tick folds away.
         let overflow_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(6)
@@ -326,7 +314,6 @@ impl PlayerBar {
         }
     }
 
-    /// Flip the expand chevron: down while the cover view is open.
     pub fn set_expanded(&self, expanded: bool) {
         if expanded {
             self.expand_btn.set_icon_name("go-down-symbolic");
@@ -337,7 +324,6 @@ impl PlayerBar {
         }
     }
 
-    /// The bar is AdwBottomSheet's bottom bar: tap and drag-up stand down.
     pub fn set_sheet_bar(&self, enabled: bool) {
         self.sheet_bar.set(enabled);
         if enabled {
@@ -347,7 +333,6 @@ impl PlayerBar {
         }
     }
 
-    /// Mobile layout: only cover, meta, play and like stay inline.
     pub fn set_compact(&self, compact: bool) {
         self.compact.set(compact);
         self.last_responsive_width.set(-1);
@@ -388,7 +373,6 @@ impl PlayerBar {
         self.player.state()
     }
 
-    // -- state to widgets -------------------------------------------------
 
     fn bind_state(self: &Rc<Self>) {
         let state = self.state();
@@ -432,7 +416,6 @@ impl PlayerBar {
         self.refresh_volume();
     }
 
-    /// Title, artist links, cover and like button from the current track.
     fn refresh_metadata(&self) {
         let state = self.state();
         let title = state.title();
@@ -471,8 +454,6 @@ impl PlayerBar {
             };
         let count = artists.len();
         for (i, (id, name)) in artists.into_iter().enumerate() {
-            // Ellipsized like the expanded player's: a long artist list must not
-            // widen the bar, and with it the window, past a phone screen.
             let label = gtk::Label::builder()
                 .label(&name)
                 .css_classes(["caption"])
@@ -510,13 +491,11 @@ impl PlayerBar {
         }
     }
 
-    /// Play button, spinner and seek bar sensitivity from status plus duration.
     fn refresh_controls(&self) {
         let state = self.state();
         let status = state.status();
         let duration = state.duration();
         let has_queue = state.queue_length() > 0;
-        // A live stream never reports a length. That is not still loading.
         let live = state.live();
 
         let (child, icon, sensitive, scale_sensitive) = match status {
@@ -601,7 +580,6 @@ impl PlayerBar {
         self.volume_btn.set_icon_name(icon);
     }
 
-    // -- widgets to player ------------------------------------------------
 
     fn connect_controls(self: &Rc<Self>, cover_btn: &gtk::Button) {
         let player = self.player.clone();
@@ -665,7 +643,6 @@ impl PlayerBar {
         });
     }
 
-    /// Compact-mode gestures: drag up or tap expands, horizontal swipe skips.
     fn connect_gestures(self: &Rc<Self>) {
         let drag = gtk::GestureDrag::builder()
             .propagation_phase(gtk::PropagationPhase::Bubble)
@@ -737,7 +714,6 @@ impl PlayerBar {
         ));
     }
 
-    /// Mouse wheel over the seek bar nudges by two seconds, applied once the wheel settles.
     fn scroll_seek(self: &Rc<Self>, dy: f64) -> glib::Propagation {
         let duration = self.state().duration();
         if duration <= 0.0 {
@@ -759,9 +735,7 @@ impl PlayerBar {
         glib::Propagation::Stop
     }
 
-    // -- responsive overflow ----------------------------------------------
 
-    /// Canonical order of the controls that fold into the overflow popover.
     fn responsive_order(&self) -> Vec<gtk::Widget> {
         vec![
             self.volume_container.clone().upcast(),
@@ -770,7 +744,6 @@ impl PlayerBar {
         ]
     }
 
-    /// Fold like, then queue, then volume into the popover as the bar narrows.
     fn responsive_tick(&self) {
         if self.compact.get() {
             return;
@@ -791,7 +764,6 @@ impl PlayerBar {
             .filter(|(_, inline)| !inline)
             .map(|(w, _)| w.clone())
             .collect();
-        // Folding one control saves nothing: the 3-dot button takes its place.
         if overflow.len() < 2 {
             overflow.clear();
         }

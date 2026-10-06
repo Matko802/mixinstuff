@@ -1,67 +1,3 @@
-//! Demo queue for verifying the playback path before any page is ported.
-//!
-//! MUSISHARK_DEMO=1            stage a queue at startup (play stays a click away)
-//! MUSISHARK_DEMO_URI=a,b      URIs or paths to use; default: audio files under ~/Music
-//! MUSISHARK_DEMO_VIDEO=a,b    append real YouTube ids so yt-dlp resolution runs too
-//! MUSISHARK_DEMO_AUTOPLAY=1   press play three seconds after the window shows
-//! MUSISHARK_DEMO_SNAPSHOT=p   write p-1.png at 2.5 s and p-2.png at 11 s from inside GTK
-//! MUSISHARK_DEMO_QUEUE=1      open the queue sidebar after staging
-//! MUSISHARK_DEMO_SAMPLE=path,ms[,from]  sample the GTK thread at 1 kHz from `from` ms, write path.samples and path.maps at ms, then quit
-//! MUSISHARK_DEMO_COUNT=ms   log widget counts per subtree that holds 150 or more
-//! MUSISHARK_DEMO_SHEET_PAGE=ms,name  show the expanded player's player, queue or lyrics page
-//! MUSISHARK_DEMO_FLING=ms[,px_per_s[,secs[,class]]]  scroll the biggest visible page (or the one with that class) at a steady speed
-//! MUSISHARK_DEMO_CLEAR_AT=ms  clear the queue after that many ms
-//! MUSISHARK_DEMO_LYRICS_PICKER=ms  switch the lyrics source through the picker and reopen it
-//! MUSISHARK_DEMO_EXPAND=1|ms  open the expanded player, five seconds in by default
-//! MUSISHARK_DEMO_TAB=name     select home, library or search at startup
-//! MUSISHARK_DEMO_SEARCH=text  run a search at startup
-//! MUSISHARK_DEMO_ACTIVATE=1   five seconds in, activate the first playable search result
-//! MUSISHARK_DEMO_HOME_PLAY=ms  play the first playable row of the Home feed
-//! MUSISHARK_DEMO_HISTORY=ms   open the listening history page
-//! MUSISHARK_DEMO_HISTORY_MENU=ms  log what a history row's menu offers
-//! MUSISHARK_DEMO_CHANNEL=ms   open the account's own channel
-//! MUSISHARK_DEMO_WIDTH=px     initial window width, under 500 for the phone layout
-//! MUSISHARK_DEMO_HEIGHT=px    initial window height, for capturing a whole long page
-//! MUSISHARK_DEMO_SCROLL=ms[,px]  scroll the visible page down before the snapshot
-//! MUSISHARK_DEMO_CATEGORY=ms  open the first genre page from Explore
-//! MUSISHARK_DEMO_ALL_MOODS=ms  open the full genre list from Explore
-//! MUSISHARK_DEMO_CHARTS_COUNTRY=code[,ms]  pick a country in the charts menu
-//! MUSISHARK_DEMO_LOGIN=1      open the sign-in dialog and snapshot it as <prefix>-login.png
-//! MUSISHARK_DEMO_SNAPSHOT_AT=ms  delay of the second snapshot, default 11000
-//! MUSISHARK_DEMO_SIFT=text,sort  search and sort the open playlist
-//! MUSISHARK_DEMO_DOWNLOAD=[title|]ids  download video ids, optionally as a playlist
-//! MUSISHARK_DEMO_DOWNLOADS=1   open the Downloads page
-//! MUSISHARK_DEMO_UPLOADS=ms    open the Uploaded Songs page
-//! MUSISHARK_DEMO_UPLOADS_TAB=ms  switch the library to its uploads tab
-//! MUSISHARK_DEMO_UPLOAD_ARTIST=id[,name]  open an uploaded artist's songs
-//! MUSISHARK_DEMO_SET_COVER=path  set the open playlist's cover from an image
-//! MUSISHARK_DEMO_NEW_PLAYLIST=ms  open the new playlist dialog
-//! MUSISHARK_DEMO_SCROLL=ms,px|title  scroll the visible page down by px, or to the heading with that text
-//! MUSISHARK_DEMO_LOCAL=ms[,open]  make a local playlist and a like, show the library, optionally open the list
-//! MUSISHARK_DEMO_CARD_MENUS=ms  log what the library card menus offer
-//! MUSISHARK_DEMO_BACK=ms      press the back button
-//! MUSISHARK_DEMO_TOGGLE=ms    from then on, open or close the player view once a second (for profiling)
-//! MUSISHARK_DEMO_NEXT_EVERY=ms  after ten seconds, skip to the next track at that interval (for profiling)
-//! MUSISHARK_DEMO_ONBOARDING=ms[,page] open the setup wizard (page: account, extras, done), MUSISHARK_DEMO_WHATS_NEW=ms the release notes
-//! MUSISHARK_DEMO_RESIZE=ms    from then on, flip the window between 1040 and 420 px wide once a second
-//! MUSISHARK_DEMO_WATCHDOG=ms  raise SIGUSR2 when the GTK thread has not run for that long, for a gdb backtrace
-//! MUSISHARK_DEMO_PHASES=1     log frame clock phases that take more than 40 ms
-//! MUSISHARK_DEMO_CLASSES=1    with TOGGLE: log every widget's classes and state after each toggle, to diff
-//! MUSISHARK_DEMO_FRAMES=1     log once a second: frames, worst gap, gaps over 25 ms, and time spent inside frames
-//! MUSISHARK_DEMO_PRESENCE=1   let a demo run scrobble and publish Discord presence
-//! MUSISHARK_DEMO_PREFS=ms[,px[,page]]  open Preferences, show the named page, scroll px
-//! MUSISHARK_DEMO_STREAM_INFO=ms  open the expanded player's Stream Info dialog
-//! MUSISHARK_DEMO_SWIPE=ms[,covers]  swipe the carousel over two seconds
-//! MUSISHARK_DEMO_DELETE_DOWNLOAD=id  delete one download
-//! MUSISHARK_DEMO_PLAYLIST=id  open a playlist or album page 1.5 s in
-//! MUSISHARK_DEMO_PLAYLIST_PLAY=1  press Play on that page six seconds in
-//! MUSISHARK_DEMO_DISCOGRAPHY=id  open a discography grid for a browse id 1.5 s in
-//! MUSISHARK_DEMO_SEEK=secs    seek to that position seven seconds in
-//! MUSISHARK_DEMO_NEXT_AT=ms   skip to the next queue entry after that many ms
-//! MUSISHARK_DEMO_EDIT_AT=ms   append a copy of the first track after that many ms
-//! MUSISHARK_DEMO_ARTIST=id    open an artist page 1.5 s in
-//! MUSISHARK_DEMO_CLICK=ms,text[,tab]  click the mapped button with that tooltip or label, then optionally show a tab
-//! MUSISHARK_DEMO_ARTIST_RADIO=1  press the artist page's radio button six seconds in
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -75,7 +11,6 @@ use crate::App;
 use crate::model::{Track, VideoId};
 use crate::ui::window::MainWindow;
 
-/// Late enough for a yt-dlp resolution started by autoplay or activation to reach Playing.
 const SECOND_SNAPSHOT_MS: u64 = 11_000;
 const FALLBACK_URI: &str = "https://download.samplelib.com/mp3/sample-15s.mp3";
 const AUDIO_EXTENSIONS: &[&str] = &["opus", "mp3", "m4a", "flac", "ogg", "wav"];
@@ -126,7 +61,6 @@ pub fn from_env() -> Option<Demo> {
     })
 }
 
-/// Stage the queue and schedule autoplay and snapshots. Call after the window is presented.
 pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     tracing::info!(tracks = demo.tracks.len(), autoplay = demo.autoplay, "demo queue staged");
     ctx.player.stage_tracks(demo.tracks.clone(), 0);
@@ -245,7 +179,6 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
                 player.next();
                 if std::env::var_os("MUSISHARK_DEMO_CLASSES").is_some() {
                     if let Some(mw) = ctx_w.window.borrow().as_ref() {
-                        // Once right after the change and once settled, to catch a class that only flickers.
                         for delay in [40, 900] {
                             let win = mw.window().clone();
                             glib::timeout_add_local_once(Duration::from_millis(delay), move || {
@@ -330,7 +263,6 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     }
 
     if let Ok(spec) = std::env::var("MUSISHARK_DEMO_SCROLL") {
-        // Scroll the visible page by px, or to the heading with that text, for a snapshot further down.
         let (ms, target) = spec.split_once(',').map(|(ms, t)| (ms.parse::<u64>().unwrap_or(3000), t.to_owned())).unwrap_or((3000, "600".to_owned()));
         let win = window.clone();
         glib::timeout_add_local_once(Duration::from_millis(ms), move || {
@@ -352,7 +284,6 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     }
 
     if let Ok(spec) = std::env::var("MUSISHARK_DEMO_LOCAL") {
-        // A local playlist of the staged tracks and a like, then the library tab. ",open" opens the list.
         let (ms, open) = spec.split_once(',').map(|(ms, rest)| (ms, rest == "open")).unwrap_or((spec.as_str(), false));
         let ctx_w = ctx.clone();
         let delay = ms.parse::<u64>().unwrap_or(2500);
@@ -391,7 +322,6 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
 
     #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64")))]
     if let Ok(spec) = std::env::var("MUSISHARK_DEMO_SAMPLE") {
-        // Sample the GTK thread from now on, write the samples and quit at `ms`.
         let mut parts = spec.split(',');
         let path = parts.next().unwrap_or_default().to_owned();
         let ms = parts.next().unwrap_or("40000");
@@ -406,7 +336,6 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     }
 
     if let Ok(ms) = std::env::var("MUSISHARK_DEMO_COUNT") {
-        // Widgets per subtree, to see what a window-wide restyle has to walk.
         let win = window.clone();
         glib::timeout_add_local_once(Duration::from_millis(ms.parse::<u64>().unwrap_or(15000)), move || {
             fn count(w: &gtk::Widget) -> (usize, usize) {
@@ -450,7 +379,6 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     }
 
     if let Ok(spec) = std::env::var("MUSISHARK_DEMO_FLING") {
-        // Scroll the biggest mapped page at a steady speed for a while, like a long fling.
         let mut parts = spec.split(',');
         let ms = parts.next().and_then(|v| v.parse::<u64>().ok()).unwrap_or(10000);
         let speed = parts.next().and_then(|v| v.parse::<f64>().ok()).unwrap_or(3000.0);
@@ -498,7 +426,6 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         glib::timeout_add_local_once(Duration::from_millis(ms.parse::<u64>().unwrap_or(10000)), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
                 for view in mw.lyrics_views() {
-                    // The expanded player keeps lyrics on a page of its own.
                     if let Some(stack) = view.widget().ancestor(adw::ViewStack::static_type()).and_downcast::<adw::ViewStack>() {
                         stack.set_visible_child_name("lyrics");
                     }
@@ -524,7 +451,6 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     }
 
     if std::env::var("MUSISHARK_DEMO_FRAMES").is_ok() {
-        // (last frame time, window start, frames, worst gap, slow frames), all in microseconds.
         let stats = std::cell::Cell::new((0i64, 0i64, 0u32, 0i64, 0u32));
         window.add_tick_callback(move |_, clock| {
             let now = clock.frame_time();
@@ -547,11 +473,9 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
             }
             glib::ControlFlow::Continue
         });
-        // Time the GTK thread spent inside frames, the number a dropped-frame count hides.
         let win = window.clone();
         glib::timeout_add_local_once(Duration::from_millis(1500), move || {
             let Some(clock) = win.frame_clock() else { return };
-            // Only the phases a frame asked for run, so the first one seen opens the frame.
             let began = Rc::new(std::cell::Cell::new(None::<std::time::Instant>));
             let busy = Rc::new(std::cell::Cell::new((Duration::ZERO, Duration::ZERO)));
             for name in ["flush-events", "before-paint", "update", "layout", "paint"] {
@@ -579,9 +503,6 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     }
 
     if let Ok(ms) = std::env::var("MUSISHARK_DEMO_WATCHDOG") {
-        // A stall that burns no CPU never shows in a sampling profile. Run under
-        // gdb with `handle SIGUSR2 stop print nopass` and ask for `bt` on thread 1:
-        // the signal lands while the GTK thread is still stuck.
         use std::sync::atomic::{AtomicU64, Ordering};
         let limit = ms.parse::<u64>().unwrap_or(200);
         let beat = Arc::new(AtomicU64::new(0));
@@ -601,7 +522,6 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
                 let now = started.elapsed().as_millis() as u64;
                 if last > 0 && now.saturating_sub(last) > limit && reported != last {
                     reported = last;
-                    // SAFETY: raising a signal in our own process has no memory safety conditions.
                     #[cfg(unix)]
                     unsafe {
                         libc::raise(libc::SIGUSR2)
@@ -612,8 +532,6 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     }
 
     if std::env::var("MUSISHARK_DEMO_PHASES").is_ok() {
-        // Time between consecutive frame clock signals, which is what the phase
-        // in between cost. Logged when one takes more than 40 ms.
         let win = window.clone();
         glib::timeout_add_local_once(Duration::from_millis(1500), move || {
             let Some(clock) = win.frame_clock() else { return };
@@ -662,8 +580,6 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         let delay = ms.parse::<u64>().unwrap_or(9000);
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
-                // Painting stops while the window is hidden, and so do the
-                // callbacks the sheet needs. Raise it like a user would.
                 mw.window().present();
                 mw.show_stream_info();
             }
@@ -861,15 +777,12 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
         glib::timeout_add_local_once(Duration::from_millis(delay), move || {
             if let Some(mw) = ctx_w.window.borrow().as_ref() {
                 tracing::info!("demo: expanding player");
-                // Painting stops while the window is hidden, and the sheet
-                // needs a frame to lay itself out. Raise it like a user would.
                 mw.window().present();
                 mw.expand_player();
             }
         });
     }
     if std::env::var("MUSISHARK_DEMO_QUEUE").ok().as_deref() == Some("1") {
-        // Open after the first layout pass, like a user click would.
         let win = window.downgrade();
         glib::timeout_add_local_once(Duration::from_millis(600), move || {
             if let Some(w) = win.upgrade() {
@@ -909,7 +822,6 @@ pub fn install(demo: &Demo, ctx: &Rc<App>, main_window: &MainWindow) {
     }
 }
 
-/// Widget type, classes and state down to `max` levels, for spotting what a toggle changes.
 fn dump_classes(widget: &gtk::Widget, depth: usize, max: usize, out: &mut Vec<String>) {
     if depth > max {
         return;
@@ -922,7 +834,6 @@ fn dump_classes(widget: &gtk::Widget, depth: usize, max: usize, out: &mut Vec<St
     }
 }
 
-/// The first label showing exactly this text, anywhere under the widget.
 fn find_label(widget: &gtk::Widget, text: &str) -> Option<gtk::Label> {
     if let Some(label) = widget.downcast_ref::<gtk::Label>() {
         if label.text() == text {
@@ -1025,8 +936,6 @@ fn with_suffix(prefix: &Path, suffix: &str) -> PathBuf {
     prefix.with_file_name(format!("{name}-{suffix}.png"))
 }
 
-/// Render the window to a PNG through its own GSK renderer.
-/// Runs right after GTK paints a frame, when the widget's render node is fresh.
 fn snapshot(window: &adw::ApplicationWindow, path: &Path) {
     snapshot_any(window.upcast_ref::<gtk::Window>(), path);
 }
@@ -1051,9 +960,6 @@ fn snapshot_any(window: &gtk::Window, path: &Path) {
         }
     });
     handler.replace(Some(id));
-    // A window the compositor thinks is hidden stops painting, and then the
-    // after-paint callback never comes. Raising it first keeps captures
-    // reliable when the terminal is in front.
     window.present();
     window.queue_draw();
 }

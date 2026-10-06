@@ -1,6 +1,3 @@
-//! LRCLIB (https://lrclib.net), line-synced LRC.
-//!
-//! Tries the exact `/get` first (title, artist and duration within 2 s), then `/get` without the duration, then `/search`, so a (Remastered) suffix or a duration a few seconds off does not lose the lyrics.
 
 use std::time::Duration;
 
@@ -15,13 +12,11 @@ const SOURCE: &str = "LRCLIB";
 const API: &str = "https://lrclib.net/api/";
 const USER_AGENT: &str = "Musishark (https://github.com/Matko802/musishark)";
 const BROWSER_USER_AGENT: &str = "Musishark/1.0";
-/// Enough for a hit. Capping low keeps the worst case at a few seconds when the chain walks several title variants and the API is sluggish.
 const TIMEOUT: Duration = Duration::from_secs(3);
 const BROWSER_TIMEOUT: Duration = Duration::from_secs(6);
 const RATE_LIMIT_BACKOFF: Duration = Duration::from_secs(120);
 const TIMEOUT_BACKOFF: Duration = Duration::from_secs(60);
 
-/// One `/search` row.
 struct Hit(Value);
 
 impl Candidate for Hit {
@@ -36,7 +31,6 @@ impl Candidate for Hit {
     }
 }
 
-/// One GET against the API. Once a 429 or a timeout has tripped the cooldown, the remaining probes and any later title variants are skipped rather than fired at a server that said to back off.
 async fn hit(http: &reqwest::Client, cooldowns: &Cooldowns, path: &str, query: &[(&str, &str)]) -> Option<Value> {
     if !cooldowns.ready(Provider::Lrclib) {
         return None;
@@ -59,9 +53,6 @@ async fn hit(http: &reqwest::Client, cooldowns: &Cooldowns, path: &str, query: &
     }
 }
 
-/// The search row to try: the artist has to match, then the closest duration wins.
-///
-/// Without the artist filter, an unfilled exact request followed by /search returns some random album's "Intro" for any track called "Intro".
 pub fn pick_search_hit(results: &Value, artist: &str, duration: u32) -> Option<Value> {
     let mut rows: Vec<&Value> = results.as_array()?.iter().filter(|r| artist.is_empty() || artist_matches(artist, text_at(r, "artistName"))).collect();
     if duration != 0 {
@@ -74,7 +65,6 @@ fn distance(row: &Value, duration: u32) -> f64 {
     (f64::from(duration) - row.get("duration").and_then(Value::as_f64).unwrap_or(0.0)).abs()
 }
 
-/// A `/get` answer or a `/search` row as a result: synced lyrics when it has them, plain otherwise.
 pub fn result_from(candidate: &Value) -> Option<LyricsResult> {
     let synced = text_at(candidate, "syncedLyrics");
     if !synced.trim().is_empty() {
@@ -107,7 +97,6 @@ pub async fn fetch(http: &reqwest::Client, cooldowns: &Cooldowns, request: Reque
     candidates.iter().find_map(result_from)
 }
 
-/// A search row as a match browser entry. Credits go here, since nothing else strips them for LRCLIB.
 fn match_from(hit: &Hit) -> Option<LyricsMatch> {
     let synced = text_at(&hit.0, "syncedLyrics");
     let lines = if synced.is_empty() { plain_lines(text_at(&hit.0, "plainLyrics")) } else { strip_leading_credits(parse_lrc_text(synced)) };
@@ -156,7 +145,6 @@ mod tests {
         assert!(!result.synced);
         assert_eq!(result.lines.len(), 2);
         assert_eq!(result.rank(), 1);
-        // Synced text with no stamps in it falls through to the plain text as well.
         assert!(!result_from(&json!({"syncedLyrics": "no stamps", "plainLyrics": "one"})).unwrap().synced);
     }
 

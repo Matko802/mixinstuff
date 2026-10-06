@@ -1,7 +1,3 @@
-//! Port of MusicClient.get_artist on top of ytmusicapi's get_artist and
-//! parse_channel_contents, plus the raw carousel scan and the deep fetches
-//! the artist page did before rendering. Subscriptions ride the same
-//! endpoints the Python client used.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,12 +13,9 @@ use crate::net::ytmusic::NetError;
 
 const SINGLE_SECTIONS: &str = "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents";
 const TWO_COLUMN_SECTIONS: &str = "/contents/twoColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents";
-/// The page waited this long for the deep fetches before rendering.
 const DEEP_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
-/// Albums and singles the artist page asks for. The discography page fetches the rest.
 const ARTIST_PAGE_ALBUMS: usize = 10;
 
-/// A carousel of cards with the "View All" pointer, what `{"results", "browseId", "params"}` was.
 #[derive(Debug, Clone, Default)]
 pub struct CardSection {
     pub browse_id: Option<String>,
@@ -30,7 +23,6 @@ pub struct CardSection {
     pub results: Vec<MediaItem>,
 }
 
-/// The top songs shelf: rows plus the playlist behind "View All".
 #[derive(Debug, Clone, Default)]
 pub struct SongSection {
     pub browse_id: Option<String>,
@@ -42,7 +34,6 @@ pub struct ArtistData {
     pub name: String,
     pub description: Option<String>,
     pub views: Option<String>,
-    /// The id the subscribe endpoints take, which differs from the browse id.
     pub channel_id: Option<String>,
     pub shuffle_id: Option<String>,
     pub radio_id: Option<String>,
@@ -51,7 +42,6 @@ pub struct ArtistData {
     pub subscribed: bool,
     pub thumbnails: Vec<String>,
     pub banner: Vec<String>,
-    /// A user channel rather than an artist: no songs, no play buttons.
     pub is_channel: bool,
     pub songs: Option<SongSection>,
     pub albums: Option<CardSection>,
@@ -75,7 +65,6 @@ fn dot_separator_index(runs: &[Value]) -> usize {
     runs.iter().position(|r| r.get("text").and_then(Value::as_str) == Some(" • ")).unwrap_or(runs.len())
 }
 
-/// Port of parse_video for a `musicTwoRowItemRenderer`.
 fn parse_video(data: &Value) -> Option<MediaItem> {
     let runs = array_at(data, "/subtitle/runs");
     let artists_len = dot_separator_index(runs);
@@ -92,7 +81,6 @@ fn parse_video(data: &Value) -> Option<MediaItem> {
     })
 }
 
-/// Port of parse_related_artist.
 fn parse_related_artist(data: &Value) -> Option<MediaItem> {
     Some(MediaItem {
         kind: ItemKind::Artist,
@@ -120,7 +108,6 @@ impl Category {
             Category::Singles => "singles & eps",
             Category::Videos => "videos",
             Category::Playlists => "playlists",
-            // ytmusicapi's English locale names the carousel this way.
             Category::Related => "fans might also like",
         }
     }
@@ -136,7 +123,6 @@ impl Category {
     }
 }
 
-/// Port of parse_channel_contents for one category: the carousel whose title matches.
 fn parse_category(sections: &[Value], category: Category) -> Option<CardSection> {
     let carousel = sections.iter().filter_map(|s| s.get("musicCarouselShelfRenderer")).find(|c| carousel_title_run(c).and_then(|r| r.get("text")).and_then(Value::as_str).is_some_and(|t| t.to_lowercase() == category.title()))?;
     let title_run = carousel_title_run(carousel);
@@ -146,8 +132,6 @@ fn parse_category(sections: &[Value], category: Category) -> Option<CardSection>
     Some(CardSection { browse_id, params, results })
 }
 
-/// The raw scan the page did for carousels ytmusicapi skips: any carousel
-/// whose title mentions `needle`, read with the best-effort item parser.
 fn scan_carousel(sections: &[Value], needle: &str) -> Option<CardSection> {
     for section in sections {
         let Some(carousel) = section.get("musicCarouselShelfRenderer") else { continue };
@@ -208,8 +192,6 @@ fn parse_artist_page(response: &Value) -> Option<ArtistData> {
     Some(artist)
 }
 
-/// Port of the get_user fallback for plain channels, normalized like the
-/// Python client did: `_is_channel`, avatar and banner off the visual header.
 fn parse_channel_page(response: &Value) -> Option<ArtistData> {
     let sections = sections(response);
     let mut artist = ArtistData { is_channel: true, subscribers: Some(String::new()), ..ArtistData::default() };
@@ -239,9 +221,6 @@ fn parse_channel_page(response: &Value) -> Option<ArtistData> {
     Some(artist)
 }
 
-/// Port of MusicClient.get_artist plus ArtistPage._fetch_artist: the page
-/// data with the deep fetches merged in (full top songs, detailed albums
-/// and singles), each bounded like the joined worker threads were.
 pub async fn get_artist(api: Arc<dyn Browse>, channel_id: &str) -> Result<ArtistData, NetError> {
     let channel_id = channel_id.strip_prefix("MPLA").unwrap_or(channel_id).to_owned();
     let response = api.post("browse", json!({ "browseId": channel_id })).await?;
@@ -287,7 +266,6 @@ pub async fn get_artist(api: Arc<dyn Browse>, channel_id: &str) -> Result<Artist
     Ok(artist)
 }
 
-/// Port of _resolve_artist_from_player's lookup: the channel behind a video, from the player response.
 pub async fn channel_of_video(api: &dyn Browse, video_id: &str) -> Result<Option<(String, String)>, NetError> {
     let response = api.post("player", json!({ "videoId": video_id })).await?;
     let channel = owned_at(&response, "/videoDetails/channelId");
@@ -295,9 +273,6 @@ pub async fn channel_of_video(api: &dyn Browse, video_id: &str) -> Result<Option
     Ok(channel.map(|c| (c, author)))
 }
 
-/// Port of resolve_channel_handle: turn the account's @handle into the
-/// channel it opens, which is what "Your Channel" needs before it can push an
-/// artist page.
 pub async fn resolve_handle(api: &dyn Browse, handle: &str) -> Result<Option<String>, NetError> {
     let handle = handle.trim_start_matches('@');
     if handle.is_empty() {
@@ -305,7 +280,6 @@ pub async fn resolve_handle(api: &dyn Browse, handle: &str) -> Result<Option<Str
     }
     let body = json!({ "url": format!("https://music.youtube.com/@{handle}") });
     let response = api.post("navigation/resolve_url", body).await?;
-    // The key nesting has moved between YouTube revisions; try both spellings.
     Ok(owned_at(&response, "/endpoint/browseEndpoint/browseId").or_else(|| owned_at(&response, "/endpoint/browse/browseId")))
 }
 
@@ -324,7 +298,6 @@ pub async fn unsubscribe(api: &dyn Browse, channel_id: &str) -> Result<(), NetEr
 mod tests {
     use super::*;
 
-    /// An artist with a long singles list. The page asks for ten and must not wait for the rest.
     #[tokio::test]
     #[ignore]
     async fn live_prolific_artist_loads_quickly() {

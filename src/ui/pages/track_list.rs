@@ -1,10 +1,3 @@
-//! The rows behind a playlist page: order, filter, selection and the sort
-//! metrics that only some orders need.
-//!
-//! `fetched` is every track the page has, in the order it arrived. `rendered`
-//! is what the list shows: sorted, and cut to the chunk rendered so far. The
-//! page asks this module which rows to show and which are ticked; it never
-//! re-derives either.
 
 use std::collections::{HashMap, HashSet};
 
@@ -20,7 +13,6 @@ pub const SORT_DURATION: u32 = 4;
 pub const SORT_VIEWS: u32 = 5;
 pub const SORT_ADDED: u32 = 6;
 
-/// The orders that need a number YouTube keeps off the track itself.
 pub fn needs_metric(sort_type: u32) -> bool {
     matches!(sort_type, SORT_VIEWS | SORT_ADDED)
 }
@@ -37,26 +29,18 @@ pub struct TrackList {
 }
 
 impl TrackList {
-    /// The list to work from.
-    ///
-    /// A page renders before the full fetch lands, so early on the only rows
-    /// are the ones already rendered. One answer, in one place.
     pub fn source(&self) -> &[Track] {
         if self.fetched.is_empty() { &self.rendered } else { &self.fetched }
     }
 
-    /// Everything fetched so far, in fetch order.
     pub fn fetched(&self) -> &[Track] {
         &self.fetched
     }
 
-    /// The rows the list is showing.
     pub fn rendered(&self) -> &[Track] {
         &self.rendered
     }
 
-    /// Rows the list shows right now: the matches while a search is active,
-    /// otherwise what is rendered.
     pub fn visible(&self) -> Vec<Track> {
         if self.filter.is_empty() { self.rendered.clone() } else { self.matches() }
     }
@@ -65,29 +49,24 @@ impl TrackList {
         self.source().is_empty()
     }
 
-    /// Everything the page has, both views, in fetch order.
     pub fn set(&mut self, tracks: Vec<Track>) {
         self.rendered = tracks.clone();
         self.fetched = tracks;
     }
 
-    /// Rows that arrived after the first page.
     pub fn extend(&mut self, tracks: Vec<Track>) {
         self.rendered.extend(tracks.iter().cloned());
         self.fetched.extend(tracks);
     }
 
-    /// The full list, when the page rendered a prefix first.
     pub fn set_fetched(&mut self, tracks: Vec<Track>) {
         self.fetched = tracks;
     }
 
-    /// What the list shows, after a sort or another chunk.
     pub fn set_rendered(&mut self, tracks: Vec<Track>) {
         self.rendered = tracks;
     }
 
-    /// Render the next `size` rows of the fetched list. Returns what to append.
     pub fn render_chunk(&mut self, size: usize) -> Vec<Track> {
         let start = self.rendered.len();
         let end = (start + size).min(self.fetched.len());
@@ -99,7 +78,6 @@ impl TrackList {
         chunk
     }
 
-    /// Whether every fetched row is on screen.
     pub fn fully_rendered(&self) -> bool {
         !self.rendered.is_empty() && self.rendered.len() >= self.fetched.len()
     }
@@ -110,7 +88,6 @@ impl TrackList {
         self.selected.clear();
     }
 
-    /// Drop rows, both views at once. Returns whether anything went.
     pub fn remove(&mut self, drop: impl Fn(&Track) -> bool) -> bool {
         let before = self.fetched.len() + self.rendered.len();
         self.fetched.retain(|t| !drop(t));
@@ -118,7 +95,6 @@ impl TrackList {
         before != self.fetched.len() + self.rendered.len()
     }
 
-    // -- search ----------------------------------------------------------
 
     pub fn filter(&self) -> &str {
         &self.filter
@@ -132,8 +108,6 @@ impl TrackList {
         !self.filter.is_empty()
     }
 
-    /// Rows matching the search, in the current order. Title, artist and album
-    /// all count, the way the Python page searched.
     pub fn matches(&self) -> Vec<Track> {
         let text = &self.filter;
         let hits: Vec<Track> = self
@@ -148,7 +122,6 @@ impl TrackList {
         self.sorted(hits)
     }
 
-    // -- order -----------------------------------------------------------
 
     pub fn sort_type(&self) -> u32 {
         self.sort_type
@@ -163,10 +136,6 @@ impl TrackList {
         self.descending = descending;
     }
 
-    /// Put tracks in the current order.
-    ///
-    /// Views and added-date read a metric fetched separately; rows the metric
-    /// does not know about keep their order and sit at the end.
     pub fn sorted(&self, tracks: Vec<Track>) -> Vec<Track> {
         let reverse = self.descending;
         let mut result = tracks;
@@ -200,7 +169,6 @@ impl TrackList {
         result
     }
 
-    /// The source list in the current order, what a sort change renders.
     pub fn sorted_source(&self) -> Vec<Track> {
         self.sorted(self.source().to_vec())
     }
@@ -217,12 +185,10 @@ impl TrackList {
         self.metrics.insert(sort_type, metric);
     }
 
-    /// Forget the metrics, for a playlist whose rows changed.
     pub fn drop_metrics(&mut self) {
         self.metrics.clear();
     }
 
-    // -- selection -------------------------------------------------------
 
     pub fn is_selected(&self, video_id: &str) -> bool {
         self.selected.contains(video_id)
@@ -247,7 +213,6 @@ impl TrackList {
         }
     }
 
-    /// Tick every row on screen. A search narrows what that means.
     pub fn select_visible(&mut self) {
         for track in self.visible() {
             self.select(&track.video_id.0.clone(), true);
@@ -258,7 +223,6 @@ impl TrackList {
         self.selected.clear();
     }
 
-    /// Ticked rows, in the order the list shows them.
     pub fn selected_tracks(&self) -> Vec<Track> {
         let picked: Vec<Track> = self.source().iter().filter(|t| self.selected.contains(&t.video_id.0)).cloned().collect();
         self.sorted(picked)

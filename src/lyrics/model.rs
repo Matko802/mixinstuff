@@ -1,31 +1,21 @@
-//! The shape every provider's lyrics are normalized into.
-//!
-//! These serialize to the exact dicts api/client.py produced, because the disk cache is shared with the Python app: `start` is always written (null when unsynced), everything optional is left out when absent.
 
 use serde::{Deserialize, Serialize};
 
-/// Word-level timing: every line can carry its own words.
 pub const RANK_WORD: u8 = 3;
-/// Line-level timing.
 pub const RANK_LINE: u8 = 2;
-/// Plain text, no timing.
 pub const RANK_PLAIN: u8 = 1;
 
-/// One timed word or syllable of a line, or of its background vocal.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LyricPart {
-    /// Seconds from the start of the track.
     #[serde(default)]
     pub start: Option<f64>,
     #[serde(default)]
     pub end: Option<f64>,
     pub text: String,
-    /// Whether the source put whitespace after this word. CJK syllables carry none.
     #[serde(default = "yes")]
     pub space_after: bool,
 }
 
-/// Which edge a line sits against. A duet's second voice is set against the far one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Align {
@@ -34,23 +24,18 @@ pub enum Align {
     Start,
 }
 
-/// One lyric line and everything the view can put under it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LyricLine {
-    /// Seconds from the start of the track. None for unsynced lyrics.
     #[serde(default)]
     pub start: Option<f64>,
     #[serde(default)]
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<f64>,
-    /// Word-level timing for the karaoke sweep. Empty when the source is line-synced.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<LyricPart>,
-    /// Background vocals answering this line, as one string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bg_text: Option<String>,
-    /// The background vocal's own word timing, when the source has it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bg: Vec<LyricPart>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -66,7 +51,6 @@ impl LyricLine {
         Self { start, text: text.into(), ..Self::default() }
     }
 
-    /// True when the second voice sings this line.
     #[allow(dead_code)]
     pub fn opposite_voice(&self) -> bool {
         self.align == Some(Align::End)
@@ -77,30 +61,24 @@ impl LyricLine {
     }
 }
 
-/// What a provider returned for a track.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LyricsResult {
     #[serde(default)]
     pub lines: Vec<LyricLine>,
-    /// True when every line has a start time.
     #[serde(default)]
     pub synced: bool,
-    /// Display name of the provider, or the credit YouTube Music reports.
     #[serde(default)]
     pub source: String,
-    /// Set on a match the listener picked by hand. Survives a pipeline bump.
     #[serde(default, skip_serializing_if = "is_false")]
     pub user_choice: bool,
 }
 
 impl LyricsResult {
-    /// A result whose synced flag follows its lines.
     pub fn from_lines(lines: Vec<LyricLine>, source: &str) -> Self {
         let synced = lines.iter().all(|l| l.start.is_some());
         Self { lines, synced, source: source.to_owned(), user_choice: false }
     }
 
-    /// Port of _result_rank: 3 word-level, 2 line-synced, 1 plain, 0 nothing usable.
     pub fn rank(&self) -> u8 {
         if self.lines.is_empty() {
             0
@@ -122,25 +100,19 @@ impl LyricsResult {
     }
 }
 
-/// Rank of an optional result, the way the chain compares them.
 pub fn rank_of(result: Option<&LyricsResult>) -> u8 {
     result.map_or(0, LyricsResult::rank)
 }
 
-/// One candidate in the match browser or the manual search.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LyricsMatch {
-    /// The candidate's title as the provider lists it.
     pub label: String,
-    /// Artist and m:ss duration joined by a middle dot, whichever halves are known.
     pub detail: String,
     pub result: LyricsResult,
-    /// Provider display name. Set by the manual search, which mixes providers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
 }
 
-/// One provider's answer during `fetch_alternatives`. None means it had nothing.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Alternative {
     pub source: String,

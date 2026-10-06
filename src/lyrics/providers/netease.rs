@@ -1,6 +1,3 @@
-//! NetEase Music (music.163.com), by far the broadest source for Japanese, Vocaloid, K-pop and other Asian tracks, and the one that ships romanization and translation tracks beside the lyric.
-//!
-//! Uses the unencrypted `cloudsearch/pc` search and the `song/lyric` endpoint. Both return plain JSON with no auth.
 
 use std::time::Duration;
 
@@ -18,13 +15,11 @@ const HEADERS: [(&str, &str); 2] = [("User-Agent", "Mozilla/5.0"), ("Referer", "
 const TIMEOUT: Duration = Duration::from_secs(5);
 const SEARCH_LIMIT: &str = "8";
 
-/// One search hit.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Song {
     id: i64,
     name: String,
     artists: Vec<String>,
-    /// The artist names joined by spaces, which is what gets matched against.
     credited: String,
     duration: u32,
 }
@@ -41,7 +36,6 @@ impl Candidate for Song {
     }
 }
 
-/// The songs of a `cloudsearch/pc` response. NetEase reports duration in milliseconds as `dt`.
 pub fn parse_search(data: &Value) -> Vec<Song> {
     let songs = data.pointer("/result/songs").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
     songs
@@ -59,9 +53,7 @@ pub fn parse_search(data: &Value) -> Vec<Song> {
         .collect()
 }
 
-/// Narrow the hits to this recording and put the best first. None when nothing survives.
 pub fn pick(mut songs: Vec<Song>, request: &Request) -> Option<Song> {
-    // Hard-filter to artist matches first. For a generic title like "Intro" the closest duration is a coin toss across everyone with an Intro, so an artist mismatch has to disqualify the hit, not just dock its score.
     if !request.artist.is_empty() {
         if songs.iter().any(|s| artist_matches(request.artist, &s.credited)) {
             songs.retain(|s| artist_matches(request.artist, &s.credited));
@@ -70,12 +62,10 @@ pub fn pick(mut songs: Vec<Song>, request: &Request) -> Option<Song> {
         }
     }
 
-    // Drop anything that is not plausibly this recording. Scoring only ranks, it never rejects, so the closest duration used to win even when it was a different song entirely.
     if request.strict {
         songs = gate(songs, request.title, request.artist, request.duration);
     }
 
-    // Closest duration wins, with a small bonus for a title match.
     let title = request.title.trim().to_lowercase();
     songs.sort_by_key(|song| {
         let mut score = 0i64;
@@ -91,14 +81,12 @@ pub fn pick(mut songs: Vec<Song>, request: &Request) -> Option<Song> {
     songs.into_iter().next()
 }
 
-/// A `song/lyric` response as a result. `romalrc` and `tlyric` are optional per track, and both are stamped against the main lyric's clock.
 pub fn parse_lyric(data: &Value) -> Option<LyricsResult> {
     let lyric_of = |key: &str| data.pointer(&format!("/{key}/lyric")).and_then(Value::as_str).unwrap_or_default();
     let lrc = lyric_of("lrc").trim();
     if lrc.is_empty() {
         return None;
     }
-    // NetEase pads the start with credit lines stamped [00:00.000], lyricist first.
     let mut lines = strip_leading_credits(parse_lrc_text(lrc));
     if lines.is_empty() {
         return None;
@@ -122,7 +110,6 @@ async fn search(http: &reqwest::Client, query: &str) -> Vec<Song> {
     }
 }
 
-/// `tv=-1` asks for the translation and `rv=-1` for the romanization.
 async fn lyric(http: &reqwest::Client, song_id: i64) -> Option<LyricsResult> {
     if song_id == 0 {
         return None;
@@ -143,7 +130,6 @@ pub async fn fetch(http: &reqwest::Client, request: Request<'_>) -> Option<Lyric
     lyric(http, best.id).await
 }
 
-/// Every NetEase song worth offering for this track, with its lyrics.
 pub async fn matches(http: &reqwest::Client, request: Request<'_>, limit: usize) -> Vec<LyricsMatch> {
     let mut songs: Vec<Song> = Vec::new();
     for variant in variants_or_title(request.title) {
@@ -202,7 +188,6 @@ mod tests {
         let songs = parse_search(&search_response());
         let best = pick(songs.clone(), &request("千本桜", "初音ミク", 245, true)).unwrap();
         assert_eq!(best.id, 3, "the live take and the other song are gated out, the other artist is narrowed out");
-        // The romanization pass skips the gate, so the closest duration with a title bonus wins.
         let loose = pick(songs, &request("千本桜", "初音ミク", 245, false)).unwrap();
         assert_eq!(loose.id, 1);
     }
@@ -213,7 +198,6 @@ mod tests {
         assert!(pick(songs.clone(), &request("Intro", "Someone Unrelated", 128, true)).is_none());
         assert_eq!(pick(songs.clone(), &request("Intro", "The xx", 128, true)).unwrap().id, 9);
         assert!(pick(Vec::new(), &request("Intro", "The xx", 128, true)).is_none());
-        // A specific title still gets through on the title and duration.
         let named = parse_search(&json!({"result": {"songs": [{"id": 5, "name": "Gruppa krovi", "ar": [{"name": "Кино"}], "dt": 285000}]}}));
         assert_eq!(pick(named, &request("Gruppa krovi", "Kino", 285, true)).unwrap().id, 5);
     }

@@ -1,8 +1,3 @@
-//! Port of ui/pages/library.py on live data: Library and Uploads tabs, a
-//! list or grid view per section from the persisted preference, Playlists
-//! (with the Downloads entry injected at index one), Albums, Artists, and
-//! the overlay loaders. Sections are `gio::ListStore`s of `MediaObject`;
-//! the list views bind to them and the grids rebuild on `items-changed`.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -25,7 +20,6 @@ use crate::ui::widgets::media_card::{CardOptions, MediaCard};
 const VIEW_MODES: [&str; 2] = ["list", "grid"];
 const DEFAULT_VIEW_MODE: &str = "grid";
 const DOWNLOADS_ID: &str = "DL";
-/// A library shown again within this long is fresh enough to leave alone.
 const RELOAD_GAP: std::time::Duration = std::time::Duration::from_secs(2);
 
 struct Section {
@@ -33,7 +27,6 @@ struct Section {
     list: gtk::ListBox,
     grid: CardGrid,
     store: gio::ListStore,
-    /// What the list and the grid show: the store with the search applied.
     filtered: gtk::FilterListModel,
     filter: gtk::CustomFilter,
     cards: Rc<RefCell<Vec<Rc<MediaCard>>>>,
@@ -55,11 +48,8 @@ pub struct LibraryPage {
     uploads_tab: gtk::ToggleButton,
     ctx: Rc<UiContext>,
     is_loading: Cell<bool>,
-    /// When the last load finished, so coming back into view does not refetch
-    /// what was just fetched.
     loaded_at: Cell<Option<std::time::Instant>>,
     compact: Rc<Cell<bool>>,
-    /// What the search bar last typed, lowercased. Shared with every filter.
     query: Rc<RefCell<String>>,
     on_refresh_done: RefCell<Option<Rc<dyn Fn()>>>,
 }
@@ -69,7 +59,6 @@ impl LibraryPage {
         let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         let content_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).margin_top(12).margin_bottom(24).margin_start(12).margin_end(12).build();
 
-        // Tab row: Library / Uploads toggles, then per-tab actions.
         let tab_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).margin_bottom(8).build();
         let lib_tab = gtk::ToggleButton::builder().label("Library").active(true).build();
         let upl_tab = gtk::ToggleButton::builder().label("Uploads").group(&lib_tab).build();
@@ -93,8 +82,6 @@ impl LibraryPage {
 
         let lib_content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).build();
         let new_playlist = gtk::Button::builder().icon_name("list-add-symbolic").css_classes(["flat", "circular"]).valign(gtk::Align::Center).tooltip_text("New Playlist").build();
-        // One query behind every section, library and uploads alike: the
-        // search bar filters whichever sub-tab is showing, like Python's.
         let query: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
         let playlists = Section::new("Playlists", Some(&new_playlist), &query);
         let albums = Section::new("Albums", None, &query);
@@ -195,10 +182,6 @@ impl LibraryPage {
             upload.connect_clicked(move |_| ctx.nav.pick_uploads());
         }
         {
-            // Coming back from a playlist shows the library again. Reload then,
-            // so a rename, a new cover or a deletion is there without reaching
-            // for the refresh button. A page edit asks for a reload too, but
-            // that runs while YouTube is still serving the old card.
             let weak = Rc::downgrade(&page);
             page.root.connect_map(move |_| {
                 let Some(p) = weak.upgrade() else { return };
@@ -213,15 +196,11 @@ impl LibraryPage {
         }
         page.sync_view_toggle();
 
-        // Load once signed in, clear when signed out.
         {
             let weak = Rc::downgrade(&page);
             let state = page.ctx.player.state();
             state.connect_notify_local(Some("authenticated"), move |state, _| {
                 if let Some(p) = weak.upgrade() {
-                    // Unverified is what a saved session reads as while the network is
-                    // down. Only a real sign-out empties the page, or offline it would
-                    // wipe the library that was just filled from disk.
                     let signed_out = matches!(p.ctx.net.client().auth_state(), crate::net::ytmusic::AuthState::Anonymous | crate::net::ytmusic::AuthState::Invalid(_));
                     if state.authenticated() {
                         p.load_library(false);
@@ -239,8 +218,6 @@ impl LibraryPage {
                 });
             }
         }
-        // A session check that ends signed out flips nothing above, since the
-        // flag was false all along. The local library shows once it is known.
         {
             let weak = Rc::downgrade(&page);
             let mut auth = page.ctx.net.client().subscribe_auth();
@@ -284,17 +261,12 @@ impl LibraryPage {
         self.apply_layout();
     }
 
-    /// Header refresh button target: a silent reload with the inline spinner.
     pub fn refresh(self: &Rc<Self>, on_done: impl Fn() + 'static) {
         self.on_refresh_done.replace(Some(Rc::new(on_done)));
         self.load_library(true);
     }
 
-    /// Port of _apply_offline_state: grey out what is not cached for offline
-    /// use, in the list and the grid alike, library and uploads. Playlists and
-    /// albums with a cached copy stay live, artists never do.
     pub fn apply_offline_state(self: &Rc<Self>) {
-        // Each section, and whether its items can be cached for offline use.
         let sections: Vec<(Rc<Section>, bool)> = vec![
             (self.sections[0].clone(), true),
             (self.sections[1].clone(), true),
@@ -303,7 +275,6 @@ impl LibraryPage {
             (self.upload_sections[1].clone(), false),
         ];
         if self.ctx.online.is_online() {
-            // Uploading and the full uploads list need the network.
             self.uploads_actions.set_sensitive(true);
             for (section, _) in &sections {
                 for row in list_rows(&section.list) {
@@ -329,9 +300,7 @@ impl LibraryPage {
                 return;
             }
             for (section, cacheable) in &sections {
-                // Downloads and the playlists kept on this device need no network.
                 let available = |id: &str| id == DOWNLOADS_ID || crate::local_library::is_local(id) || (*cacheable && cached.contains(id));
-                // The list shows the filtered model, so its rows follow that order.
                 for (i, row) in list_rows(&section.list).into_iter().enumerate() {
                     let id = section.filtered.item(i as u32).and_downcast::<MediaObject>().map(|o| o.id()).unwrap_or_default();
                     set_available(row.upcast_ref(), available(&id));
@@ -350,18 +319,13 @@ impl LibraryPage {
         self.apply_layout();
     }
 
-    /// Fan the library calls out on the runtime; each section renders as its call returns.
     pub fn load_library(self: &Rc<Self>, silent: bool) {
         if self.is_loading.replace(true) {
             return;
         }
-        // Port of the _offline_db fallbacks in get_library_*: the last library
-        // that loaded is on disk, so the page is never blank at startup, offline
-        // or while the session is still being checked.
         let signed_out = matches!(self.ctx.net.client().auth_state(), crate::net::ytmusic::AuthState::Anonymous);
         if signed_out {
             forget_library(&self.ctx.paths);
-            // Signed out, the library is what lives on this device.
             sync_store(&self.sections[0].store, with_local_items(&self.ctx, Vec::new()));
             sync_store(&self.sections[2].store, self.ctx.local.subscriptions());
             self.apply_layout();
@@ -420,7 +384,6 @@ impl LibraryPage {
         });
     }
 
-    /// Show the library as it last loaded.
     fn fill_from_disk(self: &Rc<Self>) {
         let mut saved = read_library(&self.ctx.paths);
         if saved.is_empty() {
@@ -443,7 +406,6 @@ impl LibraryPage {
         self.ctx.paths.read_prefs().get("library_view_mode").and_then(|v| v.as_str()).filter(|m| VIEW_MODES.contains(m)).unwrap_or(DEFAULT_VIEW_MODE).to_owned()
     }
 
-    /// Icon shows the mode the next click switches to, Nautilus style.
     fn sync_view_toggle(&self) {
         if self.view_mode() == "grid" {
             self.view_toggle.set_icon_name("view-list-symbolic");
@@ -454,10 +416,6 @@ impl LibraryPage {
         }
     }
 
-    /// Port of LibraryPage.filter_content: the global search bar filters the
-    /// library's own cards instead of searching YouTube, and a section the
-    /// query empties goes with it. Uploads filter too, so whichever sub-tab
-    /// is showing reacts.
     pub fn filter_content(&self, text: &str) {
         self.query.replace(text.trim().to_lowercase());
         for section in self.sections.iter().chain(self.upload_sections.iter()) {
@@ -476,19 +434,11 @@ impl LibraryPage {
         self.sync_view_toggle();
     }
 
-    /// The list binds to the store; the grid rebuilds from it on every change.
-    /// Port of _on_artist_activated for uploads: a page of that artist's
-    /// uploaded songs, filled once the fetch lands.
     fn open_upload_artist(&self, item: &MediaItem) {
         let (browse_id, name) = (item.id.clone(), item.title.clone());
         let _ = self.root.activate_action("win.open-upload-artist", Some(&(browse_id, name).to_variant()));
     }
 
-    /// A card whose picture changed, though its address looks the same.
-    ///
-    /// Clearing the thumbnail makes the next sync see a difference and rebind
-    /// that one row with the fresh address, rather than keeping the picture it
-    /// already has.
     pub fn invalidate_card(self: &Rc<Self>, playlist_id: &str) {
         let Some(section) = self.sections.first() else { return };
         for index in 0..section.store.n_items() {
@@ -505,12 +455,10 @@ impl LibraryPage {
         }
     }
 
-    /// Demo hook: switch to the uploads tab.
     pub fn show_uploads_for_demo(&self) {
         self.uploads_tab.set_active(true);
     }
 
-    /// Demo hook: what each library playlist card offers in its menu.
     pub fn card_menus_for_demo(&self) {
         let Some(section) = self.sections.first() else { return };
         for index in 0..section.store.n_items().min(10) {
@@ -524,12 +472,10 @@ impl LibraryPage {
         }
     }
 
-    /// Demo hook: open the new playlist dialog.
     pub fn new_playlist_for_demo(self: &Rc<Self>) {
         self.ask_new_playlist();
     }
 
-    /// Create a playlist through the shared dialog, then open it.
     fn ask_new_playlist(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
         crate::ui::playlist_ops::ask_new_playlist(&self.ctx, &self.root, move |id, title| {
@@ -543,7 +489,6 @@ impl LibraryPage {
         });
     }
 
-    /// Re-read the local playlists into the Playlists section without a network round trip.
     pub fn refresh_local_items(self: &Rc<Self>) {
         let store = &self.sections[0].store;
         let remote: Vec<MediaItem> = (0..store.n_items())
@@ -605,13 +550,11 @@ impl LibraryPage {
             section.cards.borrow_mut().push(card);
         }
         self.apply_layout();
-        // New cards start live; offline they take the grey like the list rows.
         if !self.ctx.online.is_online() {
             self.apply_offline_state();
         }
     }
 
-    /// Port of the grid and list activation handlers.
     fn activate(&self, item: &MediaItem) {
         match item.kind {
             ItemKind::Playlist if item.id == DOWNLOADS_ID => {
@@ -619,8 +562,6 @@ impl LibraryPage {
             }
             ItemKind::Playlist => self.ctx.nav.go(NavRequest::Playlist { id: item.id.clone(), title: item.title.clone(), thumb: item.thumb.clone() }),
             ItemKind::Album => self.ctx.nav.go(NavRequest::Album { id: item.id.clone(), title: item.title.clone(), thumb: item.thumb.clone() }),
-            // An uploaded artist has no artist page, only the songs of theirs
-            // that were uploaded.
             ItemKind::Artist if item.id.starts_with("FEmusic_library_privately_owned_artist") => {
                 self.open_upload_artist(item);
             }
@@ -656,8 +597,6 @@ impl Section {
     }
 }
 
-/// Port of _apply_library_filter's match: the title, and for an album the
-/// artists behind it as well.
 fn matches_query(item: &MediaItem, query: &str) -> bool {
     if item.title.to_lowercase().contains(query) {
         return true;
@@ -665,8 +604,6 @@ fn matches_query(item: &MediaItem, query: &str) -> bool {
     item.kind == ItemKind::Album && item.artists_text().to_lowercase().contains(query)
 }
 
-/// The synthetic Downloads playlist library.py inserts at index one.
-/// Section names, in the order load_library fetches them. Also the keys of library_cache.json.
 const LIBRARY_LABELS: [&str; 5] = ["playlists", "albums", "artists", "upload albums", "upload artists"];
 
 type SavedLibrary = std::collections::HashMap<String, Vec<MediaItem>>;
@@ -681,7 +618,6 @@ fn read_library(paths: &crate::paths::Paths) -> SavedLibrary {
 
 fn write_library(paths: &crate::paths::Paths, library: SavedLibrary) {
     let path = library_file(paths);
-    // Off the GTK thread: a big library is a few hundred kilobytes of JSON.
     std::thread::spawn(move || match serde_json::to_vec(&library) {
         Ok(bytes) => {
             if let Err(err) = std::fs::write(&path, bytes) {
@@ -692,7 +628,6 @@ fn write_library(paths: &crate::paths::Paths, library: SavedLibrary) {
     });
 }
 
-/// A signed-out app must not show the last account's library.
 fn forget_library(paths: &crate::paths::Paths) {
     let _ = std::fs::remove_file(library_file(paths));
 }
@@ -701,18 +636,12 @@ fn downloads_entry() -> MediaItem {
     MediaItem { kind: ItemKind::Playlist, id: DOWNLOADS_ID.to_owned(), title: "Downloads".to_owned(), description: Some("Downloaded songs".to_owned()), ..MediaItem::default() }
 }
 
-/// The account's playlists with what lives on this device: YouTube's likes
-/// list stays first when there is one, then Downloads, then the local likes
-/// and playlists, then the rest.
 fn with_local_items(ctx: &UiContext, remote: Vec<MediaItem>) -> Vec<MediaItem> {
     let mut items = remote;
     let head = items.len().min(1);
     let mut local = vec![downloads_entry()];
-    // Not "authenticated": offline the session cannot be verified, and the
-    // empty local list showed up beside YouTube's own Liked Music.
     let signed_out = matches!(ctx.net.client().auth_state(), crate::net::ytmusic::AuthState::Anonymous);
     for item in ctx.local.items() {
-        // Signed in, YouTube's own likes list is the one that matters. An empty local one stays out of the way.
         if item.id == crate::local_library::LIKED_ID && !signed_out && ctx.local.liked().is_empty() {
             continue;
         }
@@ -722,11 +651,9 @@ fn with_local_items(ctx: &UiContext, remote: Vec<MediaItem>) -> Vec<MediaItem> {
     items
 }
 
-/// Subtitle and icons for a grid card, following _rebuild_*_grid.
 fn card_style(item: &MediaItem) -> (String, &'static str, Option<&'static str>) {
     match item.kind {
         ItemKind::Playlist if item.id == DOWNLOADS_ID => (item.description.clone().unwrap_or_default(), "media-playlist-audio-symbolic", Some("folder-download-symbolic")),
-        // An empty playlist on this device has no art yet. It gets the tile Downloads wears.
         ItemKind::Playlist if crate::local_library::is_local(&item.id) && item.thumb.is_none() => (item.description.clone().unwrap_or_default(), "folder-music-symbolic", Some("audio-x-generic-symbolic")),
         ItemKind::Playlist if item.id.len() == 2 || crate::local_library::is_local(&item.id) => (item.description.clone().unwrap_or_default(), "folder-music-symbolic", None),
         ItemKind::Playlist => (item.count.as_ref().map(|c| format!("{c} songs")).unwrap_or_default(), "folder-music-symbolic", None),
@@ -736,7 +663,6 @@ fn card_style(item: &MediaItem) -> (String, &'static str, Option<&'static str>) 
     }
 }
 
-/// "Artist • Album • 2024", as update_albums built it.
 fn album_subtitle(item: &MediaItem) -> String {
     let mut parts = Vec::new();
     let artists = item.artists_text();
@@ -750,7 +676,6 @@ fn album_subtitle(item: &MediaItem) -> String {
     parts.join(" • ")
 }
 
-/// "12M" or "1,204": a number with at most a magnitude letter, no unit of its own.
 fn is_bare_count(text: &str) -> bool {
     let text = text.trim();
     let digits = text.trim_end_matches(['K', 'M', 'B', 'k', 'm', 'b']).trim_end();
@@ -759,14 +684,12 @@ fn is_bare_count(text: &str) -> bool {
 
 fn artist_subtitle(item: &MediaItem) -> String {
     match &item.subscribers {
-        // A bare count is subscribers. An uploaded artist says "5 songs", which already names its unit.
         Some(s) if is_bare_count(s) => format!("{s} subscribers"),
         Some(s) => s.clone(),
         None => String::new(),
     }
 }
 
-/// List-mode row: thumbnail (or the download icon), title, subtitle.
 fn list_row(ctx: &Rc<UiContext>, item: &MediaItem) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::builder().activatable(true).build();
     let inner = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).css_classes(["song-row"]).build();
@@ -821,7 +744,6 @@ fn overlay_loader(text: &str) -> gtk::Box {
     wrap
 }
 
-/// Live, or greyed out and inert while offline.
 fn set_available(widget: &gtk::Widget, available: bool) {
     widget.set_sensitive(available);
     widget.set_opacity(if available { 1.0 } else { 0.4 });
@@ -839,8 +761,6 @@ fn list_rows(list: &gtk::ListBox) -> Vec<gtk::ListBoxRow> {
     rows
 }
 
-/// A library card's menu, with the entries only the library offers: a
-/// playlist of your own can be deleted, one you saved can be dropped again.
 fn attach_playlist_menu(ctx: &Rc<UiContext>, widget: &impl IsA<gtk::Widget>, item: MediaItem) {
     let is_playlist = item.kind == ItemKind::Playlist && item.id != DOWNLOADS_ID;
     if !is_playlist && !is_upload_album(&item) {
@@ -851,7 +771,6 @@ fn attach_playlist_menu(ctx: &Rc<UiContext>, widget: &impl IsA<gtk::Widget>, ite
         let ctx = ctx.clone();
         let widget = widget.clone().upcast::<gtk::Widget>();
         Rc::new(move |x: f64, y: f64| {
-            // Built at each open: signing in or out changes what is offered.
             let extras = playlist_extras(&ctx, &widget, &item);
             crate::ui::context_menu::show_item_menu_with(&widget, x, y, &item, &ctx, extras);
         })
@@ -865,7 +784,6 @@ fn attach_playlist_menu(ctx: &Rc<UiContext>, widget: &impl IsA<gtk::Widget>, ite
     widget.add_controller(long);
 }
 
-/// An album that lives in the uploaded library rather than on YouTube Music.
 fn is_upload_album(item: &MediaItem) -> bool {
     item.kind == ItemKind::Album && item.id.starts_with("FEmusic_library_privately_owned_release")
 }
@@ -920,8 +838,6 @@ fn playlist_extras(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem) 
     })]
 }
 
-/// Port of is_own_playlist read from a library card: the system lists are
-/// never owned, and otherwise the card's author is the account holder.
 fn owns_playlist(account: Option<&str>, item: &MediaItem) -> bool {
     let Some(account) = account.filter(|name| !name.is_empty()) else { return false };
     if ["LM", "SE", "SS", "VLLM"].contains(&item.id.as_str()) {
@@ -936,7 +852,6 @@ fn owns_playlist(account: Option<&str>, item: &MediaItem) -> bool {
     }
 }
 
-/// The signed in account's name, which is what a card's author is compared to.
 fn account_name(ctx: &Rc<UiContext>) -> Option<String> {
     match ctx.net.client().auth_state() {
         crate::net::ytmusic::AuthState::Authenticated(info) => Some(info.name),
@@ -944,7 +859,6 @@ fn account_name(ctx: &Rc<UiContext>) -> Option<String> {
     }
 }
 
-/// Port of _confirm_delete_upload: an uploaded album and its songs, gone.
 fn confirm_delete_upload(ctx: &Rc<UiContext>, anchor: &gtk::Widget, entity_id: &str, title: &str) {
     let dialog = adw::AlertDialog::builder()
         .heading("Delete Upload?")
@@ -982,7 +896,6 @@ fn confirm_delete_upload(ctx: &Rc<UiContext>, anchor: &gtk::Widget, entity_id: &
     dialog.present(Some(&parent));
 }
 
-/// Port of _confirm_delete_playlist, the same wording the playlist page uses.
 fn confirm_delete(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: &str, title: &str) {
     let dialog = adw::AlertDialog::builder()
         .heading("Delete Playlist?")
@@ -1049,8 +962,6 @@ mod tests {
         };
         assert!(matches_query(&album, "sewerslvt"));
 
-        // A playlist by the same author does not: only albums carry artists
-        // into the match, which is the rule _apply_library_filter used.
         let playlist = MediaItem { kind: ItemKind::Playlist, artists: album.artists.clone(), ..MediaItem::default() };
         assert!(!matches_query(&playlist, "sewerslvt"));
     }

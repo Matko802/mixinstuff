@@ -1,6 +1,3 @@
-//! Romanization for the second line.
-//!
-//! Hangul and Cyrillic transliterate exactly with tables and no data files. Japanese and Chinese need a reading, which comes from a provider where one has it and from a dictionary where it does not. The merge between providers is by lyric text, never by timestamp.
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -11,23 +8,18 @@ use unicode_normalization::UnicodeNormalization;
 use super::model::{LyricLine, LyricsResult};
 use super::script::{is_han, is_kana, needs_reading};
 
-// Revised Romanization of Korean, transliteration variant. Hangul syllables decompose arithmetically from their code point.
 const HANGUL_INITIALS: [&str; 19] = ["g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s", "ss", "", "j", "jj", "ch", "k", "t", "p", "h"];
 const HANGUL_MEDIALS: [&str; 21] = ["a", "ae", "ya", "yae", "eo", "e", "yeo", "ye", "o", "wa", "wae", "oe", "yo", "u", "wo", "we", "wi", "yu", "eu", "ui", "i"];
 const HANGUL_FINALS: [&str; 28] = ["", "k", "k", "ks", "n", "nj", "nh", "t", "l", "lk", "lm", "lb", "ls", "lt", "lp", "lh", "m", "p", "ps", "s", "ss", "ng", "j", "ch", "k", "t", "p", "h"];
 
-/// Latin and Cyrillic vowels, for the rule that turns the Cyrillic e into "ye".
 const CYRILLIC_VOWELS: &str = "аеёиоуыэюяіїєaeiouy";
 
-/// Below this much provider coverage, a generated reading replaces the provider's rather than filling in around it. Two romanization styles alternating down one column reads as a glitch.
 const ROMANIZATION_CONSISTENCY_FLOOR: f64 = 0.5;
 
-/// How many consecutive source lines one of ours may be a run of.
 const MAX_JOIN: usize = 4;
 
 static PARENTHETICAL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[（(\[][^）)\]]*[）)\]]").unwrap());
 
-/// Romanize Hangul in `text`, leaving everything else untouched. None when there was no Hangul.
 pub fn romanize_korean(text: &str) -> Option<String> {
     let mut out = String::with_capacity(text.len());
     let mut converted = false;
@@ -46,7 +38,6 @@ pub fn romanize_korean(text: &str) -> Option<String> {
     converted.then_some(out)
 }
 
-/// BGN/PCGN-leaning values with no diacritics, covering the Russian, Ukrainian, Belarusian, Bulgarian, Serbian, Macedonian and Kazakh letters.
 fn cyrillic_value(lower: char) -> Option<&'static str> {
     Some(match lower {
         'а' => "a",
@@ -112,7 +103,6 @@ fn lower(ch: char) -> char {
     ch.to_lowercase().next().unwrap_or(ch)
 }
 
-/// Romanize Cyrillic in `text`, leaving everything else alone. None when there was no Cyrillic.
 pub fn romanize_cyrillic(text: &str) -> Option<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
@@ -125,7 +115,6 @@ pub fn romanize_cyrillic(text: &str) -> Option<String> {
         };
         converted = true;
         if low == 'е' {
-            // "ye" at the start of a word and after a vowel or a sign, "e" elsewhere.
             let prev = i.checked_sub(1).map(|p| lower(chars[p]));
             let opens = prev.is_none_or(|p| !p.is_alphabetic() || CYRILLIC_VOWELS.contains(p) || p == 'ъ' || p == 'ь');
             roman = if opens { "ye" } else { "e" };
@@ -134,7 +123,6 @@ pub fn romanize_cyrillic(text: &str) -> Option<String> {
             out.push_str(roman);
             continue;
         }
-        // An all-caps word stays all-caps: "DOZHD", not "DoZhD".
         let shouting = |c: Option<&char>| c.is_some_and(|c| c.is_alphabetic() && c.is_uppercase());
         if shouting(i.checked_sub(1).and_then(|p| chars.get(p))) || shouting(chars.get(i + 1)) {
             out.push_str(&roman.to_uppercase());
@@ -149,14 +137,10 @@ pub fn romanize_cyrillic(text: &str) -> Option<String> {
     converted.then_some(out)
 }
 
-/// The scripts that transliterate exactly with no dictionary and no network.
 pub fn romanize_locally(text: &str) -> Option<String> {
     romanize_korean(text).or_else(|| romanize_cyrillic(text))
 }
 
-/// Romanize Japanese or Chinese from the built-in dictionaries. None when the text is neither, or when the reading came out identical to the input.
-///
-/// Kana settles it: a line with kana is Japanese even when it also has kanji, while han characters on their own are read as Chinese.
 pub fn romanize_with_dictionary(text: &str) -> Option<String> {
     let out = if text.chars().any(is_kana) {
         kakasi::convert(text).romaji.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -169,7 +153,6 @@ pub fn romanize_with_dictionary(text: &str) -> Option<String> {
     (!out.is_empty() && out != text).then(|| out.to_owned())
 }
 
-/// Tone-marked pinyin, one syllable per character. A run of anything else is kept as one word.
 fn pinyin_of(text: &str) -> String {
     let mut words: Vec<String> = Vec::new();
     let mut run = String::new();
@@ -191,9 +174,6 @@ fn pinyin_of(text: &str) -> String {
     words.join(" ")
 }
 
-/// Complete a partly romanized song from the dictionaries.
-///
-/// Providers romanize whichever lines they happen to have, so coverage is routinely partial. Official transliterations read better than generated ones, so they are kept where they exist and this only fills the holes. When the provider covered less than half, the whole song is regenerated so the column does not alternate between two styles.
 pub fn fill_romanization_gaps(result: &mut LyricsResult) {
     let want: Vec<usize> = result.lines.iter().enumerate().filter(|(_, l)| l.text.chars().any(needs_reading)).map(|(i, _)| i).collect();
     if want.is_empty() {
@@ -218,17 +198,11 @@ pub fn fill_romanization_gaps(result: &mut LyricsResult) {
     }
 }
 
-/// Normalize a lyric line for cross-provider comparison.
-///
-/// NFKC folds the full-width forms one source uses and another does not, the parenthetical strip drops the furigana NetEase adds, and keeping only alphanumerics removes the punctuation and spacing the two disagree about.
 pub fn norm_lyric_text(text: &str) -> String {
     let folded: String = text.nfkc().collect();
     PARENTHETICAL_RE.replace_all(&folded, "").to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
 }
 
-/// Copy romanizations from another provider's lines onto `lines`, matched on the original text rather than on timestamps. Answers how many lines gained one.
-///
-/// Timestamps cannot be trusted across providers: two sources for one song are routinely different masters, offset by a second or two, and split their lines differently. Matching on the text is proof the two lines are the same lyric. One of our lines is sometimes several of theirs run together, which the join below handles.
 pub fn merge_romanization_by_text(lines: &mut [LyricLine], source: &[LyricLine]) -> usize {
     let pairs: Vec<(String, String)> = source
         .iter()
@@ -245,7 +219,6 @@ pub fn merge_romanization_by_text(lines: &mut [LyricLine], source: &[LyricLine])
         if key.is_empty() {
             continue;
         }
-        // The first source line with this text wins, as setdefault did.
         if let Some((_, roman)) = pairs.iter().find(|(text, _)| *text == key) {
             line.romanization = Some(roman.clone());
             matched += 1;
@@ -259,7 +232,6 @@ pub fn merge_romanization_by_text(lines: &mut [LyricLine], source: &[LyricLine])
     matched
 }
 
-/// The readings of the consecutive source lines that spell `key` when run together.
 fn joined_run(key: &str, pairs: &[(String, String)]) -> Option<String> {
     for start in 0..pairs.len() {
         if !key.starts_with(pairs[start].0.as_str()) {

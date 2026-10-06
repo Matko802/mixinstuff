@@ -1,6 +1,3 @@
-//! Port of ui/widgets/visualizer.py: CAVA-style bars fed by the spectrum
-//! frames the audio thread posts. Log-scaled bins, treble boost, contrast
-//! gamma, auto-sensitivity, Monstercat smoothing, gravity fall-off.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -25,10 +22,6 @@ const IDLE_ALPHA: f64 = 0.08;
 const ACTIVE_ALPHA_MIN: f64 = 0.15;
 const ACTIVE_ALPHA_MAX: f64 = 0.6;
 
-/// A widget that draws through a callback into the snapshot. The bars are
-/// render nodes the GPU fills; a DrawingArea rasterized them with Cairo on
-/// the CPU and uploaded the result every frame, which took a third of the
-/// GTK thread on a phone while the sheet was open.
 mod area {
     use super::*;
 
@@ -133,7 +126,6 @@ impl Visualizer {
         &self.area
     }
 
-    /// Port of set_bar_count. The bins are rebuilt on the next frame.
     pub fn set_bar_count(&self, n: usize) {
         let n = n.clamp(8, 100);
         if n == self.bars.get() {
@@ -149,15 +141,12 @@ impl Visualizer {
         self.smoothing.set(intensity.max(1.05));
     }
 
-    /// Bars animate only while playing.
     pub fn set_active(self: &Rc<Self>, active: bool) {
         self.active.set(active);
         self.sync_tick();
     }
 
     fn sync_tick(self: &Rc<Self>) {
-        // A paused or loading track lets the bars fall to rest before the tick
-        // stops. Stopping at once froze the last frame until the next song played.
         let settling = self.levels.borrow().iter().any(|level| *level > 0.0);
         if !(self.active.get() || settling) || !self.area.is_mapped() {
             self.stop_tick();
@@ -288,7 +277,6 @@ impl Visualizer {
 
     fn on_tick(self: &Rc<Self>) {
         if !self.active.get() {
-            // Nothing new comes in. Once every bar has landed the tick retires itself.
             if self.levels.borrow().iter().all(|level| *level <= 0.0) {
                 let weak = Rc::downgrade(self);
                 glib::idle_add_local_once(move || {
@@ -347,8 +335,6 @@ impl Visualizer {
     }
 }
 
-/// @visualizer_bar when the window has derived one, else the plain accent.
-/// The derived value keeps the tallest bar clear of the labels drawn over it.
 #[allow(deprecated)]
 fn bar_color(area: &gtk::Widget) -> (f64, f64, f64) {
     let ctx = area.style_context();

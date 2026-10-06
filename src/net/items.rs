@@ -1,7 +1,3 @@
-//! InnerTube renderer parsing the ytmusicapi crate does not expose: playlist
-//! and album rows, upload rows, watch-panel rows, channel content items and
-//! the continuation tokens that page them. Ports of ytmusicapi's parsers,
-//! kept row for row so the pages see what the Python app saw.
 
 use regex::Regex;
 use serde_json::Value;
@@ -11,17 +7,14 @@ use crate::model::{ItemKind, LikeStatus, MediaItem, Named, Person, Track, VideoI
 
 pub const MRLIR: &str = "musicResponsiveListItemRenderer";
 pub const MTRIR: &str = "musicTwoRowItemRenderer";
-/// A podcast episode card: title, show, date and length.
 pub const MMRLIR: &str = "musicMultiRowListItemRenderer";
 
 static DURATION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\d+:)*\d+:\d+$").unwrap());
 static YEAR_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{4}$").unwrap());
-/// The run YouTube puts between subtitle values.
 pub const DOT_SEPARATOR: &str = " \u{2022} ";
 
 static VIEWS_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\D*?[\s:\x{ff1a}\x{200e}-\x{200f}\x{202a}-\x{202e}]").unwrap());
 
-// -- json helpers ---------------------------------------------------------
 
 pub fn str_at<'a>(node: &'a Value, pointer: &str) -> Option<&'a str> {
     node.pointer(pointer).and_then(Value::as_str)
@@ -35,7 +28,6 @@ pub fn array_at<'a>(node: &'a Value, pointer: &str) -> &'a [Value] {
     node.pointer(pointer).and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[])
 }
 
-/// Every value stored under `key` anywhere below `root`, iteratively.
 pub fn walk_key<'a>(root: &'a Value, key: &str) -> Vec<&'a Value> {
     let mut out = Vec::new();
     let mut stack = vec![root];
@@ -54,11 +46,6 @@ pub fn walk_key<'a>(root: &'a Value, key: &str) -> Vec<&'a Value> {
     out
 }
 
-/// The sections of a library browse, whichever tab holds them.
-///
-/// An uploads response comes back with two tabs, Library and Uploads, and the
-/// rows are in the second one. Reading the first is why the uploaded library
-/// looked empty. Taking the first tab that has sections covers both shapes.
 pub fn library_sections(response: &Value) -> &[Value] {
     for column in ["singleColumnBrowseResultsRenderer", "twoColumnBrowseResultsRenderer"] {
         for tab in array_at(response, &format!("/contents/{column}/tabs")) {
@@ -71,11 +58,6 @@ pub fn library_sections(response: &Value) -> &[Value] {
     &[]
 }
 
-/// Continuation token of the shelf whose rows use one of `row_keys`.
-///
-/// A playlist response carries more than one continuation: the row list has
-/// its own, and the section list wrapping it has another that only pulls in
-/// the trailing related shelf. Match on the list that holds the rows.
 pub fn continuation_token_for_rows(response: &Value, row_keys: &[&str]) -> Option<String> {
     let mut stack = vec![response];
     while let Some(node) = stack.pop() {
@@ -108,13 +90,11 @@ pub fn continuation_token_for_rows(response: &Value, row_keys: &[&str]) -> Optio
     None
 }
 
-/// Token of a `continuationItemRenderer` entry.
 pub fn item_continuation_token(entry: &Value) -> Option<String> {
     let renderer = entry.get("continuationItemRenderer")?;
     owned_at(renderer, "/continuationEndpoint/continuationCommand/token").or_else(|| walk_key(renderer, "continuationCommand").into_iter().find_map(|c| owned_at(c, "/token")))
 }
 
-/// Legacy `continuations[0].nextContinuationData.continuation` token.
 pub fn next_continuation(node: &Value) -> Option<String> {
     owned_at(node, "/continuations/0/nextContinuationData/continuation")
 }
@@ -131,7 +111,6 @@ pub fn runs_text(runs: &[Value]) -> String {
     runs.iter().filter_map(|r| r.get("text").and_then(Value::as_str)).collect()
 }
 
-/// "50 min", "1 hr 5 min" or "2 hr" to seconds, how an episode states its length.
 pub fn parse_spoken_duration(text: &str) -> Option<u32> {
     let mut total = 0;
     let mut words = text.split_whitespace();
@@ -147,14 +126,11 @@ pub fn parse_spoken_duration(text: &str) -> Option<u32> {
     (total > 0).then_some(total)
 }
 
-/// A podcast episode card as a video marked "Episode". Its show goes where a
-/// song's album goes, so the row names it and a tap on it opens the show.
 pub fn parse_episode_card(data: &Value) -> Option<MediaItem> {
     let id = owned_at(data, "/onTap/watchEndpoint/videoId")?;
     let show = array_at(data, "/secondTitle/runs").first().map(|run| Named { name: owned_at(run, "/text").unwrap_or_default(), id: owned_at(run, "/navigationEndpoint/browseEndpoint/browseId") });
     let subtitle: Vec<String> = array_at(data, "/subtitle/runs").iter().filter_map(|r| owned_at(r, "/text")).map(|t| t.trim().to_owned()).filter(|t| !t.is_empty() && t != "\u{2022}").collect();
     let length = array_at(data, "/playbackProgress/musicPlaybackProgressRenderer/durationText/runs").iter().filter_map(|r| owned_at(r, "/text")).find_map(|t| parse_spoken_duration(&t));
-    // Some episodes name a channel rather than a show. A channel opens as an artist.
     let (album, artists) = match show.filter(|s| !s.name.is_empty()) {
         Some(channel) if channel.id.as_deref().is_some_and(|id| id.starts_with("UC")) => (None, vec![Person { name: channel.name, id: channel.id }]),
         show => (show, Vec::new()),
@@ -173,7 +149,6 @@ pub fn parse_episode_card(data: &Value) -> Option<MediaItem> {
     })
 }
 
-/// "3:07" or "1:02:03" to seconds, like ytmusicapi's parse_duration.
 pub fn parse_duration(text: &str) -> Option<u32> {
     let text = text.trim();
     if text.is_empty() {
@@ -189,7 +164,6 @@ pub fn parse_duration(text: &str) -> Option<u32> {
     Some(total)
 }
 
-/// ytmusicapi's parse_like_status: the endpoint carries the action, the state is its opposite.
 pub fn parse_like_status(service: &Value) -> LikeStatus {
     match str_at(service, "/likeEndpoint/status") {
         Some("LIKE") => LikeStatus::Indifferent,
@@ -198,7 +172,6 @@ pub fn parse_like_status(service: &Value) -> LikeStatus {
     }
 }
 
-// -- song runs ------------------------------------------------------------
 
 #[derive(Default, Debug, Clone)]
 pub struct SongRuns {
@@ -226,7 +199,6 @@ fn parse_views(text: &str) -> Option<String> {
     if !prefixed && stripped.is_ascii() && !stripped.contains(' ') {
         return None;
     }
-    // ytmusicapi keeps the count alone: "1.2M views" is shown as "1.2M".
     Some(stripped.split(' ').next().unwrap_or_default().to_owned())
 }
 
@@ -250,7 +222,6 @@ fn parse_song_run(run: &Value) -> RunKind {
     }
 }
 
-/// Every even run is a value, odd runs are separators.
 pub fn parse_song_runs(runs: &[Value]) -> SongRuns {
     let mut out = SongRuns::default();
     for run in runs.iter().step_by(2) {
@@ -265,15 +236,12 @@ pub fn parse_song_runs(runs: &[Value]) -> SongRuns {
     out
 }
 
-/// ytmusicapi's parse_song_runs with skip_type_spec: a carousel row leads its
-/// subtitle with the kind word ("Song \u{2022} Eminem"), which is not an artist.
 pub fn parse_song_runs_after_type(runs: &[Value]) -> SongRuns {
     let is_artist = |run: &Value| matches!(parse_song_run(run), RunKind::Artist(_));
     let leads_with_kind = runs.len() > 2 && is_artist(&runs[0]) && str_at(&runs[1], "/text") == Some(DOT_SEPARATOR) && is_artist(&runs[2]);
     parse_song_runs(if leads_with_kind { &runs[2..] } else { runs })
 }
 
-/// ytmusicapi's parse_artists_runs: every even run is an artist.
 pub fn parse_artists_runs(runs: &[Value]) -> Vec<Person> {
     runs.iter()
         .step_by(2)
@@ -311,14 +279,11 @@ fn joined_names(artists: &[Person]) -> String {
 const VIDEO_TYPE_PATH: &str = "/menu/menuRenderer/items/0/menuNavigationItemRenderer/navigationEndpoint/watchEndpoint/watchEndpointMusicSupportedConfigs/watchEndpointMusicConfig/musicVideoType";
 const BADGE_LABEL: &str = "/badges/0/musicInlineBadgeRenderer/accessibilityData/accessibilityData/label";
 
-/// Whether a renderer carries YouTube's Live badge, in either badge list.
 pub fn is_live(data: &Value) -> bool {
     ["/badges", "/subtitleBadges"].iter().any(|key| data.pointer(key).and_then(Value::as_array).is_some_and(|list| list.iter().any(|b| b.get("liveBadgeRenderer").is_some())))
 }
 
-// -- playlist and album rows ----------------------------------------------
 
-/// Port of ytmusicapi's parse_playlist_item for a `musicResponsiveListItemRenderer`.
 pub fn parse_playlist_item(data: &Value, is_album: bool, is_collaborative: bool) -> Option<Track> {
     let mut video_id: Option<String> = None;
     let mut set_video_id: Option<String> = None;
@@ -342,8 +307,6 @@ pub fn parse_playlist_item(data: &Value, is_album: bool, is_collaborative: bool)
     }
 
     let is_available = data.get("musicItemRendererDisplayPolicy").and_then(Value::as_str) != Some("MUSIC_ITEM_RENDERER_DISPLAY_POLICY_GREY_OUT");
-    // Unavailable rows and album rows have preset columns: their meaning
-    // cannot be found reliably from navigation endpoints.
     let preset = !is_available || is_album;
     let mut title_index = preset.then_some(0);
     let mut artist_index = preset.then_some(1);
@@ -417,10 +380,6 @@ pub fn parse_playlist_items<'a>(contents: impl IntoIterator<Item = &'a Value>, i
     contents.into_iter().filter_map(|r| r.get(MRLIR)).filter_map(|d| parse_playlist_item(d, is_album, is_collaborative)).collect()
 }
 
-/// The token that removes one play from the history, out of the row's menu.
-///
-/// ytmusicapi reads it in parse_song_menu_data, which the port skips: this is
-/// the only entry off that menu any page here uses.
 pub fn history_feedback_token(data: &Value) -> Option<String> {
     array_at(data, "/menu/menuRenderer/items").iter().find_map(|item| {
         let menu_item = item.get("menuServiceItemRenderer")?;
@@ -432,7 +391,6 @@ pub fn history_feedback_token(data: &Value) -> Option<String> {
     })
 }
 
-/// Port of parse_uploaded_items: upload rows carry the entity id used to delete them.
 pub fn parse_uploaded_item(data: &Value) -> Option<Track> {
     data.get("menu")?;
     let items = array_at(data, "/menu/menuRenderer/items");
@@ -458,16 +416,13 @@ pub fn parse_uploaded_items<'a>(contents: impl IntoIterator<Item = &'a Value>) -
     contents.into_iter().filter_map(|r| r.get(MRLIR)).filter_map(parse_uploaded_item).collect()
 }
 
-// -- watch panel rows -----------------------------------------------------
 
 #[derive(Debug, Clone)]
 pub struct WatchTrack {
     pub track: Track,
-    /// The song or video twin YouTube Music pairs with this row.
     pub counterpart: Option<Track>,
 }
 
-/// Port of parse_watch_track for a `playlistPanelVideoRenderer`.
 pub fn parse_watch_track(data: &Value) -> Option<Track> {
     let video_id = owned_at(data, "/videoId")?;
     let mut like = LikeStatus::Indifferent;
@@ -511,35 +466,21 @@ pub fn parse_watch_playlist<'a>(results: impl IntoIterator<Item = &'a Value>) ->
     out
 }
 
-// -- browse cards ---------------------------------------------------------
-//
-// The carousels on Home, Explore and a category page are made of two-row
-// cards and list rows. These are ytmusicapi's parsers for them, answering with
-// a `MediaItem` so the pages never re-derive what a card is.
 
-/// A two-row card keeps its picture here, a list row under `THUMBNAILS`.
 pub const THUMBNAIL_RENDERER: &str = "/thumbnailRenderer/musicThumbnailRenderer/thumbnail/thumbnails";
 pub const THUMBNAILS: &str = "/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails";
 const SUBTITLE_BADGE_LABEL: &str = "/subtitleBadges/0/musicInlineBadgeRenderer/accessibilityData/accessibilityData/label";
 const PLAY_ENDPOINT: &str = "/overlay/musicItemThumbnailOverlayRenderer/content/musicPlayButtonRenderer/playNavigationEndpoint";
 const MUSIC_VIDEO_TYPE: &str = "/watchEndpointMusicSupportedConfigs/watchEndpointMusicConfig/musicVideoType";
-/// The page a card's title opens, which is what says what the card is.
 const CARD_PAGE_TYPE: &str = "/title/runs/0/navigationEndpoint/browseEndpoint/browseEndpointContextSupportedConfigs/browseEndpointContextMusicConfig/pageType";
 
 pub fn is_year(text: &str) -> bool {
     text.len() == 4 && text.chars().all(|c| c.is_ascii_digit())
 }
 
-/// Port of ytmusicapi's parse_mixed_content item dispatch: one card of a home
-/// or browse carousel, whatever kind it turns out to be.
-///
-/// `section_title` comes along because a card with no video type is told apart
-/// by the shelf it sits in, the way home.py's _detect_kind reads it. A podcast
-/// show opens on the playlist page, marked "Podcast". An episode plays as a video, marked "Episode".
 pub fn parse_mixed_item(entry: &Value, section_title: &str) -> Option<MediaItem> {
     if let Some(data) = entry.get(MTRIR) {
         return match str_at(data, CARD_PAGE_TYPE) {
-            // No page type means it plays: a song, or a card that opens a mix.
             None => match owned_at(data, "/navigationEndpoint/watchPlaylistEndpoint/playlistId") {
                 Some(playlist_id) => Some(MediaItem {
                     kind: ItemKind::Playlist,
@@ -566,7 +507,6 @@ pub fn parse_mixed_item(entry: &Value, section_title: &str) -> Option<MediaItem>
     entry.get(MRLIR).and_then(|data| parse_song_row(data, section_title))
 }
 
-/// Port of ytmusicapi's parse_album for a `musicTwoRowItemRenderer`.
 pub fn parse_album_card(data: &Value) -> MediaItem {
     let artists = array_at(data, "/subtitle/runs")
         .iter()
@@ -583,8 +523,6 @@ pub fn parse_album_card(data: &Value) -> MediaItem {
         playlist_id: owned_at(data, "/thumbnailOverlay/musicItemThumbnailOverlayRenderer/content/musicPlayButtonRenderer/playNavigationEndpoint/watchPlaylistEndpoint/playlistId"),
         ..MediaItem::default()
     };
-    // The subtitle leads with either the year on its own or the release type
-    // followed by it.
     match str_at(data, "/subtitle/runs/0/text") {
         Some(text) if is_year(text) => item.year = Some(text.to_owned()),
         Some(text) => {
@@ -596,7 +534,6 @@ pub fn parse_album_card(data: &Value) -> MediaItem {
     item
 }
 
-/// Port of ytmusicapi's parse_video: artists up to the dot, views after it.
 pub fn parse_video_card(data: &Value) -> Option<MediaItem> {
     let runs = array_at(data, "/subtitle/runs");
     let dot = runs.iter().position(|run| str_at(run, "/text") == Some(DOT_SEPARATOR)).unwrap_or(runs.len());
@@ -613,7 +550,6 @@ pub fn parse_video_card(data: &Value) -> Option<MediaItem> {
     })
 }
 
-/// Port of ytmusicapi's parse_song: a two-row card that plays.
 pub fn parse_song_card(data: &Value, section_title: &str) -> Option<MediaItem> {
     let video_id = owned_at(data, "/navigationEndpoint/watchEndpoint/videoId")?;
     let runs = parse_song_runs_after_type(array_at(data, "/subtitle/runs"));
@@ -635,8 +571,6 @@ pub fn parse_song_card(data: &Value, section_title: &str) -> Option<MediaItem> {
     with_playable_kind(item, video_type, section_title)
 }
 
-/// Port of ytmusicapi's parse_playlist: the card of a playlist, with the
-/// "Author • N songs" subtitle split back up.
 pub fn parse_playlist_card(data: &Value) -> Option<MediaItem> {
     let browse_id = str_at(data, "/title/runs/0/navigationEndpoint/browseEndpoint/browseId")?;
     let runs = array_at(data, "/subtitle/runs");
@@ -649,7 +583,6 @@ pub fn parse_playlist_card(data: &Value) -> Option<MediaItem> {
     };
     if !runs.is_empty() {
         item.description = Some(runs_text(runs));
-        // Three runs are "Author • N songs"; anything else is a description.
         let third = str_at(data, "/subtitle/runs/2/text").unwrap_or_default();
         if runs.len() == 3 && third.split(' ').next().is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) {
             item.count = third.split(' ').next().map(str::to_owned);
@@ -659,22 +592,18 @@ pub fn parse_playlist_card(data: &Value) -> Option<MediaItem> {
     Some(item)
 }
 
-/// Port of ytmusicapi's parse_related_artist.
 pub fn parse_artist_card(data: &Value) -> Option<MediaItem> {
     let browse_id = owned_at(data, "/title/runs/0/navigationEndpoint/browseEndpoint/browseId")?;
     Some(MediaItem {
         kind: ItemKind::Artist,
         id: browse_id,
         title: owned_at(data, "/title/runs/0/text").unwrap_or_default(),
-        // "12M subscribers" is shown as the count alone.
         subscribers: str_at(data, "/subtitle/runs/0/text").map(|text| text.split(' ').next().unwrap_or_default().to_owned()),
         thumb: last_thumbnail_url(array_at(data, THUMBNAIL_RENDERER)),
         ..MediaItem::default()
     })
 }
 
-/// Port of parse_song_flat: the `musicResponsiveListItemRenderer` a carousel
-/// uses instead of a card.
 pub fn parse_song_row(data: &Value, section_title: &str) -> Option<MediaItem> {
     let title = owned_at(data, "/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")?;
     let video_id = owned_at(data, "/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/navigationEndpoint/watchEndpoint/videoId")
@@ -702,9 +631,6 @@ pub fn parse_song_row(data: &Value, section_title: &str) -> Option<MediaItem> {
     with_playable_kind(item, video_type, section_title)
 }
 
-/// Port of home.py _detect_kind for something that plays: the video type
-/// decides, then the shelf it sits in, then the thumbnail address, then the
-/// shape of what was parsed. A podcast episode is a video marked "Episode".
 pub fn with_playable_kind(mut item: MediaItem, video_type: Option<&str>, section_title: &str) -> Option<MediaItem> {
     item.kind = detect_kind(video_type, item.thumb.as_deref(), section_title, &item)?;
     if video_type.is_some_and(|t| t.contains("PODCAST") || t.contains("EPISODE")) {
@@ -713,7 +639,6 @@ pub fn with_playable_kind(mut item: MediaItem, video_type: Option<&str>, section
     Some(item)
 }
 
-/// Shelves whose name says what their untyped rows are.
 const SONG_SECTION_KEYS: [&str; 13] = ["song", "track", "favorite", "listen again", "quick pick", "forgotten", "rediscover", "hidden gem", "recap", "your library", "from your library", "mix", "hits"];
 const VIDEO_SECTION_KEYS: [&str; 6] = ["music video", "remix", "live performance", "performances", "video for you", "videos for you"];
 
@@ -734,17 +659,13 @@ pub fn detect_kind(video_type: Option<&str>, thumb: Option<&str>, section_title:
     if thumb.is_some_and(|url| url.contains("/vi/") || url.contains("/vi_webp/")) {
         return Some(ItemKind::Video);
     }
-    // A view count with none of a song's own metadata reads as a video.
     if item.views.is_some() && item.album.is_none() && item.duration_seconds.is_none() && item.year.is_none() {
         return Some(ItemKind::Video);
     }
     Some(ItemKind::Song)
 }
 
-// -- channel content items (raw fallback parsing) -------------------------
 
-/// Port of MusicClient._parse_channel_item: a best-effort read of a two-row
-/// or responsive item into a browse item.
 pub fn parse_channel_item(raw: &Value) -> Option<MediaItem> {
     for key in [MTRIR, MRLIR] {
         let Some(renderer) = raw.get(key) else { continue };

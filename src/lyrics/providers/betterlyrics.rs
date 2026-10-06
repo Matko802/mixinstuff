@@ -1,4 +1,3 @@
-//! BetterLyrics (lyrics-api.boidu.dev), Apple Music's TTML behind a fuzzy title and artist lookup.
 
 use std::time::Duration;
 
@@ -11,13 +10,9 @@ use crate::lyrics::ttml::ttml_to_lines;
 
 const SOURCE: &str = "BetterLyrics";
 const URL: &str = "https://lyrics-api.boidu.dev/getLyrics";
-/// The endpoint answers 403 to generic user agents. The BetterLyrics browser extension identifies itself this way and the API mirrors that as a soft gate.
 const USER_AGENT: &str = "BetterLyrics/1.0";
 const TIMEOUT: Duration = Duration::from_secs(6);
 
-/// A response body as a result.
-///
-/// Newer responses are `{"ttml": "<tt ...>"}` with word-level spans. The older list of `{words, startTimeMs}` rows is kept in case the deployment ever rolls back.
 pub fn parse(data: &Value) -> Option<LyricsResult> {
     if let Some(ttml) = data.get("ttml").and_then(Value::as_str) {
         let lines = ttml_to_lines(ttml);
@@ -35,7 +30,6 @@ pub fn parse(data: &Value) -> Option<LyricsResult> {
     (!lines.is_empty()).then(|| LyricsResult::from_lines(lines, SOURCE))
 }
 
-/// str() of a JSON scalar, trimmed. Empty for null, false and zero, which Python read as missing.
 fn scalar_text(value: &Value) -> String {
     match value {
         Value::String(s) => s.trim().to_owned(),
@@ -44,7 +38,6 @@ fn scalar_text(value: &Value) -> String {
     }
 }
 
-/// A millisecond stamp as seconds. The old shape sent it as a string.
 fn milliseconds(value: Option<&Value>) -> Option<f64> {
     match value? {
         Value::Number(n) => n.as_f64(),
@@ -55,7 +48,6 @@ fn milliseconds(value: Option<&Value>) -> Option<f64> {
 }
 
 pub async fn fetch(http: &reqwest::Client, request: Request<'_>) -> Option<LyricsResult> {
-    // The response is the lyric body alone, with no artist to verify against. For a generic title the server's fuzzy match would hand back some other track's lyrics, and Apple Music covers the same catalog with an artist check.
     if is_generic_title(request.title) && !request.artist.is_empty() {
         return None;
     }
@@ -66,7 +58,6 @@ pub async fn fetch(http: &reqwest::Client, request: Request<'_>) -> Option<Lyric
     }
     let body = match get_text(http, URL, &query, &[("User-Agent", USER_AGENT)], TIMEOUT).await {
         Ok(body) => body,
-        // 401 and 404 mean no lyrics for this track: common and not actionable.
         Err(HttpError::Status(401 | 404)) => return None,
         Err(err) => {
             tracing::debug!(%err, "BetterLyrics fetch failed");
@@ -102,7 +93,6 @@ mod tests {
         assert_eq!(result.lines.len(), 2);
         assert_eq!(result.lines[0].start, Some(1.5));
         assert_eq!(result.lines[1].text, "two");
-        // A bare list, and a row with no stamp.
         let bare = parse(&json!([{"words": "one", "startTimeMs": 1000}, {"words": "two"}])).unwrap();
         assert!(!bare.synced);
     }

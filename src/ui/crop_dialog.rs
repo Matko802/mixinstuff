@@ -1,6 +1,3 @@
-//! Port of ui/crop_dialog.py: pick a square out of a picture for a playlist
-//! cover. Drag the square to move it, drag its bottom-right handle to resize
-//! it, and the result comes back as a 512 px square.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -25,7 +22,6 @@ struct CropState {
     orig_offset_y: f64,
 }
 
-/// Open the crop window over `parent`. `on_result` receives the cropped 512 px square.
 pub fn show(parent: &impl IsA<gtk::Window>, pixbuf: Pixbuf, on_result: impl Fn(Pixbuf) + 'static) {
     let (w, h) = (pixbuf.width(), pixbuf.height());
     let display_scale = if w > MAX_DISPLAY || h > MAX_DISPLAY { MAX_DISPLAY as f64 / w.max(h) as f64 } else { 1.0 };

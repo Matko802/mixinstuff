@@ -1,13 +1,3 @@
-//! Lyrics preferences, port of player/lyrics_prefs.py.
-//!
-//! Everything lives in the prefs.json both apps share, under the same keys with the same defaults and clamps:
-//!
-//! - `lyrics_provider_order`: the search queue, provider display names top-down.
-//! - `lyrics_providers_disabled`: names switched off. Kept apart from the order so switching one back on restores its position.
-//! - `lyrics_match_mode`: `quality` walks past a plain hit looking for synced lyrics, `strict` takes the first provider that returns anything.
-//! - `lyrics_second_line`, `lyrics_line_sweep`, `lyrics_font_scale`, `lyrics_active_scale`, `lyrics_effects`: display options for the view.
-//!
-//! Reads are cached against the file's mtime: the chain asks for the order on every track change and the view asks per row build.
 
 use std::collections::BTreeSet;
 use std::sync::Mutex;
@@ -17,7 +7,6 @@ use serde_json::{Map, Value, json};
 
 use crate::paths::Paths;
 
-/// Canonical provider names in the order the chain used before the queue was configurable.
 pub const DEFAULT_PROVIDER_ORDER: [&str; 6] = ["Apple Music", "BetterLyrics", "BiniLyrics", "NetEase", "LRCLIB", "YouTube Music"];
 
 pub const MATCH_QUALITY: &str = "quality";
@@ -28,11 +17,9 @@ pub const SECOND_LINE_DEFAULT: &str = "auto";
 pub const EFFECTS_LEVELS: [&str; 3] = ["off", "subtle", "full"];
 pub const EFFECTS_DEFAULT: &str = "full";
 
-/// Multiplier on the lyric column's resting type size.
 pub const FONT_SCALE_MIN: f64 = 0.5;
 pub const FONT_SCALE_MAX: f64 = 1.45;
 pub const FONT_SCALE_DEFAULT: f64 = 1.0;
-/// How much bigger the active line is drawn than the resting ones.
 pub const ACTIVE_SCALE_MIN: f64 = 1.0;
 pub const ACTIVE_SCALE_MAX: f64 = 1.3;
 pub const ACTIVE_SCALE_DEFAULT: f64 = 1.2;
@@ -46,10 +33,8 @@ const KEY_FONT_SCALE: &str = "lyrics_font_scale";
 const KEY_ACTIVE_SCALE: &str = "lyrics_active_scale";
 const KEY_EFFECTS: &str = "lyrics_effects";
 
-/// The lyrics slice of prefs.json. Shared by the fetch chain on tokio and the view on GTK.
 pub struct LyricsPrefs {
     paths: Paths,
-    /// The last parse of prefs.json and the mtime it was read at.
     cache: Mutex<Option<(SystemTime, Map<String, Value>)>>,
 }
 
@@ -59,7 +44,6 @@ impl LyricsPrefs {
         Self { paths: paths.clone(), cache: Mutex::new(None) }
     }
 
-    /// The whole prefs object, re-read only when the file's mtime moved.
     fn read(&self) -> Map<String, Value> {
         let Ok(mtime) = std::fs::metadata(&self.paths.prefs_file).and_then(|m| m.modified()) else {
             return Map::new();
@@ -82,12 +66,10 @@ impl LyricsPrefs {
         self.invalidate();
     }
 
-    /// Drop the mtime cache. Needed when something else rewrites prefs.json within the same mtime tick.
     pub fn invalidate(&self) {
         *self.cache.lock().unwrap() = None;
     }
 
-    /// Every known provider in the user's order, disabled ones included. Saved names the app no longer ships are dropped, and providers missing from the saved order are appended in catalog order.
     pub fn full_provider_order(&self) -> Vec<String> {
         let prefs = self.read();
         let Some(saved) = prefs.get(KEY_ORDER).and_then(Value::as_array) else {
@@ -115,7 +97,6 @@ impl LyricsPrefs {
         saved.iter().filter_map(Value::as_str).map(str::to_owned).collect()
     }
 
-    /// The search queue: enabled providers in user order. Never empty, since switching everything off would leave the view blank with no way to tell why.
     pub fn provider_order(&self) -> Vec<String> {
         let disabled = self.disabled_providers();
         let order: Vec<String> = self.full_provider_order().into_iter().filter(|n| !disabled.contains(n)).collect();
@@ -133,7 +114,6 @@ impl LyricsPrefs {
         } else {
             disabled.insert(name.to_owned());
         }
-        // A BTreeSet iterates sorted, which is what the Python app stores.
         self.write(KEY_DISABLED, json!(disabled));
     }
 
@@ -149,13 +129,11 @@ impl LyricsPrefs {
         self.one_of(KEY_SECOND_LINE, &SECOND_LINE_MODES, SECOND_LINE_DEFAULT)
     }
 
-    /// An unknown mode renders a blank second line that reads as "off", so it is normalized rather than stored.
     pub fn set_second_line_mode(&self, mode: &str) {
         let mode = if SECOND_LINE_MODES.contains(&mode) { mode } else { SECOND_LINE_DEFAULT };
         self.write(KEY_SECOND_LINE, json!(mode));
     }
 
-    /// Write the default out when the key is missing or unusable, so the setting is never left implicit.
     pub fn ensure_second_line_mode(&self) -> String {
         let stored = self.read().get(KEY_SECOND_LINE).and_then(Value::as_str).map(str::to_owned);
         if !stored.as_deref().is_some_and(|v| SECOND_LINE_MODES.contains(&v)) {
@@ -164,7 +142,6 @@ impl LyricsPrefs {
         self.second_line_mode()
     }
 
-    /// Whether a line-synced source gets synthesized per-word timing so its highlight travels across the line.
     pub fn line_sweep(&self) -> bool {
         self.read().get(KEY_LINE_SWEEP).is_none_or(truthy)
     }
@@ -203,7 +180,6 @@ impl LyricsPrefs {
         if allowed.contains(&value) { value.to_owned() } else { default.to_owned() }
     }
 
-    /// Port of _clamped_float: anything float() would not take reads as the default.
     fn clamped(&self, key: &str, default: f64, low: f64, high: f64) -> f64 {
         let prefs = self.read();
         let value = match prefs.get(key) {
@@ -224,7 +200,6 @@ fn default_order() -> Vec<String> {
     DEFAULT_PROVIDER_ORDER.iter().map(|s| (*s).to_owned()).collect()
 }
 
-/// Python truthiness of a JSON value, which is what bool() applied to the stored pref.
 fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
@@ -286,7 +261,6 @@ mod tests {
             prefs.set_provider_enabled(name, false);
         }
         assert_eq!(prefs.provider_order(), DEFAULT_PROVIDER_ORDER);
-        // Stored sorted, like sorted(disabled) in the Python app.
         let stored = prefs.paths.read_prefs();
         let names: Vec<&str> = stored[KEY_DISABLED].as_array().unwrap().iter().filter_map(Value::as_str).collect();
         let mut sorted = names.clone();

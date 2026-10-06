@@ -1,7 +1,3 @@
-//! Queue sidebar. Port of ui/queue_panel.py: toolbar header with count,
-//! shuffle and repeat toggles, drag-and-drop reordering, right-click menu,
-//! and a pause-aware playing indicator. Rows follow `QueueEntry` properties
-//! through expression bindings, so recycling needs no unbind code.
 
 use std::rc::Rc;
 
@@ -34,7 +30,6 @@ impl QueuePanel {
             .width_request(200)
             .build();
 
-        // -- header ------------------------------------------------------
         let header_bar = adw::HeaderBar::builder()
             .css_classes(["flat"])
             .show_start_title_buttons(false)
@@ -71,8 +66,6 @@ impl QueuePanel {
             .bind_property("shuffle", &shuffle_btn, "active")
             .sync_create()
             .build();
-        // Toggle the class like _update_shuffle_state: replacing css-classes wholesale
-        // strips the button styles the header bar gave it.
         {
             let btn = shuffle_btn.clone();
             let sync = move |on: bool| {
@@ -132,13 +125,8 @@ impl QueuePanel {
         toolbar.add_top_bar(&header_bar);
         root.append(&toolbar);
 
-        // -- list --------------------------------------------------------
         let factory = gtk::SignalListItemFactory::new();
         let selection = gtk::NoSelection::new(Some(state.queue_model()));
-        // The model is attached while the panel is on screen only. A list that
-        // was never allocated builds up to 150 rows on every queue change, and
-        // both panels did that inside the click that started playback.
-        // One column of a grid keeps about 30 rows alive where a ListView keeps 200.
         let list = gtk::GridView::builder()
             .factory(&factory)
             .min_columns(1)
@@ -152,7 +140,6 @@ impl QueuePanel {
             .build();
         crate::ui::suppress_hover_while_scrolling(&scrolled);
         root.append(&scrolled);
-        // Off screen the list still held about 150 rows, restyled with every track change.
         crate::ui::style_only_while_shown(&root, &scrolled);
 
         let panel = Rc::new(Self {
@@ -165,7 +152,6 @@ impl QueuePanel {
             ctx,
         });
         {
-            // "queue" actions, as insert_action_group("queue", ...) did.
             let group = gio::SimpleActionGroup::new();
             let action = gio::SimpleAction::new("show_add_all_to_playlist", None);
             let weak = Rc::downgrade(&panel);
@@ -213,7 +199,6 @@ impl QueuePanel {
             clear_btn.connect_clicked(move |_| player.clear_queue());
         }
 
-        // Keep the playing row in view when it changes or the panel appears.
         {
             let weak = Rc::downgrade(&panel);
             state.connect_notify_local(Some("current-index"), move |_, _| {
@@ -259,8 +244,6 @@ impl QueuePanel {
             }
             let index = panel.player.state().current_index();
             if index >= 0 && (index as u32) < panel.player.state().queue_length() {
-                // No FOCUS flag: on phones the panel sits in the drawer's viewport, which
-                // follows focus and shifted the list under the list view, leaving blank rows.
                 panel
                     .list
                     .scroll_to(index as u32, gtk::ListScrollFlags::NONE, None);
@@ -268,7 +251,6 @@ impl QueuePanel {
         });
     }
 
-    /// Row layout with expression bindings rooted at the list item, plus gestures and DnD.
     fn build_row(self: &Rc<Self>, item: &gtk::ListItem) -> gtk::Box {
         let row = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -373,7 +355,6 @@ impl QueuePanel {
                 .and_downcast::<QueueEntry>()
         };
 
-        // Left click plays the row unless it is already current.
         {
             let entry_of = entry_of.clone();
             let player = self.player.clone();
@@ -390,7 +371,6 @@ impl QueuePanel {
             row.add_controller(click);
         }
 
-        // Right click or long press opens the song menu with Remove from Queue.
         {
             let open_menu = {
                 let entry_of = entry_of.clone();
@@ -429,7 +409,6 @@ impl QueuePanel {
             row.add_controller(long);
         }
 
-        // Drag the handle, drop on another row to reorder.
         {
             let source = gtk::DragSource::builder()
                 .actions(gdk::DragAction::MOVE)
@@ -473,7 +452,6 @@ impl QueuePanel {
 }
 
 impl QueuePanel {
-    /// Port of _do_add_all_to_playlist: every queued track into the chosen playlist.
     fn add_all_to_playlist(self: &Rc<Self>, playlist_id: &str) {
         crate::ui::playlist_ops::add_tracks(&self.ctx, self.root.upcast_ref(), playlist_id.to_owned(), self.player.queue_tracks());
     }

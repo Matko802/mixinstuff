@@ -1,7 +1,3 @@
-//! Playlist, album, upload-album and watch-panel endpoints on top of the
-//! crate's transport. The crate parses playlists too, but drops the like
-//! status the rows show, so the page parses the response itself. Everything
-//! here is a port of the MusicClient method of the same name.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -21,7 +17,6 @@ use crate::net::ytmusic::NetError;
 const HEADER_SECTION: &str = "/contents/twoColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0";
 const SECONDARY_SECTIONS: &str = "/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents";
 const SINGLE_SECTIONS: &str = "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents";
-/// 100 rows per page, like MusicClient._MAX_METRIC_PAGES.
 const MAX_METRIC_PAGES: usize = 60;
 const MAX_CONTINUATION_PAGES: usize = 100;
 const YT_WEB_BROWSE_URL: &str = "https://www.youtube.com/youtubei/v1/browse?prettyPrint=false";
@@ -38,7 +33,6 @@ fn to_int(text: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
-/// Everything the playlist page shows in its header, plus the rows.
 #[derive(Debug, Clone, Default)]
 pub struct PlaylistDetails {
     pub id: String,
@@ -47,16 +41,13 @@ pub struct PlaylistDetails {
     pub privacy: Option<String>,
     pub thumbnails: Vec<String>,
     pub author: Vec<Person>,
-    /// "by X and 2 others" on collaborative playlists.
     pub collaborators: Option<String>,
     pub year: Option<String>,
     pub duration: Option<String>,
     pub duration_seconds: Option<u32>,
     pub track_count: Option<u32>,
     pub tracks: Vec<Track>,
-    /// Albums: the OLAK playlist behind the browse id.
     pub audio_playlist_id: Option<String>,
-    /// Albums: "Album", "Single" or "EP" as the header says.
     pub album_type: Option<String>,
     pub like_status: LikeStatus,
 }
@@ -67,10 +58,7 @@ impl PlaylistDetails {
     }
 }
 
-// -- playlists ------------------------------------------------------------
 
-/// Port of ytmusicapi's get_playlist plus the MusicClient tweaks: LM gets the
-/// "Your Likes" title, and every continuation is followed up to `limit`.
 pub async fn get_playlist(api: &dyn Browse, playlist_id: &str, limit: Option<usize>) -> Result<PlaylistDetails, NetError> {
     let browse_id = if playlist_id.starts_with("VL") { playlist_id.to_owned() } else { format!("VL{playlist_id}") };
     let response = api.post("browse", json!({ "browseId": browse_id })).await?;
@@ -88,11 +76,8 @@ pub async fn get_playlist(api: &dyn Browse, playlist_id: &str, limit: Option<usi
     Ok(details)
 }
 
-/// The rows of a playlist browse response, following its continuations.
 async fn playlist_rows(api: &dyn Browse, response: &Value, limit: Option<usize>, collaborative: bool) -> Result<Vec<Track>, NetError> {
     let shelf = response.pointer(&format!("{SECONDARY_SECTIONS}/0/musicPlaylistShelfRenderer"));
-    // Like get_continuations_2025, `limit` bounds the rows that continuations
-    // add, not the first page, and nothing is truncated afterwards.
     let limit = limit.unwrap_or(usize::MAX);
     let mut tracks = shelf.map(|s| parse_playlist_items(array_at(s, "/contents"), false, collaborative)).unwrap_or_default();
     let token = shelf.and_then(|s| array_at(s, "/contents").last().and_then(item_continuation_token).or_else(|| next_continuation(s)));
@@ -105,23 +90,16 @@ async fn playlist_rows(api: &dyn Browse, response: &Value, limit: Option<usize>,
     Ok(tracks)
 }
 
-/// Whether an id names a podcast show page rather than a playlist.
 pub fn is_podcast(id: &str) -> bool {
     id.starts_with("MPSP")
 }
 
-/// A podcast show, in the shape the playlist page draws. The show page
-/// (`MPSP` plus the playlist id) has the header: title, host, description and
-/// art. Its episode rows come in a multi-row shape, so the episodes come from
-/// the same id browsed as a playlist, which answers with ordinary rows and no
-/// header.
 pub async fn get_podcast(api: &dyn Browse, show_id: &str, limit: Option<usize>) -> Result<PlaylistDetails, NetError> {
     let playlist_id = show_id.trim_start_matches("MPSP").to_owned();
     let (show, list) = tokio::join!(api.post("browse", json!({ "browseId": show_id })), api.post("browse", json!({ "browseId": format!("VL{playlist_id}") })));
     let show = show?;
     let mut details = parse_playlist_header(&show).ok_or_else(|| message(format!("podcast {show_id}: header missing")))?;
     details.id = show_id.to_owned();
-    // A show names its host above the title, where a playlist has its facepile.
     if details.author.is_empty() {
         let header = show.pointer(&format!("{HEADER_SECTION}/musicResponsiveHeaderRenderer"));
         if let Some(host) = header.and_then(|h| array_at(h, "/straplineTextOne/runs").first().cloned()) {
@@ -130,7 +108,6 @@ pub async fn get_podcast(api: &dyn Browse, show_id: &str, limit: Option<usize>) 
     }
     details.privacy = None;
     details.tracks = playlist_rows(api, &list?, limit, false).await?;
-    // The playlist rows do not say they are episodes. The swap and the menus need to know.
     for track in &mut details.tracks {
         track.video_type = Some(crate::model::EPISODE_VIDEO_TYPE.to_owned());
     }
@@ -176,10 +153,7 @@ fn parse_playlist_header(response: &Value) -> Option<PlaylistDetails> {
     Some(details)
 }
 
-// -- albums ---------------------------------------------------------------
 
-/// Port of get_album with parse_album_header_2024: header, then the rows
-/// parsed as album items with their album and artists filled from the header.
 pub async fn get_album(api: &dyn Browse, browse_id: &str) -> Result<PlaylistDetails, NetError> {
     if !browse_id.starts_with("MPRE") {
         return Err(message("Invalid album browseId provided, must start with MPRE."));
@@ -221,7 +195,6 @@ pub async fn get_album(api: &dyn Browse, browse_id: &str) -> Result<PlaylistDeta
     Ok(details)
 }
 
-/// Port of get_library_upload_album: the older detail header plus upload rows.
 pub async fn get_upload_album(api: &dyn Browse, browse_id: &str) -> Result<PlaylistDetails, NetError> {
     let response = api.post("browse", json!({ "browseId": browse_id })).await?;
     let header = response.pointer("/header/musicDetailHeaderRenderer").ok_or_else(|| message(format!("upload album {browse_id}: header missing")))?;
@@ -247,7 +220,6 @@ pub async fn get_upload_album(api: &dyn Browse, browse_id: &str) -> Result<Playl
     Ok(details)
 }
 
-/// Port of get_library_upload_songs(limit=None): every uploaded track.
 pub async fn get_upload_songs(api: &dyn Browse) -> Result<Vec<Track>, NetError> {
     let response = api.post("browse", json!({ "browseId": "FEmusic_library_privately_owned_tracks" })).await?;
     let sections = crate::net::items::library_sections(&response);
@@ -259,7 +231,6 @@ pub async fn get_upload_songs(api: &dyn Browse) -> Result<Vec<Track>, NetError> 
     Ok(songs)
 }
 
-// -- watch panel and radio ------------------------------------------------
 
 #[derive(Debug, Clone, Default)]
 pub struct WatchPlaylist {
@@ -267,8 +238,6 @@ pub struct WatchPlaylist {
     pub playlist_id: Option<String>,
 }
 
-/// Port of get_watch_playlist: the panel YouTube Music shows when a track
-/// plays, or a radio for `radio`. Follows continuations until `limit`.
 pub async fn get_watch_playlist(api: &dyn Browse, video_id: Option<&str>, playlist_id: Option<&str>, limit: usize, radio: bool) -> Result<WatchPlaylist, NetError> {
     let mut body = json!({ "enablePersistentPlaylistPanel": true, "isAudioOnly": true, "tunerSettingValue": "AUTOMIX_SETTING_NORMAL" });
     if video_id.is_none() && playlist_id.is_none() {
@@ -304,9 +273,6 @@ pub async fn get_watch_playlist(api: &dyn Browse, video_id: Option<&str>, playli
     })?;
     let panel_playlist = array_at(results, "/contents").iter().find_map(|x| owned_at(x, "/playlistPanelVideoRenderer/navigationEndpoint/watchEndpoint/playlistId"));
     let mut tracks = parse_watch_playlist(array_at(results, "/contents"));
-    // Continuations ride in the query string for this endpoint. The crate
-    // appends its own "?alt=json" to whatever endpoint it is given, so the
-    // token goes in front of a throwaway parameter that swallows that suffix.
     let key = if is_playlist { "/continuations/0/nextContinuationData/continuation" } else { "/continuations/0/nextRadioContinuationData/continuation" };
     let token = owned_at(results, key);
     let rest = Continuation::query(api, "next", body, token).limit(limit.saturating_sub(tracks.len())).pages(20).collect(|entries| parse_watch_playlist(entries.iter().copied())).await;
@@ -314,13 +280,10 @@ pub async fn get_watch_playlist(api: &dyn Browse, video_id: Option<&str>, playli
     Ok(WatchPlaylist { tracks, playlist_id: panel_playlist })
 }
 
-/// Port of Player.start_radio's fetch: 50 radio tracks for a song or a playlist.
 pub async fn radio_tracks(api: &dyn Browse, video_id: Option<&str>, playlist_id: Option<&str>) -> Result<WatchPlaylist, NetError> {
     get_watch_playlist(api, video_id, playlist_id, 50, true).await
 }
 
-/// Port of MusicClient.find_audio_version: the song twin of a music video,
-/// from YouTube Music's own pairing first, then a conservative song search.
 pub async fn find_audio_version(api: &dyn Browse, video_id: &str) -> Result<Option<Track>, NetError> {
     let watch = get_watch_playlist(api, Some(video_id), None, 1, false).await.unwrap_or_default();
     let Some(current) = watch.tracks.first() else { return Ok(None) };
@@ -360,10 +323,7 @@ fn normalize_title(title: &str) -> String {
     title.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
 }
 
-// -- ids and ratings ------------------------------------------------------
 
-/// Port of get_album_browse_id: the MPRE id behind an OLAK playlist, read
-/// off the playlist page's HTML.
 pub async fn get_album_browse_id(http: &reqwest::Client, auth: Option<&HttpAuth>, audio_playlist_id: &str) -> Result<Option<String>, NetError> {
     let mut request = http.get(format!("https://music.youtube.com/playlist?list={audio_playlist_id}"));
     if let Some(auth) = auth {
@@ -374,8 +334,6 @@ pub async fn get_album_browse_id(http: &reqwest::Client, auth: Option<&HttpAuth>
     Ok(MPRE_RE.captures(&decoded).map(|c| c[1].to_owned()))
 }
 
-/// Port of MusicClient.rate_playlist: LIKE saves, INDIFFERENT removes.
-/// Strips a VL prefix and turns an MPRE browse id into its audio playlist.
 pub async fn rate_playlist(api: &dyn Browse, playlist_id: &str, rating: LikeStatus) -> Result<(), NetError> {
     let mut pid = playlist_id.trim_start_matches("VL").to_owned();
     if pid.starts_with("MPRE") {
@@ -394,7 +352,6 @@ pub async fn rate_playlist(api: &dyn Browse, playlist_id: &str, rating: LikeStat
     Ok(())
 }
 
-/// Port of edit_playlist for the fields the edit dialog offers.
 pub async fn edit_playlist(api: &dyn Browse, playlist_id: &str, title: Option<&str>, description: Option<&str>, privacy: Option<&str>) -> Result<(), NetError> {
     let mut actions = Vec::new();
     if let Some(t) = title.filter(|t| !t.is_empty()) {
@@ -413,7 +370,6 @@ pub async fn edit_playlist(api: &dyn Browse, playlist_id: &str, title: Option<&s
     Ok(())
 }
 
-/// Remove rows by (videoId, setVideoId), like remove_playlist_items.
 pub async fn remove_playlist_items(api: &dyn Browse, playlist_id: &str, items: &[(String, String)]) -> Result<(), NetError> {
     let actions: Vec<Value> = items.iter().map(|(video, set)| json!({ "setVideoId": set, "removedVideoId": video, "action": "ACTION_REMOVE_VIDEO" })).collect();
     if actions.is_empty() {
@@ -423,8 +379,6 @@ pub async fn remove_playlist_items(api: &dyn Browse, playlist_id: &str, items: &
     Ok(())
 }
 
-/// Port of MusicClient.add_playlist_items. Single adds swap a music video
-/// for its song version first, bulk adds do not.
 pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: Vec<String>, swap_to_audio: Option<bool>) -> Result<(), NetError> {
     let swap = swap_to_audio.unwrap_or(video_ids.len() == 1);
     let mut ids = Vec::with_capacity(video_ids.len());
@@ -444,17 +398,11 @@ pub async fn add_playlist_items(api: &dyn Browse, playlist_id: &str, video_ids: 
     if ids.is_empty() {
         return Ok(());
     }
-    // Port of the crate's add_playlist_items body. DEDUPE_OPTION_SKIP is what
-    // "allow_duplicates: false" means to YouTube.
     let actions: Vec<Value> = ids.iter().map(|vid| json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": vid, "dedupeOption": "DEDUPE_OPTION_SKIP" })).collect();
     api.post("browse/edit_playlist", json!({ "playlistId": playlist_id.trim_start_matches("VL"), "actions": actions })).await?;
     Ok(())
 }
 
-/// Port of create_playlist: a new playlist, returning its id.
-///
-/// The privacy value is what the visibility row picked: PUBLIC, PRIVATE or
-/// UNLISTED. An empty description is left out rather than sent blank.
 pub async fn create_playlist(api: &dyn Browse, title: &str, description: &str, privacy: &str) -> Result<String, NetError> {
     if title.trim().is_empty() {
         return Err(message("A playlist needs a title."));
@@ -464,16 +412,11 @@ pub async fn create_playlist(api: &dyn Browse, title: &str, description: &str, p
         body["description"] = json!(description);
     }
     let response = api.post("playlist/create", body).await?;
-    // The id comes back bare or wrapped, depending on the response shape.
     owned_at(&response, "/playlistId")
         .or_else(|| owned_at(&response, "/playlistEditResults/0/playlistEditVideoAddedResultData/playlistId"))
         .ok_or_else(|| message("The server did not return a playlist id."))
 }
 
-/// Wait until a just-created playlist can be opened.
-///
-/// The id comes back before the browse endpoint will serve the playlist, so
-/// opening it straight away answers "header missing".
 pub async fn await_playlist(api: &dyn Browse, playlist_id: &str) -> bool {
     for attempt in 0..5 {
         if get_playlist(api, playlist_id, Some(1)).await.is_ok() {
@@ -485,16 +428,9 @@ pub async fn await_playlist(api: &dyn Browse, playlist_id: &str) -> bool {
     false
 }
 
-/// Port of set_playlist_thumbnail: put an image on a playlist as its cover.
-///
-/// Three steps, the way YouTube's resumable upload wants them: ask for an
-/// upload URL, send the bytes, then hand the blob id the upload returns to
-/// browse/edit_playlist. The first two are plain HTTP with the browser
-/// session, not InnerTube calls.
 pub async fn set_playlist_thumbnail(api: &dyn Browse, http: &reqwest::Client, headers: &BTreeMap<String, String>, playlist_id: &str, image: &Path) -> Result<(), NetError> {
     let bytes = tokio::fs::read(image).await?;
     let referer = format!("https://music.youtube.com/playlist?list={playlist_id}");
-    // The session headers minus the ones each step sets for itself.
     let session = |mut request: reqwest::RequestBuilder| {
         for (name, value) in headers.iter().filter(|(name, _)| !matches!(name.as_str(), "Content-Type" | "Accept-Encoding" | "Content-Encoding" | "Content-Length")) {
             request = request.header(name, value);
@@ -547,10 +483,7 @@ pub async fn delete_playlist(api: &dyn Browse, playlist_id: &str) -> Result<(), 
     Ok(())
 }
 
-// -- library membership and editable playlists ----------------------------
 
-/// Port of _populate_library_cache_async's fetch: every saved playlist and
-/// album id, albums under their browse id and audio playlist id both.
 pub async fn fetch_library_ids(api: Arc<dyn Browse>) -> Result<(LibraryIds, Vec<MediaItem>), NetError> {
     let playlists = library::library_playlists(api.clone()).await.unwrap_or_default();
     let albums = library::library_albums(api).await.unwrap_or_default();
@@ -565,7 +498,6 @@ pub async fn fetch_library_ids(api: Arc<dyn Browse>) -> Result<(LibraryIds, Vec<
     Ok((ids, playlists))
 }
 
-/// Port of get_editable_playlists: owned or collaborative playlists only.
 pub fn editable_playlists(playlists: &[MediaItem], account_name: Option<&str>) -> Vec<MediaItem> {
     let user = account_name.map(|n| n.to_lowercase()).unwrap_or_default();
     playlists
@@ -582,14 +514,11 @@ pub fn editable_playlists(playlists: &[MediaItem], account_name: Option<&str>) -
         .collect()
 }
 
-/// Port of is_own_playlist: only PL/VL ids the signed-in account authored.
 pub fn is_own_playlist(details: &PlaylistDetails, playlist_id: &str, account_name: Option<&str>) -> bool {
     let pid = if playlist_id.is_empty() { details.id.as_str() } else { playlist_id };
     owns_playlist(pid, details.author.first().map(|a| a.name.as_str()), details.collaborators.as_deref(), account_name)
 }
 
-/// The same rule from the parts a cached header keeps, so a page opened from
-/// the disk cache offers Edit and Delete before the live fetch lands.
 pub fn owns_playlist(playlist_id: &str, author: Option<&str>, collaborators: Option<&str>, account_name: Option<&str>) -> bool {
     let Some(user_name) = account_name.filter(|n| !n.is_empty()) else { return false };
     if ["LM", "SE", "VLLM"].contains(&playlist_id) || !(playlist_id.starts_with("PL") || playlist_id.starts_with("VL")) {
@@ -606,7 +535,6 @@ pub fn owns_playlist(playlist_id: &str, author: Option<&str>, collaborators: Opt
     author == user_name
 }
 
-// -- sort metrics ---------------------------------------------------------
 
 fn normalize_browse_playlist_id(playlist_id: &str) -> Option<String> {
     let pid = playlist_id.trim();
@@ -616,7 +544,6 @@ fn normalize_browse_playlist_id(playlist_id: &str) -> Option<String> {
     Some(if pid.starts_with("VL") { pid.to_owned() } else { format!("VL{pid}") })
 }
 
-/// Port of get_playlist_added_dates: videoId to the epoch seconds it was added.
 pub async fn playlist_added_dates(api: &dyn Browse, playlist_id: &str) -> Result<SortMetric, NetError> {
     let Some(browse_id) = normalize_browse_playlist_id(playlist_id) else { return Ok(SortMetric::new()) };
     let mut dates = SortMetric::new();
@@ -688,7 +615,6 @@ fn harvest_view_counts(response: &Value, out: &mut SortMetric) {
     }
 }
 
-/// SAPISIDHASH for an origin, what _yt_web_headers computed for www.youtube.com.
 fn sapisid_hash(cookie: &str, origin: &str) -> Option<String> {
     use sha1::{Digest, Sha1};
     let sapisid = cookie.split(';').map(str::trim).find_map(|p| p.strip_prefix("__Secure-3PAPISID=").or_else(|| p.strip_prefix("SAPISID=")))?;
@@ -697,8 +623,6 @@ fn sapisid_hash(cookie: &str, origin: &str) -> Option<String> {
     Some(format!("SAPISIDHASH {ts}_{digest:x}"))
 }
 
-/// Port of get_playlist_view_counts: youtube.com's copy of the playlist
-/// carries a view count per row, YouTube Music's does not.
 pub async fn playlist_view_counts(http: &reqwest::Client, auth: Option<&HttpAuth>, playlist_id: &str) -> Result<SortMetric, NetError> {
     let Some(browse_id) = normalize_browse_playlist_id(playlist_id) else { return Ok(SortMetric::new()) };
     let mut body = json!({ "context": { "client": { "clientName": "WEB", "clientVersion": "2.20240101.00.00", "hl": "en", "gl": "US" } }, "browseId": browse_id });
@@ -747,14 +671,11 @@ pub async fn playlist_view_counts(http: &reqwest::Client, auth: Option<&HttpAuth
     Ok(views)
 }
 
-// -- raw parsing fallbacks ------------------------------------------------
 
-/// Port of _fetch_continuation: follow tokens through both response shapes.
 async fn fetch_continuation(api: &dyn Browse, token: Option<String>) -> Vec<MediaItem> {
     Continuation::browse(api, token).pages(MAX_CONTINUATION_PAGES).collect(|entries| entries.iter().filter_map(|e| parse_channel_item(e)).collect()).await.items
 }
 
-/// Port of _raw_parse_channel_content.
 pub async fn raw_parse_channel_content(api: &dyn Browse, browse_id: &str, params: Option<&str>) -> Result<Vec<MediaItem>, NetError> {
     let mut body = json!({ "browseId": browse_id });
     if let Some(p) = params {
@@ -777,8 +698,6 @@ pub async fn raw_parse_channel_content(api: &dyn Browse, browse_id: &str, params
     Ok(items)
 }
 
-/// Port of _raw_parse_playlist for lists ytmusicapi cannot read, such as
-/// OLAK chart playlists. Returns the header title with the rows.
 pub async fn raw_parse_playlist(api: &dyn Browse, browse_id: &str) -> Result<(Option<String>, Vec<MediaItem>), NetError> {
     let response = api.post("browse", json!({ "browseId": browse_id })).await?;
     let mut items = Vec::new();
@@ -800,9 +719,6 @@ pub async fn raw_parse_playlist(api: &dyn Browse, browse_id: &str) -> Result<(Op
     Ok((title, items))
 }
 
-/// Port of MusicClient.get_artist_albums: the artist's albums grid with
-/// its continuations, falling back to user playlists and raw parsing.
-/// `limit` caps the rows, like get_artist_albums(limit=10) did for the artist page. A prolific artist has thousands of singles, and the page only shows ten.
 pub async fn artist_albums(api: &dyn Browse, channel_id: &str, params: Option<&str>, limit: Option<usize>) -> Result<Vec<MediaItem>, NetError> {
     let mut body = json!({ "browseId": channel_id });
     if let Some(p) = params {
@@ -823,7 +739,6 @@ pub async fn artist_albums(api: &dyn Browse, channel_id: &str, params: Option<&s
             if !albums.is_empty() {
                 return Ok(albums);
             }
-            // get_user_playlists: the same grid read as playlists.
             let playlists: Vec<MediaItem> = contents.iter().filter_map(|c| parse_two_row(c, ItemKind::Playlist)).collect();
             if !playlists.is_empty() {
                 return Ok(playlists);
@@ -833,7 +748,6 @@ pub async fn artist_albums(api: &dyn Browse, channel_id: &str, params: Option<&s
     raw_parse_channel_content(api, channel_id, params).await
 }
 
-/// Title, artist and album text of a track lowercased, what the filters match on.
 pub fn track_search_text(track: &Track) -> (String, String, String) {
     (track.title.to_lowercase(), track.artist.to_lowercase(), track.album.as_ref().map(|a| a.name.to_lowercase()).unwrap_or_default())
 }
@@ -843,15 +757,11 @@ mod tests {
     use super::*;
     use ytmusicapi::YTMusicClient;
 
-    // -- fixtures ---------------------------------------------------------
 
-    /// Ids that change between accounts, written beside the captured responses.
     fn index_path() -> std::path::PathBuf {
         crate::net::browse::Fixtures::dir().join("index.json")
     }
 
-    /// How the library card address and image behave after a cover change.
-    /// `MUSISHARK_SCRATCH=<id> cargo test -- --ignored live_cover_propagation --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_cover_propagation() {
@@ -897,9 +807,6 @@ mod tests {
         let _ = std::fs::remove_file(&image);
     }
 
-    /// Make or remove a playlist to try things on by hand.
-    /// `cargo test -- --ignored live_scratch_playlist --nocapture` creates one,
-    /// `MUSISHARK_SCRATCH=<id> cargo test -- --ignored live_scratch_playlist` removes it.
     #[tokio::test]
     #[ignore]
     async fn live_scratch_playlist() {
@@ -917,8 +824,6 @@ mod tests {
         }
     }
 
-    /// Sets a cover on a throwaway playlist, checks it took, then deletes it.
-    /// `cargo test -- --ignored live_playlist_cover --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_playlist_cover() {
@@ -931,7 +836,6 @@ mod tests {
         await_playlist(&api, &id).await;
         let before = get_playlist(&api, &id, Some(1)).await.map(|d| d.thumbnails.last().cloned().unwrap_or_default());
 
-        // A plain square, written the way the crop dialog writes its result.
         let image = std::env::temp_dir().join(format!("musishark-cover-test-{}.png", std::process::id()));
         let pixels: Vec<u8> = (0..256 * 256).flat_map(|i| [(i % 256) as u8, 40u8, 160u8]).collect();
         let made = std::process::Command::new("ffmpeg")
@@ -966,8 +870,6 @@ mod tests {
         assert!(!after.is_empty());
     }
 
-    /// What the uploads tab has to work with.
-    /// `cargo test -- --ignored live_uploads --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_uploads() {
@@ -981,8 +883,6 @@ mod tests {
         }
     }
 
-    /// Creates a playlist, checks it is in the library, then deletes it.
-    /// `cargo test -- --ignored live_create_and_delete_playlist --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_create_and_delete_playlist() {
@@ -991,9 +891,7 @@ mod tests {
         let id = create_playlist(&api, &title, "created by a test", "PRIVATE").await.expect("create");
         println!("created {id}");
 
-        // The library index takes a moment to show a new playlist.
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-        // Nothing here may panic: the playlist has to be deleted either way.
         let listed = crate::net::library::library_playlists(api.clone()).await.map(|mine| mine.iter().any(|p| p.title == title));
         let opened = get_playlist(&api, &id, Some(1)).await.map(|details| details.title);
 
@@ -1007,7 +905,6 @@ mod tests {
         println!("round trip complete, nothing left behind");
     }
 
-    /// `cargo test -- --ignored live_audio_version --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_audio_version() {
@@ -1024,8 +921,6 @@ mod tests {
         }
     }
 
-    /// Records what the offline test replays. Run it once while signed in:
-    /// `cargo test -- --ignored capture_fixtures`
     #[tokio::test]
     #[ignore]
     async fn capture_fixtures() {
@@ -1051,7 +946,6 @@ mod tests {
         println!("captured into {}", crate::net::browse::Fixtures::dir().display());
     }
 
-    /// Parsing runs with no network. Skips until `capture_fixtures` has run.
     #[tokio::test]
     async fn captured_responses_still_parse() {
         let Some(fixtures) = crate::net::browse::Fixtures::open() else {
@@ -1200,7 +1094,6 @@ mod tests {
         assert_eq!(out[0].id, "PL1");
     }
 
-    /// `cargo test -- --ignored a_podcast_loads --nocapture`
     #[tokio::test]
     #[ignore]
     async fn a_podcast_loads() {

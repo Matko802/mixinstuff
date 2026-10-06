@@ -1,17 +1,4 @@
-//! Cover-derived appearance: the blurred cover background, the dynamic accent
-//! with its optional tint, and the contrast-checked colors derived from
-//! whichever accent is in force. Port of the appearance half of ui/window.py.
-//!
-//! One display-wide CSS provider, one step above the user's gtk.css, holding
-//! three parts in cascade order: the background, the accent and the derived
-//! colors. Loading a display-wide provider restyles every widget in the
-//! window, which is tens of milliseconds with a full home feed, and a track
-//! change used to do it up to four times. The parts are now joined and loaded
-//! once per change, and only after the blur and the accent that are still on
-//! their way have both landed.
 
-/// App icon name matching the current color scheme: the white shark on dark
-/// backgrounds, the black shark on light ones.
 pub fn app_icon_name() -> String {
     let variant = if adw::StyleManager::default().is_dark() {
         "dark"
@@ -33,23 +20,16 @@ use crate::ui::context::UiContext;
 use crate::ui::cover_effects;
 use crate::ui::window::AppearancePref;
 
-/// Contrast the playing-row label clears against its row. AAA reads as the highlight it is.
 const PLAYING_FG_CONTRAST: f64 = color::WCAG_AAA;
-/// Contrast white has to hold against the solid accent to stay its label color.
 const ACCENT_FG_MIN_CONTRAST: f64 = 3.5;
-/// How far the sidebar pane steps from what sits behind it. Adwaita's own stands at about this.
 const SIDEBAR_SEPARATION: f64 = 1.17;
-/// Share of the accent's chroma the sidebar overlay keeps.
 const SIDEBAR_TINT: f64 = 0.15;
 const SIDEBAR_OPACITY: f64 = 0.16;
-/// The visualizer's brightest bar alpha, what Visualizer.ACTIVE_ALPHA_MAX is.
 const VISUALIZER_ALPHA_MAX: f64 = 0.6;
 
-/// How long the sheet waits for a blur or an accent still being computed.
 const MAX_HOLD: std::time::Duration = std::time::Duration::from_millis(1500);
 const HOLD_RETRY: std::time::Duration = std::time::Duration::from_millis(100);
 
-/// Typical luminance the blur normalizer lands a cover on, until the measured value arrives.
 fn default_backdrop(dark: bool) -> f64 {
     if dark { 0.025 } else { 0.55 }
 }
@@ -158,7 +138,6 @@ const TINT_LIGHT: &str = "
 @define-color secondary_sidebar_border_color mix(rgba(0, 0, 0, 0.07), @accent_bg_color, 0.12);
 ";
 
-/// Shared by both tints: panels and the legacy theme names follow the tinted surfaces.
 const TINT_COMMON: &str = "
 @define-color panel_bg_color @window_bg_color;
 @define-color panel_button_bg_color transparent;
@@ -183,26 +162,17 @@ pub struct Appearance {
     window: adw::ApplicationWindow,
     ctx: Rc<UiContext>,
     css: gtk::CssProvider,
-    /// The three parts of the sheet, joined in this order when it is loaded.
     bg_part: RefCell<String>,
     accent_part: RefCell<String>,
-    /// What the provider holds now, so an unchanged sheet is not loaded again.
     loaded: RefCell<String>,
-    /// Blur and accent requests still running. The sheet waits for them, briefly.
     inflight: Cell<u32>,
     held_since: Cell<Option<std::time::Instant>>,
     last_cover_url: RefCell<Option<String>>,
     last_dominant: Cell<Option<Rgb>>,
-    /// (solid, standalone, view background) while the cover-derived accent is in force.
     accent_override: Cell<Option<(Rgb, Rgb, Rgb)>>,
-    /// Typical luminance of the backdrop painted now, measured from the blurred cover.
     blur_backdrop: Cell<Option<f64>>,
     derive_pending: Cell<bool>,
-    /// Window classes to set with the next sheet load. A class change
-    /// restyles the whole window, so it goes out in the same frame as the
-    /// sheet: three restyles per track change cost up to 600 ms each on a phone.
     classes: RefCell<Vec<(&'static str, bool)>>,
-    /// Bumped per request so a slow blur or accent never lands over a newer cover.
     blur_request: Cell<u64>,
     accent_request: Cell<u64>,
 }
@@ -270,14 +240,10 @@ impl Appearance {
         adw::StyleManager::default().is_dark()
     }
 
-    /// AA normally, AAA under high contrast.
     fn contrast_target(&self) -> f64 {
         if adw::StyleManager::default().is_high_contrast() { color::WCAG_AAA } else { color::WCAG_AA }
     }
 
-    /// The playing track's cover. A downloaded track's own art comes first:
-    /// offline the remote address cannot be fetched, and the blur and accent
-    /// would never be made for a song first played offline.
     fn current_cover(&self) -> Option<String> {
         let state = self.ctx.player.state();
         if state.queue_length() == 0 {
@@ -290,8 +256,6 @@ impl Appearance {
         (!url.is_empty()).then_some(url)
     }
 
-    /// A downloaded track whose cover was never pulled out of the file: pull
-    /// it out, then run the metadata pass again with it.
     fn extract_track_art(self: &Rc<Self>) {
         let video_id = self.ctx.player.state().video_id();
         if video_id.is_empty() || !self.ctx.downloads.is_downloaded(&video_id) || crate::ui::cover::cached_track_art(&video_id).is_some() {
@@ -310,10 +274,8 @@ impl Appearance {
         });
     }
 
-    /// Port of _on_metadata_for_appearance.
     fn on_metadata(self: &Rc<Self>) {
         self.extract_track_art();
-        // Stopped or cleared: fall back to the normal theme background and accent.
         let Some(url) = self.current_cover() else {
             self.last_cover_url.replace(None);
             self.deactivate_cover_bg();
@@ -333,7 +295,6 @@ impl Appearance {
         }
     }
 
-    /// A switch moved in Preferences.
     pub fn pref_changed(self: &Rc<Self>, pref: AppearancePref) {
         let prefs = self.prefs();
         let cover = self.last_cover_url.borrow().clone().or_else(|| self.current_cover());
@@ -355,7 +316,6 @@ impl Appearance {
     }
 
     fn on_color_scheme_changed(self: &Rc<Self>) {
-        // The accent and the blur normalization are computed against the active scheme.
         let prefs = self.prefs();
         let cover = self.last_cover_url.borrow().clone();
         if prefs.dynamic_accent {
@@ -372,7 +332,6 @@ impl Appearance {
         self.refresh_derived_colors();
     }
 
-    /// Ask for a window class, applied with the next sheet load.
     fn want_class(self: &Rc<Self>, class: &'static str, on: bool) {
         let mut classes = self.classes.borrow_mut();
         classes.retain(|(name, _)| *name != class);
@@ -381,9 +340,7 @@ impl Appearance {
         self.refresh_derived_colors();
     }
 
-    // -- blurred background ---------------------------------------------------
 
-    /// Go translucent at once, before the blur exists. The picture joins when it is ready.
     fn activate_cover_bg(self: &Rc<Self>, url: &str) {
         self.want_class("cover-bg-active", true);
         if self.bg_part.borrow().is_empty() {
@@ -419,7 +376,6 @@ impl Appearance {
             }
             match blurred.filter(|b| b.path.exists()) {
                 Some(blurred) => {
-                    // The sidebar is sized off the typical luminance, not the worst one for text.
                     this.blur_backdrop.set(Some(blurred.backdrop.0));
                     this.set_blurred_background_css(&blurred.path);
                 }
@@ -429,10 +385,6 @@ impl Appearance {
         });
     }
 
-    /// The picture covers the whole window, so the color under it never shows
-    /// while the file is there. It is what shows when the file is not, such as
-    /// after the cache was cleared: the rule used to say transparent, and the
-    /// window went see-through until the next blur arrived.
     fn set_blurred_background_css(&self, path: &std::path::Path) {
         let Ok(uri) = glib::filename_to_uri(path, None) else { return };
         let rule = format!(
@@ -441,7 +393,6 @@ impl Appearance {
         self.bg_part.replace(format!("{BLUR_OVERRIDE_CSS}{rule}"));
     }
 
-    // -- dynamic accent -----------------------------------------------------------
 
     fn update_dynamic_accent(self: &Rc<Self>, url: &str) {
         let request = self.accent_request.get() + 1;
@@ -475,7 +426,6 @@ impl Appearance {
         let solid = color::ensure_contrast(solid, hex(if dark { "#242424" } else { "#fafafa" }), 3.0);
         let view_bg = color::mix(hex(if dark { "#1e1e1e" } else { "#ffffff" }), solid, 0.08);
         let standalone = color::ensure_contrast(solid, view_bg, self.contrast_target());
-        // White stops being readable on a bright cover-derived accent, so the label flips to black.
         let accent_fg = color::best_foreground(solid, ACCENT_FG_MIN_CONTRAST);
 
         let tint = match (prefs.dynamic_accent && prefs.tinted_background, dark) {
@@ -504,9 +454,7 @@ impl Appearance {
         self.refresh_derived_colors();
     }
 
-    // -- colors derived from whichever accent is in force -------------------------------
 
-    /// A named color as the live cascade resolves it, which covers a user's gtk.css.
     #[allow(deprecated)]
     fn theme_color(&self, name: &str) -> Option<gdk::RGBA> {
         self.window.style_context().lookup_color(name)
@@ -516,15 +464,12 @@ impl Appearance {
         self.theme_color(name).map(|c| (f64::from(c.red()), f64::from(c.green()), f64::from(c.blue())))
     }
 
-    /// Like theme_rgb, composited on `base` when the token carries alpha.
-    /// Adwaita's light window foreground is 80% black, not black.
     fn theme_rgb_over(&self, name: &str, base: Rgb) -> Option<Rgb> {
         let rgba = self.theme_color(name)?;
         let rgb = (f64::from(rgba.red()), f64::from(rgba.green()), f64::from(rgba.blue()));
         Some(if rgba.alpha() >= 1.0 { rgb } else { color::mix(base, rgb, f64::from(rgba.alpha())) })
     }
 
-    /// (solid, standalone, view background) for the accent in force.
     fn accent_in_force(&self) -> (Rgb, Rgb, Rgb) {
         if let Some(accent) = self.accent_override.get() {
             return accent;
@@ -539,11 +484,6 @@ impl Appearance {
         (to_rgb(accent.to_rgba()), to_rgb(accent.to_standalone_rgba(dark)), view_bg)
     }
 
-    /// Queue one load of the whole sheet for the next idle. GTK notifies a
-    /// scheme change before it swaps the stylesheet, so deriving inside the
-    /// notify reads the theme being left. Coalesced, since several callers
-    /// fire together, and held while a blur or an accent is still on its way
-    /// so a track change restyles the window once instead of once per part.
     pub fn refresh_derived_colors(self: &Rc<Self>) {
         if self.derive_pending.replace(true) {
             return;
@@ -566,7 +506,6 @@ impl Appearance {
                 }
             }
             this.held_since.set(None);
-            // Classes first: the derived colors read the cascade they produce.
             for (class, on) in std::mem::take(&mut *this.classes.borrow_mut()) {
                 match on {
                     true => this.window.add_css_class(class),
@@ -581,12 +520,10 @@ impl Appearance {
         });
     }
 
-    /// The derived color definitions, last in the sheet so they win over the accent part.
     fn derive_colors(&self) -> String {
         let (solid, standalone, view_bg) = self.accent_in_force();
         let dark = self.is_dark();
         let row_bg = color::mix(view_bg, solid, 0.18);
-        // The row's accent tint eats most of the AA margin, so the label clears more than that.
         let playing_fg = color::ensure_contrast(standalone, row_bg, self.contrast_target().max(PLAYING_FG_CONTRAST));
 
         let (panel, panel_weak, toggle_checked) = if dark {
@@ -595,15 +532,12 @@ impl Appearance {
             ("rgba(255, 255, 255, 0.65)", "rgba(255, 255, 255, 0.45)", "rgba(255, 255, 255, 0.65)")
         };
 
-        // The sidebar pane is sized against the backdrop painted, not a fixed
-        // opacity. Like Adwaita's it steps lighter in dark and darker in light.
         let typical = self.blur_backdrop.get().unwrap_or_else(|| default_backdrop(dark));
         let (lightness, chroma, hue) = color::rgb_to_oklch(solid);
         let overlay = color::overlay_for_contrast(color::gray(typical), color::oklch_to_rgb(lightness, chroma * SIDEBAR_TINT, hue), SIDEBAR_OPACITY, SIDEBAR_SEPARATION, dark);
         let byte = |c: f64| (c.clamp(0.0, 1.0) * 255.0).round() as u8;
         let sidebar_bg = format!("rgba({}, {}, {}, {SIDEBAR_OPACITY})", byte(overlay.0), byte(overlay.1), byte(overlay.2));
 
-        // Transport buttons and time labels are drawn over the bars, so the tallest bar stays clear of them.
         let bar_base = match self.blur_backdrop.get() {
             Some(_) => color::gray(typical),
             None => self.theme_rgb("window_bg_color").unwrap_or_else(|| hex(if dark { "#1e1e1e" } else { "#fafafb" })),

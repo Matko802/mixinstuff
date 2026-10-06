@@ -29,13 +29,8 @@
           gst-plugins-bad
         ];
 
-        # yt-dlp is the fallback stream resolver and the downloader. It wants a
-        # JavaScript runtime for YouTube's player code, and ffmpeg to convert.
         runtimeTools = [ pkgs.yt-dlp pkgs.nodejs pkgs.ffmpeg ];
 
-        # The v8 crate under the PO-token minter downloads a prebuilt library in
-        # its build script. The sandbox has no network, so it is fetched here and
-        # handed over through RUSTY_V8_ARCHIVE. The version follows v8 in Cargo.lock.
         rustyV8Version = "130.0.7";
         rustyV8Archive = pkgs.fetchurl {
           url = "https://github.com/denoland/rusty_v8/releases/download/v${rustyV8Version}/librusty_v8_release_${pkgs.stdenv.hostPlatform.rust.rustcTarget}.a.gz";
@@ -46,8 +41,6 @@
         };
 
         craneLib = crane.mkLib pkgs;
-        # Only cargo sources + the gresource files build.rs compiles.
-        # Anything else (docs, screenshots) no longer invalidates anything.
         src = pkgs.lib.fileset.toSource {
           root = ./.;
           fileset = pkgs.lib.fileset.unions [
@@ -67,9 +60,7 @@
           nativeBuildInputs = [
             pkgs.pkg-config
             pkgs.wrapGAppsHook4
-            # build.rs runs glib-compile-resources for the stylesheet and icons.
             pkgs.glib
-            # Fast linker for the final binary.
             pkgs.mold
           ];
 
@@ -79,18 +70,15 @@
             pkgs.webkitgtk_6_0
             pkgs.sqlite
             pkgs.glib-networking
-            # The ytmusicapi crate brings reqwest with native TLS, so openssl-sys builds too.
             pkgs.openssl
           ] ++ gstPlugins;
 
           RUSTY_V8_ARCHIVE = rustyV8Archive;
           RUSTFLAGS = "-C link-arg=-fuse-ld=mold";
 
-          # The tests that matter need the network or a signed-in session.
           doCheck = false;
         };
 
-        # Dependencies compiled once; source edits only rebuild our crates.
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
         musishark = craneLib.buildPackage (commonArgs // {
@@ -123,7 +111,6 @@
         devShells.default = pkgs.mkShell {
           inputsFrom = [ musishark ];
           packages = [ pkgs.cargo pkgs.rustc pkgs.clippy pkgs.rustfmt ] ++ runtimeTools;
-          # GStreamer finds its plugins through this outside a wrapped binary.
           GST_PLUGIN_SYSTEM_PATH_1_0 = pkgs.lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" gstPlugins;
         };
       }

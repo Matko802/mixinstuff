@@ -1,6 +1,3 @@
-//! Port of ui/context_menu.py: the song menu, the album and playlist menu and
-//! the artist menu. Sections keep the Python order: queue, nav, actions,
-//! remove, clipboard.
 
 use std::rc::Rc;
 
@@ -18,13 +15,11 @@ pub enum Section {
     Actions,
     Remove,
     Clipboard,
-    /// Diagnostics, last in the menu like the Python section of the same name.
     Debug,
 }
 
 const SECTIONS: [Section; 6] = [Section::Queue, Section::Nav, Section::Actions, Section::Remove, Section::Clipboard, Section::Debug];
 
-/// A page-specific entry merged into one of the standard sections.
 pub struct MenuAction {
     pub label: String,
     pub section: Section,
@@ -41,16 +36,11 @@ impl MenuAction {
 #[derive(Default)]
 pub struct SongMenuOptions {
     pub prefix: &'static str,
-    /// Entry names to leave out: play_next, add_to_queue, goto_artist, goto_album, start_radio, add_to_playlist, copy_link.
     pub hide: &'static [&'static str],
     pub extras: Vec<MenuAction>,
-    /// With a navigator, Go to Artist / Album push pages instead of toasting.
     pub nav: Option<Rc<Navigator>>,
-    /// A multi-selection the queue and playlist entries act on instead of the one track.
     pub selection: Vec<Track>,
-    /// Needed for the entries that talk to the network: Start Radio and Add to Playlist.
     pub ctx: Option<Rc<UiContext>>,
-    /// The playlist or album the rows came from, so a download is tagged with it.
     pub album: Option<(String, String)>,
 }
 
@@ -161,7 +151,6 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
             }));
         }
         let to_add: Vec<Track> = if tracks.is_empty() { if vid.is_empty() { Vec::new() } else { vec![track.clone()] } } else { tracks.clone() };
-        // A local playlist takes tracks offline and signed out.
         if !to_add.is_empty() && !hidden("add_to_playlist") {
             let anchor = anchor.clone();
             let label = if multi { format!("Add {} to Playlist…", to_add.len()) } else { "Add to Playlist…".to_owned() };
@@ -219,7 +208,6 @@ pub fn build_song_menu(anchor: &impl IsA<gtk::Widget>, track: &Track, player: &R
     builder.build()
 }
 
-/// Port of _add_to_playlist: pick a playlist in the popover, then add it where it belongs.
 pub fn add_to_playlist_via_popover(ctx: &Rc<UiContext>, anchor: &gtk::Widget, tracks: Vec<Track>) {
     let ctx_c = ctx.clone();
     let anchor_c = anchor.clone();
@@ -228,7 +216,6 @@ pub fn add_to_playlist_via_popover(ctx: &Rc<UiContext>, anchor: &gtk::Widget, tr
     });
 }
 
-/// Show a built menu at the pointer and drop the popover once closed.
 pub fn popup_menu(anchor: &impl IsA<gtk::Widget>, model: &gio::Menu, x: f64, y: f64) {
     if model.n_items() == 0 {
         return;
@@ -250,12 +237,10 @@ pub fn show_song_menu(anchor: &impl IsA<gtk::Widget>, x: f64, y: f64, track: &Tr
     }
 }
 
-/// Menu for a browse item: the song menu for playable kinds, Open plus Copy Link for collections.
 pub fn show_item_menu(anchor: &impl IsA<gtk::Widget>, x: f64, y: f64, item: &MediaItem, ctx: &Rc<UiContext>) {
     show_item_menu_with(anchor, x, y, item, ctx, Vec::new());
 }
 
-/// `show_item_menu` with page-specific entries merged in.
 pub fn show_item_menu_with(anchor: &impl IsA<gtk::Widget>, x: f64, y: f64, item: &MediaItem, ctx: &Rc<UiContext>, extras: Vec<MenuAction>) {
     if let Some(track) = item.to_track() {
         let opts = SongMenuOptions { prefix: "item", nav: Some(ctx.nav.clone()), ctx: Some(ctx.clone()), extras, ..SongMenuOptions::default() };
@@ -267,7 +252,6 @@ pub fn show_item_menu_with(anchor: &impl IsA<gtk::Widget>, x: f64, y: f64, item:
     let online = ctx.online.is_online();
     let is_artist = !matches!(item.kind, ItemKind::Album | ItemKind::Playlist);
 
-    // Port of build_collection_menu's queue section: the tracks are fetched when asked for.
     if !is_artist && online && !item.id.is_empty() {
         for (label, name, mode) in [("Play", "play", CollectionMode::Play), ("Play Next", "play-next", CollectionMode::Next), ("Add to Queue", "add-to-queue", CollectionMode::Queue)] {
             let (ctx, item, anchor) = (ctx.clone(), item.clone(), anchor_w.clone());
@@ -326,7 +310,6 @@ enum CollectionMode {
     Queue,
 }
 
-/// An album's or a playlist's tracks, and the playlist id its radio is seeded from.
 async fn collection_tracks(api: &dyn crate::net::browse::Browse, item: &MediaItem) -> (Vec<Track>, Option<String>) {
     let fetched = if item.kind == ItemKind::Album && item.id.starts_with("MPRE") {
         crate::net::playlists::get_album(api, &item.id).await
@@ -342,7 +325,6 @@ async fn collection_tracks(api: &dyn crate::net::browse::Browse, item: &MediaIte
     }
 }
 
-/// Port of build_collection_menu's _load: fetch, then play or queue.
 fn load_collection(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem, mode: CollectionMode) {
     toast(anchor, "Loading...");
     let api = ctx.net.client().api();
@@ -370,8 +352,6 @@ fn load_collection(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem, 
     });
 }
 
-/// A radio seeded from the collection: `RDAMPL` plus its playlist id. An album
-/// card only knows its browse id, so its audio playlist id is looked up first.
 fn collection_radio(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem) {
     toast(anchor, "Starting radio...");
     let known = item.playlist_id.clone().or_else(|| (!item.id.starts_with("MPRE")).then(|| item.id.trim_start_matches("VL").to_owned()));
@@ -392,7 +372,6 @@ fn collection_radio(ctx: &Rc<UiContext>, anchor: &gtk::Widget, item: &MediaItem)
     });
 }
 
-/// Port of _artist_radio: the artist's own radio, else one seeded from their top song.
 fn artist_radio(ctx: &Rc<UiContext>, anchor: &gtk::Widget, channel_id: &str) {
     toast(anchor, "Starting radio...");
     let api = ctx.net.client().api();
@@ -413,7 +392,6 @@ fn artist_radio(ctx: &Rc<UiContext>, anchor: &gtk::Widget, channel_id: &str) {
     });
 }
 
-/// Port of _refresh_metadata: what the watch panel says about the track, written back into the queue.
 fn refresh_metadata(ctx: &Rc<UiContext>, anchor: &gtk::Widget, video_id: &str) {
     toast(anchor, "Refreshing metadata...");
     let api = ctx.net.client().api();

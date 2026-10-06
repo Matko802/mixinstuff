@@ -1,6 +1,3 @@
-//! Adding tracks to a playlist, from wherever a menu offers it. A `LOCAL_`
-//! id goes to the local library, anything else to the network. One place, so
-//! the song menu, the queue and the playlist page agree on the toasts.
 
 use std::rc::Rc;
 
@@ -46,9 +43,6 @@ pub fn add_tracks(ctx: &Rc<UiContext>, anchor: &gtk::Widget, playlist_id: String
     });
 }
 
-/// Port of on_new_playlist_clicked: title, description and, signed in, where
-/// to keep it and its visibility. `on_created` gets the new id and title; a
-/// YouTube playlist is reported once the browse endpoint serves it.
 pub fn ask_new_playlist(ctx: &Rc<UiContext>, parent: &impl IsA<gtk::Widget>, on_created: impl Fn(String, String) + 'static) {
     let signed_in = ctx.net.client().is_authenticated();
     let dialog = adw::Dialog::builder().title("New Playlist").content_width(500).build();
@@ -63,7 +57,6 @@ pub fn ask_new_playlist(ctx: &Rc<UiContext>, parent: &impl IsA<gtk::Widget>, on_
     let title_row = adw::EntryRow::builder().title("Title").activates_default(true).build();
     let desc_row = adw::EntryRow::builder().title("Description").build();
     let privacy_row = adw::ComboRow::builder().title("Visibility").model(&gtk::StringList::new(&["Public", "Private", "Unlisted"])).selected(1).build();
-    // Signed out, the only place is this device. Signed in, the account is the default.
     let where_row = adw::ComboRow::builder().title("Save To").model(&gtk::StringList::new(&["YouTube Music", "This device"])).selected(if signed_in { 0 } else { 1 }).visible(signed_in).build();
     {
         let privacy_row = privacy_row.clone();
@@ -102,7 +95,6 @@ pub fn ask_new_playlist(ctx: &Rc<UiContext>, parent: &impl IsA<gtk::Widget>, on_
         let title_c = title.clone();
         let handle = ctx.net.spawn(async move {
             let id = crate::net::playlists::create_playlist(&api, &title_c, &description, privacy).await?;
-            // The browse endpoint needs a moment before it will serve it.
             crate::net::playlists::await_playlist(&api, &id).await;
             Ok::<String, crate::net::ytmusic::NetError>(id)
         });

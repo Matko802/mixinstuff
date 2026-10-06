@@ -1,9 +1,3 @@
-//! Playlists and likes kept on this device, for listeners without a Google
-//! account. A SQLite file in the data dir, one row per track, so a like or an
-//! added song writes one row rather than the whole library. Ids carry the
-//! `LOCAL_` prefix so every page can tell them from YouTube's and route writes
-//! here instead of to the network. Tracks are stored whole as JSON in their
-//! row, so a page renders them offline.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -16,12 +10,9 @@ use crate::net::playlists::PlaylistDetails;
 use crate::paths::Paths;
 
 pub const PREFIX: &str = "LOCAL_";
-/// The likes list. It is a playlist to the pages, never edited or deleted.
 pub const LIKED_ID: &str = "LOCAL_LIKED";
 pub const LIKED_TITLE: &str = "Liked Songs";
-/// YouTube's own art for its likes list, so both lists wear the same cover.
 pub const LIKED_ART: &str = "https://www.gstatic.com/youtube/media/ytm/images/pbg/liked-songs-delhi-576.png";
-/// What cards and headers say instead of an author.
 pub const HERE: &str = "On this device";
 
 const SCHEMA: &str = "
@@ -60,13 +51,9 @@ CREATE TABLE IF NOT EXISTS artists (
 );
 ";
 
-/// Columns added after a table first shipped. Each runs once; on a database that
-/// has the column already the statement fails and is ignored.
 const MIGRATIONS: [&str; 1] = ["ALTER TABLE artists ADD COLUMN subscribers TEXT"];
 
-/// Plays older than this leave the log, so the feed follows current taste.
 const PLAYS_KEPT_SECS: u64 = 180 * 24 * 3600;
-/// And never more rows than this.
 const PLAYS_KEPT_ROWS: i64 = 5000;
 
 pub fn is_local(id: &str) -> bool {
@@ -92,9 +79,6 @@ impl LocalLibrary {
         Arc::new(library)
     }
 
-    /// Run a query on the open connection, opening it on the first call. A
-    /// failure is logged and answered with the default, never a crash: the
-    /// library is a convenience, not the app.
     fn with_db<T: Default>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> T {
         let mut guard = self.db.lock().unwrap();
         if guard.is_none() {
@@ -121,9 +105,7 @@ impl LocalLibrary {
         }
     }
 
-    // -- reading -----------------------------------------------------------
 
-    /// Cards for the library page and the add-to-playlist popover: likes first, then playlists, newest change first.
     pub fn items(&self) -> Vec<MediaItem> {
         let mut items = vec![self.liked_item()];
         items.extend(self.playlist_items());
@@ -171,7 +153,6 @@ impl LocalLibrary {
         })
     }
 
-    /// What the playlist page renders, in the shape the network gives it.
     pub fn details(&self, id: &str) -> Option<PlaylistDetails> {
         let (title, description) = if id == LIKED_ID {
             (LIKED_TITLE.to_owned(), String::new())
@@ -207,13 +188,11 @@ impl LocalLibrary {
         self.tracks_of(LIKED_ID)
     }
 
-    // -- writing -----------------------------------------------------------
 
     pub fn create(&self, title: &str, description: &str) -> String {
         let now = now();
         let id = format!("{PREFIX}{now:x}{:04x}", std::process::id() & 0xffff);
         self.with_db(|db| {
-            // A second list within the same second gets a suffix.
             let mut candidate = id.clone();
             let mut n = 0;
             while db.query_row("SELECT 1 FROM playlists WHERE id = ?1", params![candidate], |_| Ok(())).optional()?.is_some() {
@@ -245,7 +224,6 @@ impl LocalLibrary {
         });
     }
 
-    /// Append what is not there yet. Returns how many were new.
     pub fn add_tracks(&self, id: &str, tracks: &[Track]) -> usize {
         self.with_db(|db| {
             let exists: Option<i64> = db.query_row("SELECT 1 FROM playlists WHERE id = ?1", params![id], |r| r.get(0)).optional()?;
@@ -266,7 +244,6 @@ impl LocalLibrary {
         })
     }
 
-    /// Remove by video id. The likes list unlikes instead.
     pub fn remove_tracks(&self, id: &str, video_ids: &[String]) {
         self.with_db(|db| {
             let tx = db.unchecked_transaction()?;
@@ -299,9 +276,7 @@ impl LocalLibrary {
         });
     }
 
-    // -- subscriptions -------------------------------------------------------
 
-    /// Artists followed on this device, newest first, as library cards.
     pub fn subscriptions(&self) -> Vec<MediaItem> {
         self.with_db(|db| {
             let mut stmt = db.prepare("SELECT id, name, thumb, subscribers FROM artists ORDER BY subscribed_at DESC, rowid DESC")?;
@@ -316,8 +291,6 @@ impl LocalLibrary {
         self.with_db(|db| db.query_row("SELECT 1 FROM artists WHERE id = ?1", params![artist_id], |_| Ok(true)).optional().map(|found| found.unwrap_or(false)))
     }
 
-    /// Follow or drop an artist. `artist` carries the card: name, picture and
-    /// the subscriber count as the page shows it, "19.1M".
     pub fn set_subscribed(&self, artist: &MediaItem, subscribed: bool) {
         self.with_db(|db| {
             if subscribed {
@@ -332,7 +305,6 @@ impl LocalLibrary {
         });
     }
 
-    /// Fresh name, picture and count for a followed artist, keeping its place in the list.
     pub fn refresh_subscription(&self, artist: &MediaItem) {
         self.with_db(|db| {
             db.execute(
@@ -343,9 +315,7 @@ impl LocalLibrary {
         });
     }
 
-    // -- listening -----------------------------------------------------------
 
-    /// One real listen, for the feed built without an account.
     pub fn log_play(&self, track: &Track) {
         let json = serde_json::to_string(track).unwrap_or_default();
         let now = now() as i64;
@@ -359,7 +329,6 @@ impl LocalLibrary {
         });
     }
 
-    /// The last songs played, newest first, each once.
     pub fn recent_plays(&self, limit: usize) -> Vec<Track> {
         self.with_db(|db| {
             let mut stmt = db.prepare("SELECT track_json FROM plays GROUP BY video_id ORDER BY MAX(played_at) DESC, MAX(id) DESC LIMIT ?1")?;
@@ -368,7 +337,6 @@ impl LocalLibrary {
         })
     }
 
-    /// Every play, newest first, with its time in seconds, for the history page.
     pub fn play_history(&self, limit: usize) -> Vec<(Track, i64)> {
         self.with_db(|db| {
             let mut stmt = db.prepare("SELECT track_json, played_at FROM plays ORDER BY played_at DESC, id DESC LIMIT ?1")?;
@@ -377,12 +345,10 @@ impl LocalLibrary {
         })
     }
 
-    /// Drop every play of a song from the log.
     pub fn forget_plays(&self, video_id: &str) {
         self.with_db(|db| db.execute("DELETE FROM plays WHERE video_id = ?1", params![video_id]).map(|_| ()));
     }
 
-    /// The songs played most since `since_secs` ago, most first.
     pub fn top_plays(&self, since_secs: u64, limit: usize) -> Vec<Track> {
         let since = now().saturating_sub(since_secs) as i64;
         self.with_db(|db| {
@@ -392,7 +358,6 @@ impl LocalLibrary {
         })
     }
 
-    /// Every play since `since_secs` ago, one track per play, for counting artists.
     pub fn plays_since(&self, since_secs: u64) -> Vec<Track> {
         let since = now().saturating_sub(since_secs) as i64;
         self.with_db(|db| {
@@ -402,13 +367,11 @@ impl LocalLibrary {
         })
     }
 
-    /// A bare track for a like made from a card that carries no more than an id.
     pub fn track_or_stub(&self, video_id: &VideoId, known: Option<Track>) -> Track {
         known.unwrap_or_else(|| Track { video_id: video_id.clone(), title: "Unknown".to_owned(), ..Track::default() })
     }
 }
 
-/// Rows are removed by (video id, set video id). Ours are the video id, which is unique per list.
 fn with_set_id(mut track: Track) -> Track {
     track.set_video_id = Some(track.video_id.0.clone());
     track
@@ -418,7 +381,6 @@ fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-/// Likes are ordered by this, so two in one second keep their order.
 fn now_millis() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }

@@ -304,7 +304,7 @@
           <li>Added ability to change between grid and list view for library</li>
           <li>Fixed bug where download would override M3U with incomplete tracklist</li>
           <li>Added expanded cover view for large screens</li>
-          <li>Added refresh to some pages</li> 
+          <li>Added refresh to some pages</li>
           <li>Smaller fixes</li>
         </ul>
       </description>

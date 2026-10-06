@@ -1,4 +1,3 @@
-//! Reusable widgets shared by pages and player views.
 
 pub mod add_to_playlist;
 pub mod card_grid;

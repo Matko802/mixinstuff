@@ -1,6 +1,3 @@
-//! Wires the player to the services that publish what is playing: the
-//! scrobbler and Discord Rich Presence. Both follow `PlayerState` on the GTK
-//! thread and do their network work elsewhere.
 
 use std::rc::Rc;
 
@@ -33,13 +30,10 @@ fn wire_scrobbler(ctx: &Rc<App>) {
         let scrobbler = ctx.scrobbler.clone();
         state.connect_status_notify(move |state| scrobbler.on_state_changed(state.status() == PlaybackStatus::Playing));
     }
-    // The clock hangs off the position tick, not the status: a queue played
-    // straight through never reports a transition back into playing.
     let scrobbler = ctx.scrobbler.clone();
     state.connect_position_notify(move |state| scrobbler.on_progress(state.duration(), state.status() == PlaybackStatus::Playing));
 }
 
-/// Build the activity from the player as it stands and hand it to the worker.
 pub fn update_discord(ctx: &App) {
     if !ctx.discord.is_enabled() {
         return;

@@ -1,7 +1,3 @@
-//! The Pillow operations cover_effects.py leans on, ported from libImaging so
-//! the Rust app lands on the same pixels: Resample.c, Reduce.c, BoxBlur.c,
-//! Blend.c and the median cut of Quant.c. Integer widths, float widths and
-//! rounding follow the C, which is why f32 and wrapping u32 show up here.
 
 use std::collections::HashMap;
 
@@ -11,7 +7,6 @@ const BANDS: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Filter {
-    /// Pillow's default for Image.resize.
     Bicubic,
     Lanczos,
 }
@@ -49,7 +44,6 @@ fn new_image(width: usize, height: usize, data: Vec<u8>) -> RgbImage {
     RgbImage::from_raw(width as u32, height as u32, data).expect("buffer matches its size")
 }
 
-/// Image.resize((width, height), filter) over the whole image.
 pub fn resize(img: &RgbImage, width: u32, height: u32, filter: Filter) -> RgbImage {
     if img.dimensions() == (width, height) {
         return img.clone();
@@ -57,8 +51,6 @@ pub fn resize(img: &RgbImage, width: u32, height: u32, filter: Filter) -> RgbIma
     resample(img, width, height, filter, [0.0, 0.0, img.width() as f32, img.height() as f32])
 }
 
-/// Image.thumbnail((max_width, max_height), filter) with Pillow's default reducing_gap of 2.0:
-/// an integer box reduce first, then the filter over what is left.
 pub fn thumbnail(img: &RgbImage, max_width: u32, max_height: u32, filter: Filter) -> RgbImage {
     const REDUCING_GAP: f64 = 2.0;
     let Some((width, height)) = thumbnail_size(img.width(), img.height(), max_width, max_height) else { return img.clone() };
@@ -70,7 +62,6 @@ pub fn thumbnail(img: &RgbImage, max_width: u32, max_height: u32, filter: Filter
     if factor_x == 1 && factor_y == 1 {
         return resize(img, width, height, filter);
     }
-    // The source box in reduced coordinates is fractional when the factor does not divide the size.
     let area = [0.0, 0.0, (f64::from(img.width()) / f64::from(factor_x)) as f32, (f64::from(img.height()) / f64::from(factor_y)) as f32];
     let reduced = reduce(img, factor_x, factor_y);
     if reduced.dimensions() == (width, height) && area[2] == width as f32 && area[3] == height as f32 {
@@ -79,12 +70,10 @@ pub fn thumbnail(img: &RgbImage, max_width: u32, max_height: u32, filter: Filter
     resample(&reduced, width, height, filter, area)
 }
 
-/// The size Image.thumbnail settles on, None when the image already fits.
 fn thumbnail_size(width: u32, height: u32, max_width: u32, max_height: u32) -> Option<(u32, u32)> {
     if max_width >= width && max_height >= height {
         return None;
     }
-    // min(floor, ceil, key=...) keeps the floor on a tie.
     let round_aspect = |number: f64, key: &dyn Fn(f64) -> f64| {
         let (floor, ceil) = (number.floor(), number.ceil());
         let pick = if key(ceil) < key(floor) { ceil } else { floor };
@@ -99,7 +88,6 @@ fn thumbnail_size(width: u32, height: u32, max_width: u32, max_height: u32) -> O
     }
 }
 
-/// Fixed-point weights for one axis: per output pixel, the first source pixel and its weights.
 struct Coeffs {
     ksize: usize,
     bounds: Vec<(usize, usize)>,
@@ -129,7 +117,6 @@ fn precompute_coeffs(in_size: usize, in0: f32, in1: f32, out_size: usize, filter
         }
         for (x, w) in row.iter().enumerate().take(count) {
             let w = if total != 0.0 { w / total } else { *w };
-            // Rounded away from zero into 22 fractional bits, as normalize_coeffs_8bpc does.
             let scaled = w * f64::from(1u32 << PRECISION_BITS);
             weights[xx * ksize + x] = if w < 0.0 { (scaled - 0.5) as i64 } else { (scaled + 0.5) as i64 };
         }
@@ -142,8 +129,6 @@ fn clip8(sum: i64) -> u8 {
     (sum >> PRECISION_BITS).clamp(0, 255) as u8
 }
 
-/// ImagingResample: a horizontal pass, then a vertical one, each rounding to 8 bits.
-/// `area` is the source box (x0, y0, x1, y1), which Pillow carries as C floats.
 fn resample(img: &RgbImage, width: u32, height: u32, filter: Filter, area: [f32; 4]) -> RgbImage {
     let (in_w, in_h) = (img.width() as usize, img.height() as usize);
     let (out_w, out_h) = (width as usize, height as usize);
@@ -180,12 +165,10 @@ fn resample(img: &RgbImage, width: u32, height: u32, filter: Filter, area: [f32;
     new_image(out_w, out_h, out)
 }
 
-/// division_UINT32(divider, 8): the reciprocal Reduce.c multiplies by, computed in a C float.
 fn reduce_multiplier(cells: u32) -> u32 {
     (4_294_967_296.0f32 / (256 * cells) as f32) as u32
 }
 
-/// Image.reduce((factor_x, factor_y)): box averages, with partial boxes on the far edges.
 fn reduce(img: &RgbImage, factor_x: u32, factor_y: u32) -> RgbImage {
     let (in_w, in_h) = (img.width() as usize, img.height() as usize);
     let (fx, fy) = (factor_x as usize, factor_y as usize);
@@ -212,7 +195,6 @@ fn reduce(img: &RgbImage, factor_x: u32, factor_y: u32) -> RgbImage {
     new_image(out_w, out_h, out)
 }
 
-/// _gaussian_blur_radius: the box radius whose three passes have the asked standard deviation.
 fn gaussian_box_radius(radius: f32, passes: u8) -> f32 {
     let sigma2 = radius * radius / f32::from(passes);
     let length = (12.0 * f64::from(sigma2) + 1.0).sqrt() as f32;
@@ -222,7 +204,6 @@ fn gaussian_box_radius(radius: f32, passes: u8) -> f32 {
     whole + fraction
 }
 
-/// ImagingLineBoxBlur8 on one channel of one line. Edges extend the border pixel.
 fn box_blur_line(out: &mut [u8], line: &[u8], radius: usize, ww: u32, fw: u32) {
     let size = line.len();
     let lastx = size - 1;
@@ -263,7 +244,6 @@ fn box_blur_line(out: &mut [u8], line: &[u8], radius: usize, ww: u32, fw: u32) {
     }
 }
 
-/// `passes` box blurs along lines of `len` pixels. `at` maps (line, position) to a pixel index.
 fn box_blur_axis(data: &mut [u8], lines: usize, len: usize, float_radius: f32, passes: u8, at: impl Fn(usize, usize) -> usize) {
     let radius = float_radius as usize;
     let ww = (16_777_216.0f32 / (float_radius * 2.0 + 1.0)) as u32;
@@ -286,7 +266,6 @@ fn box_blur_axis(data: &mut [u8], lines: usize, len: usize, float_radius: f32, p
     }
 }
 
-/// ImageFilter.GaussianBlur(radius): three box blurs per axis, rows first.
 pub fn gaussian_blur(img: &RgbImage, radius: f32) -> RgbImage {
     const PASSES: u8 = 3;
     let (width, height) = (img.width() as usize, img.height() as usize);
@@ -300,7 +279,6 @@ pub fn gaussian_blur(img: &RgbImage, radius: f32) -> RgbImage {
     new_image(width, height, data)
 }
 
-/// One channel of ImagingBlend. C float math, truncated rather than rounded.
 fn blend_channel(from: u8, to: u8, alpha: f32) -> u8 {
     let value = f32::from(from) + alpha * (f32::from(to) - f32::from(from));
     if (0.0..=1.0).contains(&alpha) {
@@ -322,35 +300,29 @@ fn map_pixels(img: &RgbImage, f: impl Fn([u8; 3]) -> [u8; 3]) -> RgbImage {
     out
 }
 
-/// ImageEnhance.Brightness(img).enhance(factor): a blend up from black.
 pub fn brightness(img: &RgbImage, factor: f64) -> RgbImage {
     let alpha = factor as f32;
     map_pixels(img, |p| p.map(|c| blend_channel(0, c, alpha)))
 }
 
-/// ImageEnhance.Color(img).enhance(factor): a blend away from the grayscale copy.
 pub fn saturation(img: &RgbImage, factor: f64) -> RgbImage {
     let alpha = factor as f32;
     map_pixels(img, |p| {
-        // The ITU-R 601 luma of convert("L").
         let luma = ((u32::from(p[0]) * 19595 + u32::from(p[1]) * 38470 + u32::from(p[2]) * 7471 + 0x8000) >> 16) as u8;
         p.map(|c| blend_channel(luma, c, alpha))
     })
 }
 
-/// Image.blend(img, white, alpha).
 pub fn blend_toward_white(img: &RgbImage, alpha: f64) -> RgbImage {
     let alpha = alpha as f32;
     map_pixels(img, |p| p.map(|c| blend_channel(c, 255, alpha)))
 }
 
-/// One distinct color of the image and how many pixels carry it.
 struct Swatch {
     rgb: [u8; 3],
     count: u32,
 }
 
-/// A median cut box: its swatches, listed once per axis in descending order of that channel.
 struct CutBox {
     lists: [Vec<usize>; 3],
     pixel_count: u32,
@@ -368,15 +340,12 @@ impl CutBox {
     }
 }
 
-/// QuantHeap.c: a binary max-heap on pixel count. Ported as is, since its
-/// handling of equal counts decides which box is cut next.
 struct BoxHeap {
     slots: Vec<usize>,
 }
 
 impl BoxHeap {
     fn new() -> Self {
-        // Slot 0 is unused, the C heap is one-based.
         Self { slots: vec![usize::MAX] }
     }
 
@@ -424,11 +393,8 @@ impl BoxHeap {
     }
 }
 
-/// Quant.c split(): cut along the axis with the widest weighted extent, at the
-/// channel value where the running pixel count passes half.
 fn split(boxes: &mut Vec<CutBox>, swatches: &[Swatch], flags: &mut [bool], node: usize) -> (usize, usize) {
     const AXIS_WEIGHTS: [i32; 3] = [77, 150, 29];
-    // The first axis wins a tie.
     let (mut axis, mut best) = (0, i32::MIN);
     for (candidate, weight) in AXIS_WEIGHTS.iter().enumerate() {
         let spread = boxes[node].extent(swatches, candidate) * weight;
@@ -449,7 +415,6 @@ fn split(boxes: &mut Vec<CutBox>, swatches: &[Swatch], flags: &mut [bool], node:
             break;
         }
     }
-    // A channel value is never divided between the halves.
     if at < list.len() {
         let value = swatches[list[at - 1]].rgb[axis];
         while at < list.len() && swatches[list[at]].rgb[axis] == value {
@@ -461,7 +426,6 @@ fn split(boxes: &mut Vec<CutBox>, swatches: &[Swatch], flags: &mut [bool], node:
         flags[swatch] = true;
     }
     if at == list.len() {
-        // Nothing fell right: hand it the lowest channel value.
         let value = swatches[*list.last().expect("box is not empty")].rgb[axis];
         for &swatch in list.iter().rev().take_while(|&&s| swatches[s].rgb[axis] == value) {
             flags[swatch] = true;
@@ -487,7 +451,6 @@ fn split(boxes: &mut Vec<CutBox>, swatches: &[Swatch], flags: &mut [bool], node:
     ids
 }
 
-/// Leaves in the order annotate_hash_table numbers them: depth first, left before right.
 fn collect_leaves(boxes: &[CutBox], node: usize, out: &mut Vec<usize>) {
     match boxes[node].children {
         Some((left, right)) => {
@@ -499,8 +462,6 @@ fn collect_leaves(boxes: &[CutBox], node: usize, out: &mut Vec<usize>) {
     }
 }
 
-/// img.quantize(colors, method=MEDIANCUT) followed by getcolors():
-/// each used palette entry with its pixel count, in palette order.
 pub fn quantize_median_cut(img: &RgbImage, colors: usize) -> Vec<(u32, [u8; 3])> {
     let mut histogram: HashMap<[u8; 3], u32> = HashMap::new();
     for pixel in img.pixels() {
@@ -510,7 +471,6 @@ pub fn quantize_median_cut(img: &RgbImage, colors: usize) -> Vec<(u32, [u8; 3])>
         return Vec::new();
     }
     let mut swatches: Vec<Swatch> = histogram.into_iter().map(|(rgb, count)| Swatch { rgb, count }).collect();
-    // Hash order varies per run. Where equal channel values sit in a list never changes a cut, this only keeps runs alike.
     swatches.sort_by_key(|s| s.rgb);
 
     let sorted_by = |axis: usize| {
@@ -524,7 +484,6 @@ pub fn quantize_median_cut(img: &RgbImage, colors: usize) -> Vec<(u32, [u8; 3])>
     heap.add(&boxes, 0);
     let mut flags = vec![false; swatches.len()];
     'cuts: for _ in 1..colors {
-        // Boxes of one color cannot be cut. They leave the heap and stay leaves.
         let node = loop {
             match heap.remove(&boxes) {
                 Some(node) if boxes[node].is_single_color(&swatches) => continue,
@@ -557,7 +516,6 @@ pub fn quantize_median_cut(img: &RgbImage, colors: usize) -> Vec<(u32, [u8; 3])>
         })
         .collect();
 
-    // Pixels then move to the nearest entry. Their own box wins a tie, then the entry nearest to it.
     let dist = |a: [u8; 3], b: [u8; 3]| (0..3).map(|i| (i32::from(a[i]) - i32::from(b[i])).pow(2)).sum::<i32>();
     let order: Vec<Vec<usize>> = (0..palette.len())
         .map(|entry| {
@@ -582,22 +540,18 @@ pub fn quantize_median_cut(img: &RgbImage, colors: usize) -> Vec<(u32, [u8; 3])>
     palette.into_iter().zip(counts).filter(|&(_, count)| count > 0).map(|(rgb, count)| (count, rgb)).collect()
 }
 
-/// Synthetic covers, built by the same formulas as tools/cover_effects_ref.py (in git history, removed with the Python app), which asks Pillow for the expected values.
 #[cfg(test)]
 pub mod fixtures {
     use image::RgbImage;
 
-    /// High-frequency color noise.
     pub fn noisy(w: u32, h: u32) -> RgbImage {
         RgbImage::from_fn(w, h, |x, y| image::Rgb([((x * 7 + y * 3) % 256) as u8, ((x * x / 8 + y * 5) % 256) as u8, ((x * y / 4) % 256) as u8]))
     }
 
-    /// Red and green ramps under a blue checkerboard.
     pub fn smooth(w: u32, h: u32) -> RgbImage {
         RgbImage::from_fn(w, h, |x, y| image::Rgb([(x * 255 / (w - 1)) as u8, (y * 255 / (h - 1)) as u8, (((x / 16 + y / 16) % 2) * 200 + 20) as u8]))
     }
 
-    /// A gray ramp: no chromatic bin, plenty of detail.
     pub fn gray_ramp(w: u32, h: u32) -> RgbImage {
         RgbImage::from_fn(w, h, |x, _| image::Rgb([(x * 255 / (w - 1)) as u8; 3]))
     }
@@ -606,7 +560,6 @@ pub mod fixtures {
         RgbImage::from_pixel(w, h, image::Rgb([120, 120, 120]))
     }
 
-    /// FNV-1a over the raw bytes, enough to pin a whole image to Pillow's output.
     pub fn fnv(img: &RgbImage) -> u64 {
         img.as_raw().iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
     }
@@ -632,12 +585,10 @@ mod tests {
 
     #[test]
     fn thumbnail_matches_pillow_with_and_without_the_box_reduce() {
-        // 517x389 reduces by 2 with a ragged edge, 800x800 by 3 into a fractional box, 1280x720 by 5.
         assert_pillow("noisy_517x389_thumb", &thumbnail(&noisy(517, 389), 128, 128, Filter::Lanczos), (128, 96), 0x5fefc2858a22b6ab);
         assert_pillow("smooth_800x800_thumb", &thumbnail(&smooth(800, 800), 128, 128, Filter::Lanczos), (128, 128), 0x7c0636c05e7a8f7a);
         assert_pillow("noisy_1280x720_thumb", &thumbnail(&noisy(1280, 720), 128, 128, Filter::Lanczos), (128, 72), 0x5c67b350c1eee7c0);
         assert_pillow("smooth_97x131_thumb", &thumbnail(&smooth(97, 131), 128, 128, Filter::Lanczos), (95, 128), 0x8e4a7058bfc8c90f);
-        // Already small enough: untouched.
         assert_pillow("smooth_100x60_thumb", &thumbnail(&smooth(100, 60), 128, 128, Filter::Lanczos), (100, 60), 0x269594c5678cd181);
     }
 
@@ -667,7 +618,6 @@ mod tests {
 
     #[test]
     fn median_cut_stops_at_the_colors_a_cover_has() {
-        // One color cannot be cut, and two colors make two boxes however many are asked for.
         assert_eq!(quantize_median_cut(&flat(40, 30), 32), [(1200, [120, 120, 120])]);
         let mut two = flat(40, 30);
         two.put_pixel(0, 0, image::Rgb([10, 200, 30]));

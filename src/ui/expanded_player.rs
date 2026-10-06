@@ -1,6 +1,3 @@
-//! Port of ui/expanded_player.py: the mobile sheet with a Player / Queue /
-//! Lyrics toggle, a cover carousel over the queue, metadata with like,
-//! seek bar, transport row over the visualizer.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -22,8 +19,6 @@ use crate::ui::widgets::visualizer::Visualizer;
 const MAX_CAROUSEL_COVERS: usize = 31;
 const CAROUSEL_PRELOAD_RADIUS: usize = 5;
 const USER_INPUT_WINDOW: Duration = Duration::from_millis(800);
-/// Scroll events arrive as a stream with no beginning of their own. A pause
-/// longer than this starts a new gesture, and with it a new baseline.
 const GESTURE_GAP: Duration = Duration::from_millis(600);
 
 pub struct ExpandedPlayer {
@@ -36,21 +31,15 @@ pub struct ExpandedPlayer {
     ignore_page_change: Cell<bool>,
     more_btn: gtk::MenuButton,
     user_input_at: Cell<Option<Instant>>,
-    /// Where the carousel sat when the current gesture began. A settle that
-    /// did not move from here is a tap, not a swipe.
     gesture_start: Cell<Option<f64>>,
-    /// Set while a centre is waiting for the carousel to be laid out.
     center_pending: Cell<bool>,
     title: Rc<MarqueeLabel>,
     artists_box: gtk::Box,
     like: Rc<LikeButton>,
-    /// Held so the transport's state bindings stay alive with the view.
     #[allow(dead_code)]
     transport: Rc<Transport>,
     visualizer: Rc<Visualizer>,
-    /// A metadata update is already queued for the next idle.
     metadata_pending: Cell<bool>,
-    /// Kept alive here. The widget tree only holds its root box.
     #[allow(dead_code)]
     lyrics_view: Rc<LyricsView>,
     height_probe: gtk::ScrolledWindow,
@@ -91,7 +80,6 @@ impl ExpandedPlayer {
         }
         root.append(&toggle_nav);
 
-        // -- player view -------------------------------------------------
         let main_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(12)
@@ -200,7 +188,6 @@ impl ExpandedPlayer {
         controls_overlay.set_measure_overlay(&controls_content, true);
         main_box.append(&controls_overlay);
 
-        // The sheet sizes to natural height: the probe claims a tall natural, near-zero minimum.
         let height_probe = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vscrollbar_policy(gtk::PolicyType::External)
@@ -227,7 +214,6 @@ impl ExpandedPlayer {
             "folder-music-symbolic",
         );
 
-        // -- queue and lyrics views --------------------------------------
         let queue_panel = QueuePanel::new(ctx.clone());
         queue_panel.widget().set_vexpand(true);
         let lyrics_view = LyricsView::new(ctx.clone());
@@ -269,9 +255,6 @@ impl ExpandedPlayer {
             on_dismiss: RefCell::new(None),
         });
 
-        // The menu is rebuilt whenever the track changes, like the Python
-        // view. A menu button with no model is insensitive, so building it
-        // only on activate would leave the button dead.
         this.refresh_more_menu();
 
         this.connect_toggles();
@@ -290,17 +273,14 @@ impl ExpandedPlayer {
         self.on_dismiss.replace(Some(Rc::new(f)));
     }
 
-    /// Back to the player page, so the sheet opens on it next time.
     pub fn show_player_page(&self) {
         self.show_page("player");
     }
 
-    /// Show "player", "queue" or "lyrics".
     pub fn show_page(&self, name: &str) {
         self.view_stack.set_visible_child_name(name);
     }
 
-    /// Inside the bottom sheet the toggle row shows and the probe is live.
     pub fn set_compact_mode(&self, compact: bool) {
         self.toggle_nav.set_visible(compact);
         self.height_probe.set_visible(compact);
@@ -333,11 +313,6 @@ impl ExpandedPlayer {
     }
 
     fn connect_carousel(self: &Rc<Self>, cover_frame: &gtk::AspectFrame) {
-        // Every part of a gesture counts, not only its start: a slow swipe can
-        // take seconds, and the carousel settles after the finger lifts. A raw
-        // controller, because on a touchscreen the carousel's swipe tracker
-        // claims the sequence and a gesture here is cancelled with it, so a
-        // slow touch swipe used to look like no input at all once it settled.
         let events = gtk::EventControllerLegacy::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
         let weak = Rc::downgrade(self);
         events.connect_event(move |_, event| {
@@ -345,7 +320,6 @@ impl ExpandedPlayer {
             let begins = match event.event_type() {
                 EventType::TouchBegin | EventType::ButtonPress => true,
                 EventType::TouchUpdate | EventType::TouchEnd | EventType::TouchCancel | EventType::ButtonRelease => false,
-                // A mouse drag moves the carousel too, hovering does not.
                 EventType::MotionNotify if event.modifier_state().contains(gtk::gdk::ModifierType::BUTTON1_MASK) => false,
                 _ => return glib::Propagation::Proceed,
             };
@@ -377,9 +351,6 @@ impl ExpandedPlayer {
             if !touched_recently(since_input) || !settled_on_a_page(position) {
                 return;
             }
-            // The carousel counts pages, not covers. Resolve the page that is
-            // showing and ask the list where it sits, so a hidden cover can
-            // never send the player somewhere else.
             let index = position.round() as u32;
             if index >= carousel.n_pages() {
                 return;
@@ -391,10 +362,6 @@ impl ExpandedPlayer {
             if queue_index as i32 == current {
                 return;
             }
-            // A flick can carry several covers, so any distance counts as long
-            // as the carousel actually moved under the finger. A settle that
-            // did not move is the carousel sitting out of step with the queue,
-            // and following it is what used to jump to another track.
             if swiped(position, ep.gesture_start.get()) {
                 tracing::debug!(queue_index, current, since_input = ?since_input, "carousel swipe");
                 ep.ctx.player.play_queue_index(queue_index);
@@ -404,7 +371,6 @@ impl ExpandedPlayer {
             }
         });
 
-        // Tap on the cover toggles play, like the Python view.
         let tap = gtk::GestureClick::new();
         let player = self.ctx.player.clone();
         tap.connect_released(move |_, _, _, _| player.toggle_play());
@@ -430,8 +396,6 @@ impl ExpandedPlayer {
             "like-status",
         ] {
             let weak = Rc::downgrade(self);
-            // A track change moves all five properties in a row. One update on the
-            // next idle covers them, where each used to rebuild the labels and the menu.
             state.connect_notify_local(Some(prop), move |_, _| {
                 let Some(ep) = weak.upgrade() else { return };
                 if ep.metadata_pending.replace(true) {
@@ -549,8 +513,6 @@ impl ExpandedPlayer {
         let extras = vec![crate::ui::context_menu::MenuAction::new("Stream Info (Debug)", crate::ui::context_menu::Section::Debug, move || this.show_stream_info())];
         let opts = crate::ui::context_menu::SongMenuOptions {
             prefix: "ep",
-            // The view already shows the artist as a link and the cover for
-            // the album, so those entries would only repeat it.
             hide: &["play_next", "add_to_queue", "goto_artist", "goto_album"],
             nav: Some(self.ctx.nav.clone()),
             ctx: Some(self.ctx.clone()),
@@ -561,7 +523,6 @@ impl ExpandedPlayer {
         self.more_btn.set_menu_model(model.as_ref());
     }
 
-    /// Port of _show_stream_info: what is playing and how the pipeline sees it.
     pub fn visualizer(&self) -> &Rc<Visualizer> {
         &self.visualizer
     }
@@ -570,7 +531,6 @@ impl ExpandedPlayer {
         present_stream_info(&self.ctx, self.root.upcast_ref::<gtk::Widget>());
     }
 
-    // -- carousel over the queue ------------------------------------------
 
     fn center_carousel(&self) {
         let idx = self.ctx.player.state().current_index();
@@ -579,15 +539,12 @@ impl ExpandedPlayer {
         }
         let page = (idx as usize).saturating_sub(self.cover_offset.get());
         if let Some(cover) = self.covers.borrow().get(page) {
-            // A sync in flight keeps its own guard: restore what was there.
             let guarded = self.ignore_page_change.replace(true);
             self.carousel.scroll_to(cover.widget(), false);
             self.ignore_page_change.set(guarded);
         }
     }
 
-    /// Demo hook: a gesture that takes two seconds, then settles `covers`
-    /// along. Stands in for a swipe, which no test harness can send.
     pub fn slow_swipe_for_demo(self: &Rc<Self>, covers: i32) {
         let this = self.clone();
         let ticks = std::cell::Cell::new(0u32);
@@ -608,11 +565,6 @@ impl ExpandedPlayer {
         });
     }
 
-    /// Remember that the listener is working the carousel.
-    ///
-    /// The clock runs from the last movement, so a swipe that takes its time
-    /// still counts. `begins` marks the start of a gesture, where the baseline
-    /// for judging a swipe is taken.
     fn note_input(&self, begins: bool) {
         let now = Instant::now();
         let fresh = begins || self.user_input_at.get().is_none_or(|last| now.duration_since(last) > GESTURE_GAP);
@@ -622,14 +574,6 @@ impl ExpandedPlayer {
         self.user_input_at.set(Some(now));
     }
 
-    /// Put the playing track's cover in view once the carousel has a size.
-    ///
-    /// A carousel that has never been laid out cannot scroll, and the sheet is
-    /// laid out only when it opens. Centring at that moment alone leaves the
-    /// view on the first cover, which is why opening the sheet used to show
-    /// the wrong song and a swipe played the second one. The frame callback
-    /// runs only while the widget is mapped, so this settles on the first
-    /// frame the sheet is actually on screen.
     fn center_when_ready(self: &Rc<Self>) {
         if self.center_pending.replace(true) {
             return;
@@ -684,16 +628,12 @@ impl ExpandedPlayer {
         let lo = page.saturating_sub(CAROUSEL_PRELOAD_RADIUS);
         let hi = (page + CAROUSEL_PRELOAD_RADIUS).min(covers.len() - 1);
         for (i, cover) in covers.iter().enumerate() {
-            // The playing track falls back to the artwork the bar is showing:
-            // a radio row often carries no thumbnail of its own.
             let track = tracks.get(offset + i);
             let thumb = match track.and_then(|t| t.thumb.clone()) {
                 Some(thumb) => thumb,
                 None if i == page => self.ctx.player.state().thumbnail_url(),
                 None => String::new(),
             };
-            // Every cover stays a page, with a placeholder when there is no
-            // art. Hiding one would shift every page index after it.
             cover.widget().set_visible(true);
             if i >= lo && i <= hi {
                 cover.load_track(track.map_or("", |t| t.video_id.0.as_str()), &thumb);
@@ -705,8 +645,6 @@ impl ExpandedPlayer {
             self.carousel.scroll_to(cover.widget(), false);
         }
         drop(covers);
-        // The scroll above is lost while the sheet is closed, so ask again for
-        // the first frame after it opens.
         self.center_when_ready();
         let weak = Rc::downgrade(self);
         glib::timeout_add_local_once(Duration::from_millis(200), move || {
@@ -717,10 +655,6 @@ impl ExpandedPlayer {
     }
 }
 
-/// The Stream Info panel, shared by the phone sheet and the desktop view.
-///
-/// The pipeline half is queried on the audio thread, so the text arrives after
-/// a round trip. Copy takes the whole signed URI rather than the shortened one.
 pub fn present_stream_info(ctx: &Rc<UiContext>, anchor: &gtk::Widget) {
     let ctx = ctx.clone();
     let anchor = anchor.clone();
@@ -752,24 +686,14 @@ pub fn present_stream_info(ctx: &Rc<UiContext>, anchor: &gtk::Widget) {
     });
 }
 
-/// Whether the listener has touched the carousel recently enough for a move
-/// to be theirs rather than one the app made.
 fn touched_recently(since_input: Option<Duration>) -> bool {
     since_input.is_some_and(|elapsed| elapsed < USER_INPUT_WINDOW)
 }
 
-/// Whether the carousel has come to rest on a page rather than between two.
 fn settled_on_a_page(position: f64) -> bool {
     (position - position.round()).abs() <= 0.001
 }
 
-/// Whether the carousel moved under the gesture rather than settling where it
-/// already was.
-///
-/// A flick can carry several covers at once, so distance is not capped. What
-/// matters is that the position left the page the gesture started on: a tap
-/// settles where it began, and following that would play whatever cover the
-/// carousel happened to be showing.
 fn swiped(position: f64, gesture_start: Option<f64>) -> bool {
     gesture_start.is_some_and(|start| (position - start).abs() >= 0.5)
 }

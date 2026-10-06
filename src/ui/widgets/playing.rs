@@ -1,5 +1,3 @@
-//! Keeps the `playing` CSS class on whichever registered widget shows the
-//! current track. One state subscription per page instead of one per card.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -25,7 +23,6 @@ impl PlayingTracker {
         tracker
     }
 
-    /// Forget every widget, before a page rebuilds its content.
     pub fn clear(&self) {
         self.entries.borrow_mut().clear();
     }

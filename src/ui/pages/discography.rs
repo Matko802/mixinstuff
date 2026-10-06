@@ -1,5 +1,3 @@
-//! Port of ui/pages/discography.py: an artist's albums, singles or songs as
-//! a justified card grid that loads more as the user scrolls to the bottom.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -95,7 +93,6 @@ impl DiscographyPage {
         &self.root
     }
 
-    /// The window sets its title from this, like the header-title-changed signal.
     pub fn set_on_header_title(&self, f: impl Fn(&str) + 'static) {
         self.on_title.replace(Some(Box::new(f)));
     }
@@ -141,7 +138,6 @@ impl DiscographyPage {
         self.load_more();
     }
 
-    /// Hide cards whose title does not contain the query.
     pub fn filter_content(&self, text: &str) {
         let query = text.trim().to_lowercase();
         for card in self.cards.borrow().iter() {
@@ -232,7 +228,6 @@ impl DiscographyPage {
         }
     }
 
-    /// Port of _activate_item_data: browse ids open a page, videos play.
     fn activate(&self, item: &MediaItem) {
         match item.kind {
             ItemKind::Song | ItemKind::Video => {

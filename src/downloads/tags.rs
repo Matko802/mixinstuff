@@ -1,9 +1,3 @@
-//! Tags and cover art on a finished download.
-//!
-//! Port of _tag_file: title, artist, album, album artist, track number and
-//! total, year, the cover, and the YouTube Music ids in a comment so the file
-//! can be matched back to its track later. Formats differ in how they store
-//! these; `lofty` picks the right tag for the container, the way mutagen did.
 
 use std::path::Path;
 
@@ -12,7 +6,6 @@ use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::tag::{ItemKey, Tag};
 
-/// What goes on the file.
 #[derive(Debug, Default, Clone)]
 pub struct Tags {
     pub title: String,
@@ -26,10 +19,6 @@ pub struct Tags {
     pub album_id: String,
 }
 
-/// Write the tags and, when there are bytes for it, the cover.
-///
-/// A failure here leaves a playable file with poor metadata, so it is logged
-/// and the download still counts.
 pub fn write(path: &Path, tags: &Tags, cover: Option<&[u8]>) {
     if let Err(err) = apply(path, tags, cover) {
         tracing::warn!(%err, path = %path.display(), "tagging failed");
@@ -61,7 +50,6 @@ fn apply(path: &Path, tags: &Tags, cover: Option<&[u8]>) -> lofty::error::Result
     if !tags.year.is_empty() {
         tag.insert_text(ItemKey::RecordingDate, tags.year.clone());
     }
-    // The ids ride in the comment, which every container we write supports.
     tag.insert_text(ItemKey::Comment, ytm_comment(&tags.video_id, &tags.album_id));
 
     if let Some(bytes) = cover.filter(|b| !b.is_empty()) {
@@ -70,12 +58,10 @@ fn apply(path: &Path, tags: &Tags, cover: Option<&[u8]>) -> lofty::error::Result
     file.save_to_path(path, WriteOptions::default())
 }
 
-/// The JSON the Python app wrote, so files stay readable by both.
 fn ytm_comment(video_id: &str, album_id: &str) -> String {
     serde_json::json!({ "videoId": video_id, "albumId": album_id, "source": "YouTube Music (Musishark)" }).to_string()
 }
 
-/// The cover embedded in a downloaded file, for showing art offline.
 pub fn embedded_cover(path: &Path) -> Option<Vec<u8>> {
     let file = lofty::read_from_path(path).ok()?;
     let tag = file.primary_tag().or_else(|| file.first_tag())?;
@@ -96,7 +82,6 @@ mod tests {
         assert!(parsed["source"].as_str().unwrap().contains("Musishark"));
     }
 
-    /// Writes a real file, so it also proves the lofty round trip.
     #[test]
     fn tags_and_cover_survive_a_round_trip() {
         let dir = tempfile::tempdir().unwrap();

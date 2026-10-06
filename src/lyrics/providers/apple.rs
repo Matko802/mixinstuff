@@ -1,11 +1,3 @@
-//! Apple Music lyrics through the Paxsenix proxy (lyrics.paxsenix.org), which serves Apple's syllable-level lyrics as JSON plus the original TTML, keyed by Apple's catalog song id.
-//!
-//! Finding that id is the hard part, and there are two ways:
-//!
-//! 1. `itunes.apple.com/search`: public, documented, no auth, and it returns the same catalog ids the lyrics endpoint accepts.
-//! 2. `amp-api.music.apple.com`: needs a developer JWT scraped out of the Apple Music web app's minified bundle.
-//!
-//! The public one goes first. The scrape is a 3 MB download and a regex over obfuscated JavaScript that Apple can change at any time. It stays as the fallback because its search ranks better for some queries.
 
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
@@ -31,14 +23,11 @@ const TIMEOUT: Duration = Duration::from_secs(6);
 const BUNDLE_TIMEOUT: Duration = Duration::from_secs(10);
 const LYRICS_TIMEOUT: Duration = Duration::from_secs(8);
 const SEARCH_LIMIT: &str = "8";
-/// How many gated candidates get a lyrics request before giving up.
 const MAX_LYRIC_FETCHES: usize = 5;
 
 static BUNDLE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"/assets/index[~\-][^/"' ]+\.js"#).unwrap());
-// Matched on the JWT's own shape rather than a fixed prefix: the header's first key is not always "alg", so the old "eyJh" prefix missed every token.
 static JWT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}").unwrap());
 
-/// One catalog song, from either search.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Song {
     id: String,
@@ -59,7 +48,6 @@ impl Candidate for Song {
     }
 }
 
-/// A catalog id as text. iTunes sends a number, amp-api a string.
 fn id_text(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(s)) => s.clone(),
@@ -68,7 +56,6 @@ fn id_text(value: Option<&Value>) -> String {
     }
 }
 
-/// The songs of an `itunes.apple.com/search` response.
 pub fn parse_itunes(data: &Value) -> Vec<Song> {
     let rows = data.get("results").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
     rows.iter()
@@ -77,7 +64,6 @@ pub fn parse_itunes(data: &Value) -> Vec<Song> {
         .collect()
 }
 
-/// The songs of an amp-api catalog search response.
 pub fn parse_amp(data: &Value) -> Vec<Song> {
     let rows = data.pointer("/results/songs/data").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
     rows.iter()
@@ -88,9 +74,6 @@ pub fn parse_amp(data: &Value) -> Vec<Song> {
         .collect()
 }
 
-/// Gate the candidates down to this recording, best first.
-///
-/// The gate runs before the richest-lyrics walk: that walk keeps whichever candidate has the best lyric type, so one unrelated song with word-level timing would beat the correct song's line-level timing.
 pub fn shortlist(candidates: Vec<Song>, request: &Request) -> Vec<Song> {
     let mut gated = gate(candidates, request.title, request.artist, request.duration);
     let title = request.title.trim().to_lowercase();
@@ -114,12 +97,10 @@ pub fn shortlist(candidates: Vec<Song>, request: &Request) -> Vec<Song> {
     gated
 }
 
-/// The address of the web app's main bundle, from its landing page.
 pub fn find_bundle(html: &str) -> Option<&str> {
     BUNDLE_RE.find(html).map(|m| m.as_str())
 }
 
-/// Every distinct JWT in the bundle, in the order they appear. Not all of them authorize the catalog API, so the caller tries each.
 pub fn find_tokens(js: &str) -> Vec<&str> {
     let mut out: Vec<&str> = Vec::new();
     for found in JWT_RE.find_iter(js).map(|m| m.as_str()) {
@@ -130,14 +111,10 @@ pub fn find_tokens(js: &str) -> Vec<&str> {
     out
 }
 
-/// A millisecond stamp as seconds.
 fn milliseconds(value: Option<&Value>) -> Option<f64> {
     value.and_then(Value::as_f64).map(|ms| ms / 1000.0)
 }
 
-/// `[{text, timestamp, endtime}]` as parts.
-///
-/// `space_after` comes from trailing whitespace on the raw word when the payload carries any. This endpoint's words carry none at all, so the fallback decides per boundary from the scripts on either side.
 fn words_to_parts(words: &Value) -> Vec<LyricPart> {
     let words = words.as_array().map(Vec::as_slice).unwrap_or_default();
     let mut parts: Vec<LyricPart> = Vec::new();
@@ -167,12 +144,6 @@ fn join_parts(parts: &[LyricPart]) -> String {
     out.trim().to_owned()
 }
 
-/// A Paxsenix `/apple-music/lyrics` response as a result.
-///
-/// The response carries Apple's TTML beside the flattened JSON, and the TTML is strictly richer: transliterations, translations, background vocals as nested spans, and real spacing between words. The JSON is the fallback for responses without it:
-///
-/// - `type`: "Syllable" (word-level), "Line" or "None" (plain)
-/// - `content`: `[{timestamp, endtime, oppositeTurn, text: [{text, timestamp, endtime}], backgroundText: [...]}]`
 pub fn paxsenix_to_lines(data: &Value) -> Option<LyricsResult> {
     if !data.is_object() {
         return None;
@@ -198,11 +169,9 @@ pub fn paxsenix_to_lines(data: &Value) -> Option<LyricsResult> {
         if entry.get("oppositeTurn").is_some_and(truthy) {
             line.align = Some(Align::End);
         }
-        // Word timing only exists for the "Syllable" type.
         if kind == "Syllable" && parts.iter().any(|p| p.start.is_some()) {
             line.parts = parts;
         }
-        // `background` is a flag on the lead line, and the words sit in `backgroundText` beside it.
         let bg_parts = words_to_parts(entry.get("backgroundText").unwrap_or(&Value::Null));
         let bg_text = join_parts(&bg_parts);
         if !bg_text.is_empty() {
@@ -222,7 +191,6 @@ pub fn paxsenix_to_lines(data: &Value) -> Option<LyricsResult> {
         return None;
     }
     if kind == "None" {
-        // Apple's untimed tracks rank as plain, so they cannot preempt a line-synced source.
         for line in &mut lines {
             line.start = None;
         }
@@ -234,14 +202,11 @@ fn truthy(value: &Value) -> bool {
     !matches!(value, Value::Null | Value::Bool(false)) && value.as_f64() != Some(0.0) && value.as_str() != Some("")
 }
 
-/// Why the authenticated search had nothing.
 enum AmpError {
-    /// The token was refused. It is forgotten, and a fresh scrape may work.
     Unauthorized,
     Failed,
 }
 
-/// The Apple Music provider. Holds the scraped JWT for the life of the process.
 pub struct AppleMusic {
     http: reqwest::Client,
     token: Mutex<Option<String>>,
@@ -258,22 +223,18 @@ impl AppleMusic {
             return Some(result);
         }
 
-        // Fall back to the authenticated catalog search.
         let token = self.token(false).await?;
         let songs = match self.search_amp(&token, request.title, request.artist).await {
             Ok(songs) => songs,
             Err(_) => {
-                // The token might have expired, so try once with a fresh one.
                 let token = self.token(true).await?;
                 self.search_amp(&token, request.title, request.artist).await.ok()?
             }
         };
-        // Ids the iTunes pass already tried and rejected are not fetched again.
         let fresh: Vec<Song> = songs.into_iter().filter(|s| !candidates.iter().any(|c| c.id == s.id)).collect();
         self.richest(fresh, &request).await
     }
 
-    /// The richest lyrics among the candidates that pass the gate.
     async fn richest(&self, candidates: Vec<Song>, request: &Request<'_>) -> Option<LyricsResult> {
         let mut best: Option<LyricsResult> = None;
         for song in shortlist(candidates, request).into_iter().take(MAX_LYRIC_FETCHES) {
@@ -288,7 +249,6 @@ impl AppleMusic {
         best
     }
 
-    /// Both catalog searches, not only the public one. They do not agree: iTunes Search lacks songs amp-api has at the exact duration, so browsing iTunes alone would hide the match the chain itself found.
     pub async fn matches(&self, request: Request<'_>, limit: usize) -> Vec<LyricsMatch> {
         let mut songs: Vec<Song> = Vec::new();
         let collect = |found: Vec<Song>, songs: &mut Vec<Song>| {
@@ -358,7 +318,6 @@ impl AppleMusic {
         }
     }
 
-    /// A JWT that authorizes the catalog search, scraped from the web app and kept for the life of the process.
     async fn token(&self, force_new: bool) -> Option<String> {
         if !force_new && let Some(token) = self.token.lock().unwrap().clone() {
             return Some(token);
@@ -380,7 +339,6 @@ impl AppleMusic {
         };
         let candidates = find_tokens(&js);
         for token in &candidates {
-            // A cheap search says whether this one authorizes the catalog API.
             if self.amp_get(token, "test", "1").await.is_ok() {
                 *self.token.lock().unwrap() = Some((*token).to_owned());
                 return Some((*token).to_owned());
@@ -396,7 +354,6 @@ impl AppleMusic {
         }
         match get_json(&self.http, PAXSENIX_LYRICS, &[("id", song_id)], &[("User-Agent", APP_USER_AGENT)], LYRICS_TIMEOUT).await {
             Ok(data) => Some(data),
-            // Paxsenix answers 404 for a song Apple has no lyrics for. That is a miss, not an outage.
             Err(err) if err.to_string().contains("404") => {
                 tracing::debug!(song_id, "Apple Music has no lyrics for this song");
                 None

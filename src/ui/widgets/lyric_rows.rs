@@ -1,10 +1,3 @@
-//! The rows of the lyrics column. Port of LyricRow and InterludeRow in
-//! ui/widgets/lyrics_view.py, plus the pure rules that feed them.
-//!
-//! A row always renders through Pango markup so active and inactive states
-//! share one layout. While a line is sung its label is hidden and the row
-//! paints the text itself: sung words in the active color, the word under the
-//! cursor split at the sweep position, long words riding a small wave.
 
 use std::cell::{Cell, RefCell};
 use std::sync::LazyLock;
@@ -19,41 +12,29 @@ use crate::lyrics::model::{LyricLine, LyricPart};
 const ALPHA_ACTIVE: f64 = 1.00;
 const ALPHA_FUTURE_WORD: f64 = 0.32;
 
-/// Per-frame fade speed, as a fraction of the remaining gap.
 const LERP_SPEED: f64 = 0.18;
 const LERP_SPEED_EFFECTS: f64 = 0.34;
 
-/// How long a word takes to reach full brightness, as a share of how long it is held.
 const WORD_RAMP_FRACTION: f64 = 0.55;
 const WORD_RAMP_MIN_MS: f64 = 90.0;
 const WORD_RAMP_MAX_MS: f64 = 420.0;
-/// Synthesized timings are an estimate, so their words ramp faster than real ones.
 const SWEEP_RAMP_FRACTION: f64 = 0.3;
 
 const BLUR_START_DISTANCE: i32 = 0;
 const BLUR_PER_LINE: f64 = 0.65;
 const BLUR_MAX: f64 = 3.5;
 const EFFECT_LERP: f64 = 0.16;
-/// Below this a fading blur is invisible, but drawing it still softens the
-/// text, so it snaps to zero rather than easing out the tail.
 const BLUR_SNAP: f64 = 0.15;
-/// The frame length the per-frame easing constants were tuned at.
 const FRAME_MS: f64 = 1000.0 / 60.0;
-/// How often a resting row looks at its colors, in frames.
 const REST_CHECK_FRAMES: u32 = 30;
 
-/// A span longer than this is followed by an instrumental, not sung throughout.
 const SWEEP_MAX_MS: i64 = 12_000;
-/// Below this a sweep reads as a flash.
 const SWEEP_MIN_MS: i64 = 400;
 
-/// A word held at least this long glows and waves.
 const MIN_GLOW_MS: f64 = 600.0;
 const MAX_GLOW_MS: f64 = 1200.0;
 
-/// An instrumental stretch shorter than this is not worth marking.
 const INTERLUDE_MIN_S: f64 = 5.0;
-/// End the marker just before the vocal returns.
 const INTERLUDE_END_EARLY_S: f64 = 0.25;
 const INTERLUDE_DOTS: usize = 3;
 const DOT_RADIUS: f64 = 3.0;
@@ -63,7 +44,6 @@ const DOT_WAVE_SWELL: f64 = 0.14;
 const DOT_WAVE_PERIOD: f64 = 2.2;
 const DOT_MAX_SWELL: f64 = 1.0 + DOT_FOCUS_SWELL + DOT_WAVE_SWELL;
 
-/// The effects level a row was built for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Effects {
     Off,
@@ -81,7 +61,6 @@ impl Effects {
     }
 }
 
-/// A word with its timing in milliseconds and its place in the line's UTF-8 text.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Part {
     pub start_ms: i64,
@@ -92,9 +71,7 @@ pub struct Part {
     pub byte_end: i32,
 }
 
-// -- pure rules ---------------------------------------------------------------
 
-// Scripts a romanization helps with. Greek is left out: it shows up as stylized Latin.
 static NON_LATIN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new("[\u{0400}-\u{04FF}\u{0590}-\u{05FF}\u{0600}-\u{06FF}\u{0E00}-\u{0E7F}\u{3040}-\u{30FF}\u{3400}-\u{4DBF}\u{4E00}-\u{9FFF}\u{AC00}-\u{D7AF}]").expect("static regex")
 });
@@ -103,7 +80,6 @@ pub fn is_non_latin(text: &str) -> bool {
     !text.is_empty() && NON_LATIN.is_match(text)
 }
 
-/// The second line's text for one lyric line, and its word timing when it is a background vocal.
 pub fn second_line_for<'a>(line: &'a LyricLine, mode: &str) -> (Option<&'a str>, Option<&'a [LyricPart]>) {
     let clean = |value: &'a Option<String>| value.as_deref().map(str::trim).filter(|t| !t.is_empty());
     let roman = clean(&line.romanization);
@@ -114,7 +90,6 @@ pub fn second_line_for<'a>(line: &'a LyricLine, mode: &str) -> (Option<&'a str>,
         "romanization" => (roman, None),
         "translation" => (translation, None),
         "background" => (bg_text, bg_text.map(|_| line.bg.as_slice())),
-        // auto: a romanization where the script needs one, background vocals otherwise.
         _ => match (roman, bg_text) {
             (Some(roman), _) if is_non_latin(&line.text) => (Some(roman), None),
             (_, Some(bg)) => (Some(bg), Some(line.bg.as_slice())),
@@ -123,12 +98,10 @@ pub fn second_line_for<'a>(line: &'a LyricLine, mode: &str) -> (Option<&'a str>,
     }
 }
 
-/// Scripts written without spaces between words.
 fn is_cjk_char(ch: char) -> bool {
     matches!(ch as u32, 0x1100..=0x11FF | 0x3040..=0x30FF | 0x3130..=0x318F | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF)
 }
 
-/// The chunks a sweep advances over: words, or single characters for CJK.
 fn sweep_tokens(text: &str) -> Vec<(String, bool)> {
     let mut tokens: Vec<(String, bool)> = Vec::new();
     let mut buf = String::new();
@@ -155,8 +128,6 @@ fn sweep_tokens(text: &str) -> Vec<(String, bool)> {
     tokens
 }
 
-/// Fake per-word timing for a line-synced lyric: the line's span divided
-/// across its tokens by length. Empty when there is nothing to sweep across.
 pub fn synthesize_parts(text: &str, start_ms: i64, end_ms: Option<i64>) -> Vec<Part> {
     let Some(end_ms) = end_ms else { return Vec::new() };
     let span = end_ms - start_ms;
@@ -181,7 +152,6 @@ pub fn synthesize_parts(text: &str, start_ms: i64, end_ms: Option<i64>) -> Vec<P
         .collect()
 }
 
-/// Seconds to millisecond ints, dropping anything without a start time.
 pub fn normalize_parts(raw: &[LyricPart]) -> Vec<Part> {
     raw.iter()
         .filter(|p| !p.text.is_empty())
@@ -199,7 +169,6 @@ pub fn normalize_parts(raw: &[LyricPart]) -> Vec<Part> {
         .collect()
 }
 
-/// Find each part in the line's text, in order, so Pango indices can address it.
 fn assign_byte_offsets(text: &str, parts: &mut [Part]) {
     if text.is_empty() {
         return;
@@ -220,23 +189,18 @@ fn assign_byte_offsets(text: &str, parts: &mut [Part]) {
     }
 }
 
-/// The instrumental stretches in a line list, as (start, end) seconds.
-/// Providers either stamp an empty line at the top of a break or leave a hole
-/// after a line's own end. Both read as a gap between two lines with words.
 pub fn find_interludes(lines: &[LyricLine]) -> Vec<(f64, f64)> {
     let timed: Vec<(usize, &LyricLine, f64)> = lines.iter().enumerate().filter_map(|(i, l)| l.start.map(|s| (i, l, s))).collect();
     let sung: Vec<&(usize, &LyricLine, f64)> = timed.iter().filter(|(_, l, _)| !l.text.trim().is_empty()).collect();
     let Some(first) = sung.first() else { return Vec::new() };
 
     let mut out = Vec::new();
-    // A long lead-in before the first word is an interlude too.
     if first.2 >= INTERLUDE_MIN_S {
         out.push((0.0, first.2 - INTERLUDE_END_EARLY_S));
     }
     for pair in sung.windows(2) {
         let (idx_a, a, _) = pair[0];
         let gap_end = pair[1].2;
-        // Prefer the line's own end, else an empty marker line after it.
         let gap_start = a.end.or_else(|| timed.iter().find(|(j, l, _)| j > idx_a && l.text.trim().is_empty()).map(|(_, _, s)| *s));
         let Some(gap_start) = gap_start else { continue };
         if gap_end - gap_start >= INTERLUDE_MIN_S {
@@ -259,15 +223,10 @@ fn word_alpha_for(cursor_ms: i64, part: &Part, effects: Effects, swept: bool) ->
     ((cursor_ms - part.start_ms) as f64 / ramp).min(1.0)
 }
 
-/// Where the sweep stands inside a laid-out line.
 struct Sweep {
-    /// Index of the word under the cursor, if one is.
     active: Option<usize>,
-    /// Sweep position, relative to the layout.
     x: f64,
-    /// End of the last finished word: (x, y, height).
     sung: (f64, f64, f64),
-    /// The active word's box: (x, y, width, height).
     active_rect: Option<(f64, f64, f64, f64)>,
     glow: f64,
     is_long: bool,
@@ -324,7 +283,6 @@ fn color_to_markup(color: &gdk::RGBA, text: &str) -> String {
     format!("<span color='#{:02x}{:02x}{:02x}' fgalpha='{alpha}'>{}</span>", channel(color.red()), channel(color.green()), channel(color.blue()), glib::markup_escape_text(text))
 }
 
-/// The label's resting, active and glow colors, as the stylesheet resolves them.
 #[allow(deprecated)]
 fn css_colors(label: &gtk::Label) -> (gdk::RGBA, gdk::RGBA, gdk::RGBA) {
     let ctx = label.style_context();
@@ -343,14 +301,10 @@ fn now_ms() -> f64 {
     glib::monotonic_time() as f64 / 1000.0
 }
 
-/// How much of the remaining distance an ease tuned per 60 Hz frame covers in
-/// `delta_ms`. Counting time rather than frames keeps a fade the same length
-/// at any frame rate; a stall moves it at most 100 ms ahead.
 fn eased(per_frame: f64, delta_ms: f64) -> f64 {
     1.0 - (1.0 - per_frame).powf(delta_ms.clamp(0.0, 100.0) / FRAME_MS)
 }
 
-// -- LyricRow -----------------------------------------------------------------
 
 struct RowState {
     text: String,
@@ -382,7 +336,6 @@ struct RowState {
     dirty: bool,
     last_tick: Option<f64>,
     last_colors: Option<[i32; 6]>,
-    /// Nothing is animating. A resting row only checks its colors now and then.
     resting: bool,
     rest_ticks: u32,
 }
@@ -415,7 +368,6 @@ impl RowState {
         self.dirty = true;
     }
 
-    /// Step every alpha toward its target. True when one moved.
     fn step_alphas(&mut self, delta_ms: f64) -> bool {
         let lerp = eased(self.lerp, delta_ms);
         let sung = self.cursor_ms >= 0 && self.effects != Effects::Off;
@@ -423,7 +375,6 @@ impl RowState {
         let step = |parts: &[Part], alphas: &mut [f64], targets: &[f64]| {
             let mut changed = false;
             for i in 0..alphas.len() {
-                // While a line is sung a word lights up once the cursor has passed it.
                 let target = match (sung, parts.get(i)) {
                     (true, Some(p)) => f64::from(u8::from(internal > p.end_ms as f64)),
                     (true, None) => 1.0,
@@ -452,9 +403,6 @@ impl RowState {
             return color_to_markup(&lerp_color(&resting, &active, alphas[0].clamp(0.0, 1.0)), text);
         }
         let color_of = |i: usize| lerp_color(&resting, &active, alphas[i].clamp(0.0, 1.0));
-        // Cut from the line itself, so the label shows exactly `text`. Joining the
-        // parts with ' ' turned a full-width space into a narrow one, and every
-        // byte offset after it then pointed the sweep at the wrong character.
         if parts.iter().all(|p| p.byte_start >= 0 && p.byte_end as usize <= text.len()) {
             let mut out = String::new();
             let mut cursor = 0usize;
@@ -524,7 +472,6 @@ mod imp {
             let blurring = s.blur > 0.02;
             let active = s.internal_cursor_ms >= 0.0 && s.effects != Effects::Off;
 
-            // The row paints a sung line itself, so its label steps aside.
             s.label.set_opacity(if active && !s.parts.is_empty() { 0.0 } else { 1.0 });
             if let Some(sub) = &s.sub_label {
                 sub.set_opacity(if active && !s.sub_parts.is_empty() { 0.0 } else { 1.0 });
@@ -561,7 +508,6 @@ mod imp {
     }
 
     impl LyricRow {
-        /// Paint one label's text split at the sweep position.
         #[allow(deprecated)]
         fn render_layer(&self, snapshot: &gtk::Snapshot, s: &RowState, label: &gtk::Label, text: &str, parts: &[Part]) {
             let row = self.obj();
@@ -587,7 +533,6 @@ mod imp {
             };
             let base_layout = new_layout();
 
-            // In row coordinates: a second line under a long first one sits well below its own height.
             let clip_top = base_y - 60.0;
             let clip_bottom = base_y + f64::from(alloc.height()) + 120.0;
             let origin = graphene::Point::new(x_offset as f32, y_offset as f32);
@@ -634,7 +579,6 @@ mod imp {
             let progress = (s.internal_cursor_ms - part.start_ms as f64) / duration;
             let n_chars = part.text.chars().count().max(1) as f64;
 
-            // The whole line laid out again with everything but the active word invisible.
             let word_only = |color: &gdk::RGBA| {
                 let l = new_layout();
                 let attrs = pango::AttrList::new();
@@ -661,8 +605,6 @@ mod imp {
             let transparent = gdk::RGBA::new(0.0, 0.0, 0.0, 0.0);
             let scale = f64::from(pango::SCALE);
 
-            // Character by character, so a long word can ride the wave. `sung`
-            // picks the side of the sweep position this pass paints.
             let draw_word = |colored: &pango::Layout, sung: bool| {
                 let mut cb = b_start as i32;
                 for (char_idx, ch) in part.text.chars().enumerate() {
@@ -725,7 +667,6 @@ glib::wrapper! {
     pub struct LyricRow(ObjectSubclass<imp::LyricRow>) @extends gtk::ListBoxRow, gtk::Widget, @implements gtk::Accessible, gtk::Actionable, gtk::Buildable, gtk::ConstraintTarget;
 }
 
-/// How a row is built, from the view's display prefs.
 #[derive(Clone, Debug)]
 pub struct RowOptions {
     pub second_line_mode: String,
@@ -873,7 +814,6 @@ impl LyricRow {
         self.queue_draw();
     }
 
-    /// The play-head inside this line in ms, or -1 when the line is not the active one.
     pub fn set_cursor_ms(&self, ms: i64) {
         let mut guard = self.imp().state.borrow_mut();
         let Some(s) = guard.as_mut() else { return };
@@ -881,7 +821,6 @@ impl LyricRow {
             return;
         }
         if ms == -1 {
-            // Let the sweep run to the end of the line before it fades.
             s.wants_turn_off = true;
         } else {
             s.wants_turn_off = false;
@@ -908,9 +847,6 @@ impl LyricRow {
         let start_ms = self.start_ms() as f64;
         let mut guard = self.imp().state.borrow_mut();
         let Some(s) = guard.as_mut() else { return };
-        // Sixty rows tick every frame and one of them is being sung. The rest
-        // skip the style lookups, which dominated the frame, but still notice
-        // a theme or accent change within half a second.
         if s.resting {
             s.rest_ticks += 1;
             if s.rest_ticks % REST_CHECK_FRAMES != 0 {
@@ -922,7 +858,6 @@ impl LyricRow {
         s.last_tick = Some(now);
         let mut changed = false;
 
-        // A theme or accent change moves the colors the markup was baked with.
         let (c_in, c_act, _) = css_colors(&s.label);
         let key = [c_in.red(), c_in.green(), c_in.blue(), c_act.red(), c_act.green(), c_act.blue()].map(|v| (v * 100.0).round() as i32);
         if s.last_colors != Some(key) {
@@ -949,7 +884,6 @@ impl LyricRow {
                 changed = true;
             }
         } else if s.cursor_ms >= 0 && !paused {
-            // The player ticks a few times a second. The frame clock fills in between.
             if delta > 250.0 {
                 s.internal_cursor_ms = s.cursor_ms as f64;
             } else if s.internal_cursor_ms < s.cursor_ms as f64 {
@@ -983,7 +917,6 @@ impl LyricRow {
     }
 }
 
-// -- InterludeRow ---------------------------------------------------------------
 
 struct InterludeState {
     dots: gtk::Box,
@@ -1042,12 +975,9 @@ mod interlude_imp {
 }
 
 glib::wrapper! {
-    /// The music-only marker for an instrumental stretch: three dots that fill
-    /// in turn across the gap, so the row doubles as a countdown to the next line.
     pub struct InterludeRow(ObjectSubclass<interlude_imp::InterludeRow>) @extends gtk::ListBoxRow, gtk::Widget, @implements gtk::Accessible, gtk::Actionable, gtk::Buildable, gtk::ConstraintTarget;
 }
 
-/// How far through its own slice of the gap dot `i` is.
 fn dot_fill(progress: f64, i: usize) -> f64 {
     ((progress - i as f64 / INTERLUDE_DOTS as f64) * INTERLUDE_DOTS as f64).clamp(0.0, 1.0)
 }
@@ -1059,7 +989,6 @@ impl InterludeRow {
         imp.start_ms.set((start_s * 1000.0) as i64);
         imp.end_ms.set((end_s * 1000.0) as i64);
 
-        // An empty box claims the row's space. The dots are painted over it.
         let dots = gtk::Box::builder().halign(gtk::Align::Start).valign(gtk::Align::Center).css_classes(["lyrics-interlude"]).build();
         dots.set_size_request((DOT_SPACING * (INTERLUDE_DOTS - 1) as f64 + DOT_RADIUS * 2.0) as i32, (DOT_RADIUS * 2.0 * DOT_MAX_SWELL) as i32);
         row.set_child(Some(&dots));
@@ -1137,7 +1066,6 @@ impl InterludeRow {
             }
         }
         match self.progress(s.cursor_ms).filter(|_| s.effects != Effects::Off) {
-            // A dot swells as its slice fills, over a slow wave that keeps a long break moving.
             Some(progress) => {
                 let elapsed = s.t0.elapsed().as_secs_f64();
                 for i in 0..INTERLUDE_DOTS {
@@ -1238,9 +1166,7 @@ mod tests {
         let part = Part { start_ms: 1000, end_ms: 2000, text: "word".into(), space_after: true, byte_start: 0, byte_end: 4 };
         assert_eq!(word_alpha_for(500, &part, Effects::Subtle, false), 0.0);
         assert_eq!(word_alpha_for(1000, &part, Effects::Off, false), 1.0);
-        // Held 1000 ms: the ramp is 420 ms (the cap), so 210 ms in is half.
         assert!((word_alpha_for(1210, &part, Effects::Subtle, false) - 0.5).abs() < 1e-9);
-        // Swept: 300 ms ramp.
         assert!((word_alpha_for(1150, &part, Effects::Subtle, true) - 0.5).abs() < 1e-9);
     }
 }

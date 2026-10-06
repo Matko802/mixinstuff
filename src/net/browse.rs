@@ -1,14 +1,3 @@
-//! The InnerTube transport seam and the paging that rides on it.
-//!
-//! Every endpoint in `net` posts a JSON body to an InnerTube endpoint and
-//! parses the JSON that comes back. `Browse` is that one call. The app runs
-//! it against the `ytmusicapi` client; tests run it against `Fixtures`,
-//! captured responses on disk, so parsing is checked without the network.
-//!
-//! `Continuation` owns paging. YouTube returns long lists a page at a time
-//! behind a token, in two response shapes and with three token spellings.
-//! Endpoints hand it the first token and a parser and get the rest of the
-//! rows back.
 
 use std::future::Future;
 #[cfg(test)]
@@ -21,19 +10,12 @@ use ytmusicapi::YTMusicClient;
 use super::items::{array_at, item_continuation_token, next_continuation, owned_at};
 use super::ytmusic::NetError;
 
-/// A boxed response future, so `Browse` works behind `dyn`.
 pub type Response<'a> = Pin<Box<dyn Future<Output = Result<Value, NetError>> + Send + 'a>>;
 
-/// The InnerTube transport: post a body to an endpoint, get JSON back.
-///
-/// Endpoints take this rather than a client, so the same parsing runs against
-/// the live service, against captured fixtures, and against pages written by
-/// hand in a test.
 pub trait Browse: Send + Sync {
     fn post<'a>(&'a self, endpoint: &'a str, body: Value) -> Response<'a>;
 }
 
-/// A shared handle is an adapter too, so callers holding an `Arc` pass it straight through.
 impl<T: Browse + ?Sized> Browse for std::sync::Arc<T> {
     fn post<'a>(&'a self, endpoint: &'a str, body: Value) -> Response<'a> {
         (**self).post(endpoint, body)
@@ -46,15 +28,10 @@ impl Browse for YTMusicClient {
     }
 }
 
-/// Safety cap on continuation pages. A YouTube list is finite, a token loop is not.
 pub const MAX_PAGES: usize = 100;
 
-/// Continuation renderers under the 2024 response shape.
 const APPEND_ACTIONS: &str = "/onResponseReceivedActions";
 
-/// Every legacy `continuationContents` node the app has seen. A response
-/// carries at most one, so trying them all costs nothing and spares callers
-/// from naming the one their endpoint happens to use.
 const LEGACY_KEYS: [&str; 5] = [
     "musicPlaylistShelfContinuation",
     "musicShelfContinuation",
@@ -63,18 +40,12 @@ const LEGACY_KEYS: [&str; 5] = [
     "sectionListContinuation",
 ];
 
-/// Rows gathered before paging stopped.
-///
-/// A failed page keeps what came before it: a long playlist that dies on page
-/// nine still shows eight pages. `strict` is for callers that would rather
-/// report the failure than show a short list.
 pub struct Paged<T> {
     pub items: Vec<T>,
     pub error: Option<NetError>,
 }
 
 impl<T> Paged<T> {
-    /// Fail if any page failed.
     pub fn strict(self) -> Result<Vec<T>, NetError> {
         match self.error {
             Some(err) => Err(err),
@@ -83,18 +54,11 @@ impl<T> Paged<T> {
     }
 }
 
-/// Where the endpoint carries its continuation token.
 enum Carrier {
-    /// `browse` and friends take it in the request body.
     Body,
-    /// `next` takes it in the query string and wants the original body resent.
     Query { endpoint: String, body: Value },
 }
 
-/// Follows continuation tokens until the rows run out.
-///
-/// Paging stops at the first of: no token, the row limit, the page cap, a page
-/// that parses to nothing, or a failed request. Rows survive all of them.
 pub struct Continuation<'a> {
     api: &'a dyn Browse,
     carrier: Carrier,
@@ -104,34 +68,25 @@ pub struct Continuation<'a> {
 }
 
 impl<'a> Continuation<'a> {
-    /// Browse continuations: the token rides in the body.
     pub fn browse(api: &'a dyn Browse, token: Option<String>) -> Self {
         Self { api, carrier: Carrier::Body, token, limit: usize::MAX, pages: MAX_PAGES }
     }
 
-    /// Watch-panel continuations: the token rides in the query string.
-    ///
-    /// The crate appends its own "?alt=json" to whatever endpoint it is given,
-    /// so the token goes in front of a throwaway parameter that swallows it.
     pub fn query(api: &'a dyn Browse, endpoint: &str, body: Value, token: Option<String>) -> Self {
         let carrier = Carrier::Query { endpoint: endpoint.to_owned(), body };
         Self { api, carrier, token, limit: usize::MAX, pages: MAX_PAGES }
     }
 
-    /// Stop once this many rows have been added. Counts rows these pages add,
-    /// not rows the caller already had.
     pub fn limit(mut self, rows: usize) -> Self {
         self.limit = rows;
         self
     }
 
-    /// Stop after this many requests.
     pub fn pages(mut self, pages: usize) -> Self {
         self.pages = pages;
         self
     }
 
-    /// Follow the tokens, parsing each page.
     pub async fn collect<T>(mut self, mut parse: impl FnMut(&[&Value]) -> Vec<T>) -> Paged<T> {
         let mut items = Vec::new();
         let mut requests = 0;
@@ -166,11 +121,6 @@ impl<'a> Continuation<'a> {
     }
 }
 
-/// Rows and the next token of one continuation response.
-///
-/// Covers both shapes: `appendContinuationItemsAction` for the 2024 responses
-/// and `continuationContents` for the older ones. Token renderers are dropped
-/// from the rows, since they are paging, not content.
 fn page(response: &Value) -> (Vec<&Value>, Option<String>) {
     let mut entries = Vec::new();
     let mut token = None;
@@ -186,7 +136,6 @@ fn page(response: &Value) -> (Vec<&Value>, Option<String>) {
     (entries, token)
 }
 
-/// Sort one batch of renderers into rows and the token that follows them.
 fn take<'v>(raws: &'v [Value], entries: &mut Vec<&'v Value>, token: &mut Option<String>) {
     for raw in raws {
         match item_continuation_token(raw) {
@@ -196,29 +145,22 @@ fn take<'v>(raws: &'v [Value], entries: &mut Vec<&'v Value>, token: &mut Option<
     }
 }
 
-/// The two legacy token spellings: playlists use one, radios the other.
 fn legacy_token(node: &Value) -> Option<String> {
     next_continuation(node).or_else(|| owned_at(node, "/continuations/0/nextRadioContinuationData/continuation"))
 }
 
 #[cfg(test)]
-/// Captured InnerTube responses on disk, keyed by endpoint and body.
-///
-/// The directory is not in git. `cargo test -- --ignored` records it against
-/// the live service, and the offline tests skip while it is missing.
 pub struct Fixtures {
     dir: PathBuf,
 }
 
 #[cfg(test)]
 impl Fixtures {
-    /// The fixture directory, or None when nothing has been captured.
     pub fn open() -> Option<Self> {
         let dir = Self::dir();
         dir.is_dir().then_some(Self { dir })
     }
 
-    /// Where fixtures live: `$MUSISHARK_FIXTURES`, else `fixtures/innertube`.
     pub fn dir() -> PathBuf {
         match std::env::var_os("MUSISHARK_FIXTURES") {
             Some(dir) => PathBuf::from(dir),
@@ -226,8 +168,6 @@ impl Fixtures {
         }
     }
 
-    /// File name for a request. The body is part of it, so the pages of a
-    /// paged capture stay distinct and replay in the order they were recorded.
     fn key(endpoint: &str, body: &Value) -> String {
         let safe: String = endpoint.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
         let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
@@ -251,10 +191,6 @@ impl Browse for Fixtures {
 }
 
 #[cfg(test)]
-/// Writes every response passing through to the fixture directory.
-///
-/// Wrap the live client with this in a test marked `#[ignore]`, run it once,
-/// and the offline tests have something to replay.
 pub struct Recorder {
     inner: std::sync::Arc<dyn Browse>,
     dir: PathBuf,
@@ -286,7 +222,6 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    /// Pages handed out in order, then an error. The third adapter at the seam.
     struct Scripted {
         pages: Mutex<Vec<Value>>,
         requests: Mutex<Vec<String>>,

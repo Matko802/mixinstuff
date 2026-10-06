@@ -1,11 +1,3 @@
-//! A sampling profiler for the GTK thread, for devices with no perf or
-//! sysprof, and for the Flatpak sandbox, which blocks perf_event_open. A
-//! wall-clock timer signals the thread every millisecond and the handler
-//! walks the frame pointers into a fixed buffer. The GNOME runtime and this
-//! binary both keep frame pointers. `dump` writes the raw addresses and the
-//! memory map, which `tools/symbolize_samples.py` turns into a profile.
-//!
-//! Demo only: MUSISHARK_DEMO_SAMPLE=path.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -18,7 +10,6 @@ static STACK_LO: AtomicUsize = AtomicUsize::new(0);
 static STACK_HI: AtomicUsize = AtomicUsize::new(0);
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// Start sampling the calling thread at `hz`.
 pub fn start(hz: i64) {
     unsafe {
         let mut attr: libc::pthread_attr_t = std::mem::zeroed();
@@ -52,8 +43,6 @@ pub fn start(hz: i64) {
     }
 }
 
-/// Write `samples` (one line of hex addresses per sample, leaf first) and
-/// `maps` (a copy of /proc/self/maps) next to `path`.
 pub fn dump(path: &str) {
     RUNNING.store(false, Ordering::Relaxed);
     let end = NEXT.load(Ordering::Relaxed).min(WORDS);
@@ -70,7 +59,6 @@ pub fn dump(path: &str) {
         at += 1 + len;
     }
     let _ = std::fs::write(format!("{path}.samples"), out);
-    // Read, not copied: procfs reports a size of zero, and a copy writes nothing.
     if let Ok(maps) = std::fs::read_to_string("/proc/self/maps") {
         let _ = std::fs::write(format!("{path}.maps"), maps);
     }
@@ -91,7 +79,6 @@ extern "C" fn handler(_: libc::c_int, _: *mut libc::siginfo_t, context: *mut lib
     let mut n = 0;
     frames[n] = pc;
     n += 1;
-    // A leaf function on aarch64 may not have pushed its frame yet; the link register covers it.
     if lr != 0 {
         frames[n] = lr;
         n += 1;

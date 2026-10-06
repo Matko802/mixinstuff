@@ -1,5 +1,3 @@
-//! Song rows and kind subtitles as home.py builds them: thumbnail, title
-//! with explicit badge, and an icon plus detail line.
 
 use std::rc::Rc;
 
@@ -12,7 +10,6 @@ use crate::ui::cover::CoverImage;
 pub const SONG_THUMB_SIZE: i32 = 56;
 const LABEL_NATURAL_MAX_CHARS: i32 = 12;
 
-/// Icon and detail text under a title. `include_kind_word` prepends "Song", "Album" and so on.
 pub fn kind_subtitle(item: &MediaItem, include_kind_word: bool, constrain_width: bool) -> gtk::Box {
     let mut parts = Vec::new();
     if include_kind_word {
@@ -25,7 +22,6 @@ pub fn kind_subtitle(item: &MediaItem, include_kind_word: bool, constrain_width:
     kind_subtitle_text(item, &parts.join(" · "), constrain_width)
 }
 
-/// Port of search.py's subtitle: kind word, then artists and album, joined by bullets.
 pub fn search_subtitle(item: &MediaItem) -> String {
     let detail = match item.kind {
         ItemKind::Artist => item.subscribers.clone().unwrap_or_default(),
@@ -49,7 +45,6 @@ pub fn search_subtitle(item: &MediaItem) -> String {
     if detail.is_empty() { kind } else { format!("{kind} • {detail}") }
 }
 
-/// Kind icon plus a given subtitle text.
 pub fn kind_subtitle_text(item: &MediaItem, text: &str, constrain_width: bool) -> gtk::Box {
     let row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).halign(if constrain_width { gtk::Align::Fill } else { gtk::Align::Start }).build();
     let icon = gtk::Image::builder().icon_name(item.kind_icon()).pixel_size(12).valign(gtk::Align::Center).css_classes(["home-kind-icon", if item.is_live { "live-icon" } else { "dim-label" }]).build();
@@ -67,12 +62,10 @@ pub fn kind_subtitle_text(item: &MediaItem, text: &str, constrain_width: bool) -
     row
 }
 
-/// One row for a boxed song list. Returns the row plus its inner box for gestures.
 pub fn song_row(ctx: &Rc<UiContext>, item: &MediaItem) -> (gtk::ListBoxRow, gtk::Box) {
     song_row_with_subtitle(ctx, item, None)
 }
 
-/// Same row with a caller-provided subtitle text, as the search page needs.
 pub fn song_row_with_subtitle(ctx: &Rc<UiContext>, item: &MediaItem, subtitle: Option<&str>) -> (gtk::ListBoxRow, gtk::Box) {
     let row = gtk::ListBoxRow::builder().activatable(true).build();
     let inner = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).css_classes(["song-row"]).build();
@@ -85,7 +78,6 @@ pub fn song_row_with_subtitle(ctx: &Rc<UiContext>, item: &MediaItem, subtitle: O
         None => cover.set_placeholder("media-optical-symbolic"),
     }
     inner.append(cover.widget());
-    // Keep the loader alive as long as the row.
     unsafe { row.set_data("cover", cover) };
 
     let text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).valign(gtk::Align::Center).hexpand(true).build();

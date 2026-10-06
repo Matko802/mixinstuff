@@ -1,6 +1,3 @@
-//! GObject wrapper for a `Track`, the item type of the playlist page's
-//! track store. The header row is a plain `glib::Object`, so the flattened
-//! model carries both under `glib::Object`.
 
 use std::cell::RefCell;
 

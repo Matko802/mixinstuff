@@ -1,6 +1,3 @@
-//! The first-launch wizard: welcome, sign in or skip, a few popular settings,
-//! done. Replaces the bare login window Python opened on a fresh install. The
-//! login dialog itself is unchanged and opens from the account step.
 
 use std::rc::Rc;
 
@@ -16,10 +13,6 @@ use crate::ui::window::{AppearancePref, MainWindow};
 
 pub const DONE_PREF: &str = "onboarding_done";
 
-/// A fresh install has no saved session and never declined the sign-in. A
-/// signed-in user updating from an older build counts as set up already, so
-/// the wizard never opens over an existing account. Startup writes a default
-/// or two into prefs.json before this runs, so an empty file is no test.
 pub fn pending(ctx: &App) -> bool {
     let prefs = ctx.paths.read_prefs();
     if prefs.get(DONE_PREF).and_then(|v| v.as_bool()).unwrap_or(false) {
@@ -36,7 +29,6 @@ pub fn pending(ctx: &App) -> bool {
 fn finish(ctx: &App) {
     save(ctx, DONE_PREF, true);
     release_notes::mark_seen(ctx);
-    // Leaving the wizard signed out is a choice, so startup does not ask again.
     if matches!(ctx.net.client().auth_state(), AuthState::Anonymous) {
         crate::ui::login::set_login_skipped(&ctx.paths, true);
     }
@@ -49,10 +41,8 @@ struct Wizard {
     ctx: Rc<App>,
 }
 
-/// `start` opens on a later step, for screenshots.
 pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>, start: Option<&str>) -> adw::Dialog {
     let nav = adw::NavigationView::new();
-    // Sized to its content: a taller dialog left the status pages floating in empty space.
     let dialog = adw::Dialog::builder().title("Welcome").content_width(460).content_height(540).child(&nav).build();
     let wizard = Rc::new(Wizard { dialog: dialog.clone(), nav, win: win.clone(), ctx: ctx.clone() });
     wizard.nav.add(&wizard.welcome_page());
@@ -61,14 +51,12 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>, start: Option<&str>) -> adw:
     wizard.nav.add(&wizard.done_page());
     {
         let ctx = ctx.clone();
-        // Closing the dialog at any step counts as finished. The prefs keep their defaults.
         dialog.connect_closed(move |_| finish(&ctx));
     }
     if let Some(tag) = start {
         wizard.nav.push_by_tag(tag);
     }
     dialog.present(Some(win.window()));
-    // The wizard lives as long as its dialog.
     let holder = wizard.clone();
     dialog.connect_closed(move |_| {
         let _ = &holder;
@@ -85,7 +73,6 @@ impl Wizard {
     }
 
     fn status(&self, icon: &str, title: &str, description: &str) -> adw::StatusPage {
-        // The compact style drops the page's own side padding, so the margins give it back.
         let page = adw::StatusPage::builder().icon_name(icon).title(title).css_classes(["compact"]).margin_start(24).margin_end(24).build();
         if !description.is_empty() {
             page.set_description(Some(description));
@@ -152,7 +139,6 @@ impl Wizard {
         self.page("account", "Account", &status)
     }
 
-    /// The login window opens over the wizard. A success moves on to the settings step.
     fn sign_in(self: &Rc<Self>) {
         let login = LoginDialog::new(self.win.ui().clone(), self.win.window());
         let library = self.win.library_page();
@@ -171,7 +157,6 @@ impl Wizard {
         });
     }
 
-    /// An account with brand channels gets to pick one before the settings step.
     fn after_sign_in(self: &Rc<Self>) {
         let client = self.ctx.net.client().clone();
         let handle = self.ctx.net.spawn(async move { client.accounts().await });
@@ -343,7 +328,6 @@ impl Wizard {
             dialog.close();
         });
         column.append(&start);
-        // Musishark and my other projects are free. A quiet line and two links, no panel.
         column.append(&gtk::Label::builder().label("Musishark is free. If you like it, you can support my work.").css_classes(["dim-label"]).wrap(true).justify(gtk::Justification::Center).margin_top(18).build());
         column.append(&release_notes::donate_buttons());
         status.set_child(Some(&column));

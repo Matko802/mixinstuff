@@ -1,5 +1,3 @@
-//! Port of ui/widgets/media_card.py: a square cover, a wrapping title and a
-//! one-line subtitle inside a flat button. Sized by the strip or grid it sits in.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -45,7 +43,6 @@ pub struct MediaCard {
 impl MediaCard {
     pub fn new(ctx: &Rc<UiContext>, item: MediaItem, opts: CardOptions) -> Rc<Self> {
         let button = gtk::Button::builder().css_classes(["activatable", "artist-horizontal-item", "flat"]).hexpand(false).halign(gtk::Align::Start).build();
-        // CardBinLayout: the card is only ever as wide as the size set on it.
         button.set_layout_manager(Some(CardLayout::new()));
         let main_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).build();
         main_box.set_size_request(CARD_SIZE_DEFAULT, -1);
@@ -92,7 +89,6 @@ impl MediaCard {
         let subtitle = opts.subtitle.clone().unwrap_or_else(|| resolve_subtitle(&item, ctx.net.caches().release_kind_for(&item.id)));
         if !subtitle.is_empty() || item.explicit || item.is_live {
             let subtitle_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).halign(gtk::Align::Fill).hexpand(true).build();
-            // A live stream: the antenna, as a symbolic icon like the rest of the interface.
             if item.is_live {
                 subtitle_box.append(&gtk::Image::builder().icon_name(item.kind_icon()).pixel_size(12).valign(gtk::Align::Center).css_classes(["live-icon"]).tooltip_text("Live").build());
             }
@@ -142,7 +138,6 @@ impl MediaCard {
         self.apply_size();
     }
 
-    /// Grow to the width a grid column offers.
     pub fn set_card_size(&self, size: i32) {
         self.grid_size.set(Some(size));
         self.apply_size();
@@ -164,7 +159,6 @@ impl MediaCard {
     }
 }
 
-/// `known_kind` is the release kind counted from the album's own tracks, when it was opened before.
 fn resolve_subtitle(item: &MediaItem, known_kind: Option<&str>) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(year) = &item.year {
@@ -182,9 +176,6 @@ fn resolve_subtitle(item: &MediaItem, known_kind: Option<&str>) -> String {
     if !parts.is_empty() {
         return parts.join(" • ");
     }
-    // A playlist card shows its whole description, "Author • N tracks":
-    // ytmusicapi files that author under `author`, which _resolve_subtitle
-    // never reads, so the description is what it falls through to.
     if item.kind == ItemKind::Playlist {
         if let Some(description) = item.description.clone().filter(|d| !d.is_empty()) {
             return description;

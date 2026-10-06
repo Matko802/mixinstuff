@@ -1,11 +1,3 @@
-//! Session and endpoint layer on top of the `ytmusicapi` crate.
-//!
-//! The crate owns the InnerTube transport: browser-cookie auth with the
-//! SAPISIDHASH header, the WEB_REMIX context, and `send_request`. This module
-//! owns what the app needs around it: the auth state machine published on a
-//! watch channel, the headers_auth.json file the Python app wrote, header
-//! normalization, the media auth snapshot for GStreamer and yt-dlp, and the
-//! ratings cache. Endpoint parsers the crate lacks live in sibling modules.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -42,7 +34,6 @@ pub enum NetError {
 }
 
 impl NetError {
-    /// HTTP status carried by an API server error, if any.
     pub fn status(&self) -> Option<u16> {
         match self {
             NetError::Api(ytmusicapi::Error::Server { status, .. }) => Some(*status),
@@ -59,8 +50,6 @@ pub struct AccountInfo {
     pub photo_url: Option<String>,
 }
 
-/// One entry of the account switcher: the Google account itself or a brand
-/// account (channel) under it. `page_id` is None for the account itself.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Account {
     pub name: String,
@@ -71,9 +60,6 @@ pub struct Account {
     pub selected: bool,
 }
 
-/// Authentication state machine.
-/// Anonymous: no saved headers. Unverified: headers loaded, no round trip yet.
-/// Authenticated: server confirmed the session. Invalid: server rejected it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AuthState {
     Anonymous,
@@ -87,7 +73,6 @@ impl AuthState {
         matches!(self, AuthState::Authenticated(_))
     }
 
-    /// True whenever we have headers worth sending, verified or not.
     pub fn has_session(&self) -> bool {
         matches!(self, AuthState::Authenticated(_) | AuthState::Unverified)
     }
@@ -95,26 +80,20 @@ impl AuthState {
 
 #[derive(Default)]
 struct Session {
-    /// Normalized browser headers, Title-Case keys. Empty when anonymous.
     headers: BTreeMap<String, String>,
     browser_auth: Option<BrowserAuth>,
 }
 
 pub struct YtMusic {
-    /// App-side HTTP client for cover art and other plain fetches.
     http: reqwest::Client,
     auth_file: PathBuf,
-    /// The crate client, rebuilt on login and logout since it is immutable.
     api: RwLock<Arc<YTMusicClient>>,
     session: RwLock<Session>,
     auth: watch::Sender<AuthState>,
-    /// Ratings seen or set this session, keyed by video id. Mirrors MusicClient._known_likes.
     known_likes: RwLock<HashMap<String, LikeStatus>>,
-    /// The brand account acted for, as `onBehalfOfUser`. None is the Google account itself.
     page_id: RwLock<Option<String>>,
 }
 
-/// Pref holding the chosen channel's page id.
 pub const CHANNEL_PREF: &str = "account_page_id";
 
 impl YtMusic {
@@ -136,17 +115,14 @@ impl YtMusic {
         Ok(client)
     }
 
-    /// Shared HTTP client for non-InnerTube fetches such as cover art.
     pub fn http(&self) -> &reqwest::Client {
         &self.http
     }
 
-    /// The `ytmusicapi` client for the current session.
     pub fn api(&self) -> Arc<YTMusicClient> {
         self.api.read().unwrap().clone()
     }
 
-    // -- auth state ------------------------------------------------------
 
     pub fn auth_state(&self) -> AuthState {
         self.auth.borrow().clone()
@@ -164,7 +140,6 @@ impl YtMusic {
         self.auth.send_replace(state);
     }
 
-    /// Cookie, UA and authorization snapshot for GStreamer and yt-dlp. None when anonymous.
     pub fn media_auth(&self) -> Option<HttpAuth> {
         if !self.auth.borrow().has_session() {
             return None;
@@ -176,11 +151,6 @@ impl YtMusic {
         Some(HttpAuth { cookie, user_agent, authorization })
     }
 
-    /// The captured browser headers, with a fresh SAPISIDHASH.
-    ///
-    /// The InnerTube endpoints go through the crate client; this is for the
-    /// plain HTTP endpoints that still need the session, such as the playlist
-    /// cover upload.
     pub fn browser_headers(&self) -> Option<BTreeMap<String, String>> {
         if !self.auth.borrow().has_session() {
             return None;
@@ -196,7 +166,6 @@ impl YtMusic {
         Some(headers)
     }
 
-    /// Load headers_auth.json the way MusicClient.try_login(skip_validation=True) did.
     fn load_saved_session(&self) {
         let Ok(text) = std::fs::read_to_string(&self.auth_file) else {
             self.publish(AuthState::Anonymous);
@@ -220,7 +189,6 @@ impl YtMusic {
         }
     }
 
-    /// Build a signed-in crate client from normalized headers and remember them.
     fn install_headers(&self, headers: BTreeMap<String, String>) -> Result<(), NetError> {
         let browser_auth = BrowserAuth::from_json(&serde_json::to_string(&headers)?).map_err(|e| NetError::InvalidAuth(e.to_string()))?;
         browser_auth.sapisid().map_err(|e| NetError::InvalidAuth(e.to_string()))?;
@@ -235,7 +203,6 @@ impl YtMusic {
         Ok(())
     }
 
-    /// Confirm the loaded session with the server. Offline keeps Unverified.
     pub async fn validate(&self) -> Result<AuthState, NetError> {
         if !self.auth.borrow().has_session() {
             return Ok(self.auth_state());
@@ -260,7 +227,6 @@ impl YtMusic {
         Ok(self.auth_state())
     }
 
-    /// Accept a browser.json path, a JSON object string, or a raw "Key: value" header block.
     pub async fn login(&self, input: &str) -> Result<AccountInfo, NetError> {
         let raw = parse_auth_input(input)?;
         let mut headers = normalize_headers(raw);
@@ -300,14 +266,11 @@ impl YtMusic {
         self.publish(AuthState::Anonymous);
     }
 
-    // -- channels --------------------------------------------------------
 
     pub fn channel(&self) -> Option<String> {
         self.page_id.read().unwrap().clone()
     }
 
-    /// Act as another channel of the signed-in account. The caller persists
-    /// the choice. The session is re-validated so the account info follows.
     pub async fn set_channel(&self, page_id: Option<String>) -> Result<AuthState, NetError> {
         *self.page_id.write().unwrap() = page_id;
         let headers = self.session.read().unwrap().headers.clone();
@@ -319,7 +282,6 @@ impl YtMusic {
         self.validate().await
     }
 
-    /// The account and its brand accounts, from the switcher YouTube Music shows.
     pub async fn accounts(&self) -> Result<Vec<Account>, NetError> {
         if !self.auth.borrow().has_session() {
             return Ok(Vec::new());
@@ -328,7 +290,6 @@ impl YtMusic {
         Ok(parse_accounts(&resp))
     }
 
-    // -- ratings ---------------------------------------------------------
 
     pub fn known_like_status(&self, video_id: &str) -> Option<LikeStatus> {
         self.known_likes.read().unwrap().get(video_id).copied()
@@ -338,7 +299,6 @@ impl YtMusic {
         self.known_likes.write().unwrap().insert(video_id.to_owned(), status);
     }
 
-    /// Thumbs up, thumbs down, or clear, through the crate's rate_song.
     pub async fn rate_song(&self, video_id: &str, status: LikeStatus) -> Result<(), NetError> {
         if !self.auth.borrow().has_session() {
             return Err(NetError::Unauthenticated);
@@ -352,14 +312,11 @@ impl YtMusic {
         Ok(())
     }
 
-    // -- transport -------------------------------------------------------
 
-    /// POST to an InnerTube endpoint through the crate, context merged in.
     pub async fn post(&self, endpoint: &str, body: Value) -> Result<Value, NetError> {
         Ok(self.api().send_request(endpoint, body).await?)
     }
 
-    /// The signed-in account, or None when the server treats us as anonymous.
     pub async fn account_info(&self) -> Result<Option<AccountInfo>, NetError> {
         let resp = self.post("account/account_menu", json!({})).await?;
         let header = resp.pointer("/actions/0/openPopupAction/popup/multiPageMenuRenderer/header/activeAccountHeaderRenderer");
@@ -380,9 +337,7 @@ impl YtMusic {
     }
 }
 
-// -- helpers -------------------------------------------------------------
 
-/// Every `accountItem` in the response, wherever the renderers nest it.
 pub fn parse_accounts(resp: &Value) -> Vec<Account> {
     let mut items = Vec::new();
     collect_key(resp, "accountItem", &mut items);
@@ -427,7 +382,6 @@ fn parse_account(item: &Value) -> Option<Account> {
     })
 }
 
-/// Port of MusicClient._normalize_headers: Title-Case the known keys and drop OAuth material.
 pub fn normalize_headers(raw: BTreeMap<String, String>) -> BTreeMap<String, String> {
     const DROP: &[&str] = &["oauth_credentials", "client_id", "client_secret", "access_token", "refresh_token", "token_type", "expires_at", "expires_in"];
     let mut out = BTreeMap::new();
@@ -475,7 +429,6 @@ fn parse_auth_input(input: &str) -> Result<BTreeMap<String, String>, NetError> {
     if trimmed.starts_with('{') {
         return Ok(serde_json::from_str(trimmed)?);
     }
-    // Raw request headers copied from the browser's network panel.
     let mut map = BTreeMap::new();
     for line in trimmed.lines() {
         if let Some((k, v)) = line.split_once(':') {

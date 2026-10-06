@@ -1,7 +1,3 @@
-//! Home shelves for listeners without an account. YouTube's signed-out feed
-//! is the same for everyone in a region, so these come from what this device
-//! knows: the play log and the likes in local.db. Everything fetched here
-//! works anonymously: a radio per seed song and an artist page per favorite.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -14,27 +10,20 @@ use crate::net::home::HomeSection;
 use crate::net::search::futures_join_all;
 
 const DAY: u64 = 24 * 3600;
-/// Songs the quick picks are radios of.
 const SEEDS: usize = 3;
-/// Artists the "Similar to" and new release shelves look at.
 const ARTISTS: usize = 3;
-/// Followed artists whose pages are fetched for new releases, on top of the most heard.
 const FOLLOWED: usize = 5;
-/// "Similar to" shelves, so the feed does not turn into a wall of artists.
 const SIMILAR_SHELVES: usize = 3;
 const QUICK_PICKS: usize = 20;
 const RADIO_LENGTH: usize = 25;
 const LISTEN_AGAIN: usize = 20;
-/// Fewer plays than this and the shelf would repeat the last hour.
 const LISTEN_AGAIN_MIN: usize = 4;
 const NEW_RELEASES: usize = 12;
-/// A like counts for this many plays when ranking artists.
 const LIKE_WEIGHT: usize = 2;
 
 pub const QUICK_PICKS_TITLE: &str = "Quick picks";
 pub const LISTEN_AGAIN_TITLE: &str = "Listen again";
 
-/// What the device knows about the listener, read on the GTK thread.
 #[derive(Clone, Debug, Default)]
 pub struct Signals {
     pub recent: Vec<Track>,
@@ -65,7 +54,6 @@ impl Signals {
     }
 }
 
-/// The most heard artists, then the followed ones not among them.
 fn with_followed(mut artists: Vec<Person>, followed: Vec<Person>) -> Vec<Person> {
     for artist in followed {
         if !artists.iter().any(|a| a.id == artist.id) {
@@ -75,12 +63,10 @@ fn with_followed(mut artists: Vec<Person>, followed: Vec<Person>) -> Vec<Person>
     artists
 }
 
-/// A radio seed has to be a real YouTube id, not a demo or local stand-in.
 fn is_video_id(id: &str) -> bool {
     id.len() == 11 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-/// The artists heard most, by the first credited artist that has a channel.
 fn top_artists<'a>(tracks: impl Iterator<Item = (&'a Track, usize)>, limit: usize) -> Vec<Person> {
     let mut counts: HashMap<String, (usize, usize, String)> = HashMap::new();
     for (order, (track, weight)) in tracks.enumerate() {
@@ -89,13 +75,10 @@ fn top_artists<'a>(tracks: impl Iterator<Item = (&'a Track, usize)>, limit: usiz
         entry.0 += weight;
     }
     let mut ranked: Vec<(String, (usize, usize, String))> = counts.into_iter().collect();
-    // Most heard first; a tie goes to the one heard first in the log.
     ranked.sort_by(|a, b| b.1.0.cmp(&a.1.0).then(a.1.1.cmp(&b.1.1)));
     ranked.into_iter().take(limit).map(|(id, (_, _, name))| Person { name, id: Some(id) }).collect()
 }
 
-/// The shelves, in the order Home shows them. Each fetch that fails costs its
-/// shelf only.
 pub async fn build(api: Arc<dyn Browse>, signals: Signals) -> Vec<HomeSection> {
     let seed_ids: Vec<String> = signals.seeds.iter().map(|t| t.video_id.0.clone()).collect();
     let artists = futures_join_all(signals.artists.iter().map(|artist| {
@@ -121,7 +104,6 @@ pub async fn build(api: Arc<dyn Browse>, signals: Signals) -> Vec<HomeSection> {
             recent
         })
         .collect();
-    // Artists take turns, so the one with the busiest year fills no more than its share.
     let releases = interleave(per_artist, NEW_RELEASES, |item| item.id.clone());
     if !releases.is_empty() {
         sections.push(HomeSection { title: "New from artists you like".to_owned(), items: releases, strapline_thumb: None, strapline: None });
@@ -137,9 +119,6 @@ pub async fn build(api: Arc<dyn Browse>, signals: Signals) -> Vec<HomeSection> {
     sections
 }
 
-/// Quick picks made the way YouTube made them: a radio per seed song, taken
-/// in turns. YouTube stopped sending its own row in late 2026, so the signed
-/// in feed builds it too, seeded from Listen again.
 pub async fn quick_picks(api: Arc<dyn Browse>, seed_ids: Vec<String>) -> Option<HomeSection> {
     let radios = futures_join_all(seed_ids.iter().map(|id| {
         let (api, id) = (api.clone(), id.clone());
@@ -151,15 +130,12 @@ pub async fn quick_picks(api: Arc<dyn Browse>, seed_ids: Vec<String>) -> Option<
         .filter_map(|radio| radio.inspect_err(|err| tracing::warn!(%err, "quick picks radio failed")).ok())
         .map(|radio| radio.tracks.into_iter().map(|t| t.track).collect())
         .collect();
-    // Each radio opens with its seed, which Listen again already shows.
     let seeds: HashSet<&str> = seed_ids.iter().map(String::as_str).collect();
     let radios = radios.into_iter().map(|radio| radio.into_iter().filter(|t| !seeds.contains(t.video_id.as_str())).collect()).collect();
     let picks = interleave(radios, QUICK_PICKS, |t| t.video_id.0.clone());
     (!picks.is_empty()).then(|| HomeSection { title: QUICK_PICKS_TITLE.to_owned(), items: picks.iter().map(MediaItem::from_track).collect(), strapline_thumb: None, strapline: None })
 }
 
-/// Songs to seed quick picks with, from a feed that came without them:
-/// Listen again first, then Forgotten favorites. None when the feed has its own row.
 pub fn quick_pick_seeds(sections: &[HomeSection]) -> Option<Vec<String>> {
     use crate::net::home::{Bucket, classify_section};
     if sections.iter().any(|s| s.title.to_lowercase().contains("quick pick")) {
@@ -178,7 +154,6 @@ pub fn quick_pick_seeds(sections: &[HomeSection]) -> Option<Vec<String>> {
     Some(seeds)
 }
 
-/// One from each list in turn, each entry once.
 fn interleave<T: Clone>(lists: Vec<Vec<T>>, limit: usize, key: impl Fn(&T) -> String) -> Vec<T> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
@@ -203,7 +178,6 @@ fn current_year() -> i32 {
     1970 + (days as f64 / 365.2425) as i32
 }
 
-/// The local shelves ahead of YouTube's, minus YouTube's own rows of the same name.
 pub fn merge(local: Vec<HomeSection>, remote: Vec<HomeSection>) -> Vec<HomeSection> {
     let taken: HashSet<String> = local.iter().map(|s| s.title.to_lowercase()).collect();
     local.into_iter().chain(remote.into_iter().filter(|s| !taken.contains(&s.title.to_lowercase()))).collect()
@@ -287,8 +261,6 @@ mod tests {
         assert_eq!(names.last().map(String::as_str), Some("Zeta"), "a followed artist counts without a single play");
     }
 
-    /// Builds the shelves on a signed-out client from two well-known songs.
-    /// `cargo test -- --ignored shelves_build_signed_out --nocapture`
     #[tokio::test]
     #[ignore]
     async fn shelves_build_signed_out() {

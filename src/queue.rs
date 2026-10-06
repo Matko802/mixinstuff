@@ -1,33 +1,17 @@
-//! The play queue: order, position, shuffle, repeat, and what follows the
-//! current track.
-//!
-//! Pure data. No GTK, no GStreamer, no network, so every rule about ordering
-//! and about what plays next can be exercised directly. `Player` owns one of
-//! these, asks it what to do, and carries the answer out to the audio thread
-//! and the store.
 
 use crate::model::{LikeStatus, RepeatMode, Track, VideoId};
 
-/// How far into a track Previous stops stepping back and restarts it instead.
 pub const PREVIOUS_RESTART_THRESHOLD: f64 = 5.0;
 
-/// What the caller must do after asking the queue something. Every method that
-/// can change what plays answers with one of these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
-    /// Load and play this index.
     Load(usize),
-    /// Play the current track again from the beginning.
     Restart,
-    /// Nothing follows. Stop and clear the current track.
     Stop,
-    /// Nothing follows, but the source is a radio: fetch more, then keep playing.
     Extend,
-    /// The queue changed; what plays does not.
     Stay,
 }
 
-/// What the shell and the transport bar may offer right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Bounds {
     pub can_next: bool,
@@ -37,18 +21,15 @@ pub struct Bounds {
 #[derive(Default)]
 pub struct Queue {
     tracks: Vec<Track>,
-    /// The order before shuffling, so turning shuffle off restores it.
     original: Vec<Track>,
     current: Option<usize>,
     shuffle: bool,
     repeat: RepeatMode,
-    /// The playlist, album or radio the queue came from, or None for a loose set.
     source_id: Option<String>,
     infinite: bool,
 }
 
 impl Queue {
-    // -- reading ----------------------------------------------------------
 
     pub fn tracks(&self) -> &[Track] {
         &self.tracks
@@ -90,8 +71,6 @@ impl Queue {
         self.infinite
     }
 
-    /// Whether Next and Previous have anywhere to go. Previous always does
-    /// once the track is past the restart threshold, because it restarts.
     pub fn bounds(&self, position: f64) -> Bounds {
         let Some(current) = self.current else { return Bounds::default() };
         Bounds {
@@ -100,8 +79,6 @@ impl Queue {
         }
     }
 
-    /// The index to pre-resolve for a gapless switch. Repeat-track arms the
-    /// same index again, which is how a single track repeats without a gap.
     pub fn armable_next(&self) -> Option<usize> {
         let current = self.current?;
         match self.repeat {
@@ -112,15 +89,11 @@ impl Queue {
         }
     }
 
-    /// A radio with tracks left behind it can always be extended.
     fn can_extend(&self) -> bool {
         self.infinite && self.source_id.is_some() && !self.is_empty()
     }
 
-    // -- moving through the queue -----------------------------------------
 
-    /// Next. Repeat-all wraps; repeat-track does not, because a manual Next
-    /// means the listener wants the following track, not this one again.
     pub fn advance(&mut self) -> Step {
         let Some(current) = self.current else { return self.exhausted() };
         if current + 1 < self.tracks.len() {
@@ -132,8 +105,6 @@ impl Queue {
         self.exhausted()
     }
 
-    /// The current track played to its end. Repeat-track plays it again;
-    /// everything else follows Next.
     pub fn finished(&mut self) -> Step {
         match (self.repeat, self.current) {
             (RepeatMode::Track, Some(current)) => Step::Load(current),
@@ -141,8 +112,6 @@ impl Queue {
         }
     }
 
-    /// Previous. Past the threshold it restarts the track, which is what the
-    /// listener means by pressing it twice.
     pub fn back(&mut self, position: f64) -> Step {
         let Some(current) = self.current else { return Step::Stay };
         if position > PREVIOUS_RESTART_THRESHOLD || current == 0 {
@@ -155,9 +124,6 @@ impl Queue {
         if index >= self.tracks.len() { Step::Stay } else { self.go(index) }
     }
 
-    /// The current track could not be played. This deliberately does not wrap
-    /// under repeat-all and does not extend a radio: every track could fail,
-    /// and the app would spin instead of stopping.
     pub fn failed_current(&mut self) -> Step {
         match self.current {
             Some(current) if current + 1 < self.tracks.len() => self.go(current + 1),
@@ -168,7 +134,6 @@ impl Queue {
         }
     }
 
-    /// Adopt an index the pipeline switched to on its own, after a gapless handoff.
     pub fn adopt(&mut self, index: usize) -> Option<&Track> {
         if index < self.tracks.len() {
             self.current = Some(index);
@@ -189,10 +154,7 @@ impl Queue {
         Step::Stop
     }
 
-    // -- editing ----------------------------------------------------------
 
-    /// Replace everything and choose where to start. An out-of-range index
-    /// under shuffle means "no chosen first track", which is what Shuffle does.
     pub fn replace(&mut self, tracks: Vec<Track>, start_index: usize, shuffle: bool, source_id: Option<String>, infinite: bool) -> Step {
         self.original = tracks.clone();
         self.tracks = tracks;
@@ -200,7 +162,6 @@ impl Queue {
         self.source_id = source_id;
         self.infinite = infinite;
         if shuffle {
-            // The chosen track plays first, everything behind it is shuffled.
             let mut rest = std::mem::take(&mut self.tracks);
             let first = (start_index < rest.len()).then(|| rest.remove(start_index));
             shuffle_in_place(&mut rest);
@@ -218,7 +179,6 @@ impl Queue {
         }
     }
 
-    /// Load a queue without playing it, for the restored session and the demo.
     pub fn stage(&mut self, tracks: Vec<Track>, start_index: usize) {
         self.original = tracks.clone();
         self.tracks = tracks;
@@ -228,14 +188,11 @@ impl Queue {
         self.current = (start_index < self.tracks.len()).then_some(start_index);
     }
 
-    /// Empty the queue. Repeat survives, as it is a listener preference rather
-    /// than a property of what is queued.
     pub fn clear(&mut self) {
         let repeat = self.repeat;
         *self = Self { repeat, ..Self::default() };
     }
 
-    /// Add after the current track, or at the end. Playing starts if nothing was.
     pub fn insert(&mut self, tracks: Vec<Track>, play_next: bool) -> Step {
         if tracks.is_empty() {
             return Step::Stay;
@@ -255,9 +212,6 @@ impl Queue {
         }
     }
 
-    /// Append tracks the radio fetched. Under shuffle they mix into what is
-    /// still ahead, never into what already played. What plays does not change;
-    /// a caller that wants to start there jumps afterwards.
     pub fn append(&mut self, tracks: Vec<Track>) {
         if tracks.is_empty() {
             return;
@@ -282,13 +236,10 @@ impl Queue {
         }
     }
 
-    /// Nothing plays, but the queue stays as it is.
     pub fn clear_current(&mut self) {
         self.current = None;
     }
 
-    /// Remove one row. Removing the playing track loads whatever slid into its
-    /// place, which is what the queue sidebar's delete does.
     pub fn remove(&mut self, index: usize) -> Step {
         if index >= self.tracks.len() {
             return Step::Stay;
@@ -314,8 +265,6 @@ impl Queue {
         }
     }
 
-    /// Drag-and-drop reorder. Returns whether anything moved; the playing
-    /// track keeps playing and its index follows it.
     pub fn move_item(&mut self, from: usize, to: usize) -> bool {
         if from >= self.tracks.len() || to >= self.tracks.len() || from == to {
             return false;
@@ -337,13 +286,7 @@ impl Queue {
         true
     }
 
-    // -- listener preferences ---------------------------------------------
 
-    /// Hand the queue over to a radio it did not start as.
-    ///
-    /// A section played from Home is a plain queue with a stamp on it; once
-    /// its radio arrives the stamp is replaced by the playlist behind it, and
-    /// from there the infinite extender keeps it going.
     pub fn adopt_source(&mut self, source_id: String, infinite: bool) {
         self.source_id = Some(source_id);
         self.infinite = infinite;
@@ -353,8 +296,6 @@ impl Queue {
         self.repeat = mode;
     }
 
-    /// Turn shuffle on or off, keeping the playing track playing. Returns the
-    /// value afterwards, which is what the store mirrors.
     pub fn set_shuffle(&mut self, on: bool) -> bool {
         if on == self.shuffle {
             return self.shuffle;
@@ -386,11 +327,7 @@ impl Queue {
         self.set_shuffle(!self.shuffle)
     }
 
-    // -- track upkeep -----------------------------------------------------
 
-    /// Replace the playing track with its audio twin, which carries a
-    /// different video id. `refine_current` refuses that on purpose, since
-    /// everywhere else a changed id means the queue moved on.
     pub fn swap_current(&mut self, previous: &VideoId, replacement: Track) -> bool {
         let Some(slot) = self.current.and_then(|i| self.tracks.get_mut(i)) else { return false };
         if slot.video_id != *previous {
@@ -403,8 +340,6 @@ impl Queue {
         true
     }
 
-    /// Replace the playing track with a richer copy, once the resolver has
-    /// filled in the title, artist or art a search result lacked.
     pub fn refine_current(&mut self, refined: &Track) -> bool {
         let Some(slot) = self.current.and_then(|i| self.tracks.get_mut(i)) else { return false };
         if slot.video_id != refined.video_id {
@@ -414,8 +349,6 @@ impl Queue {
         true
     }
 
-    /// Overwrite the descriptive fields of every copy of a track, in both
-    /// orders. What the queue tracks about it (rating, playlist row id) stays.
     pub fn refresh_metadata(&mut self, fresh: &Track) -> bool {
         let mut found = false;
         for track in self.tracks.iter_mut().chain(self.original.iter_mut()).filter(|t| t.video_id == fresh.video_id) {
@@ -437,7 +370,6 @@ impl Queue {
         found
     }
 
-    /// Apply a rating to every copy of a track, in both orders.
     pub fn set_like_status(&mut self, video_id: &VideoId, status: LikeStatus) {
         for track in self.tracks.iter_mut().chain(self.original.iter_mut()) {
             if track.video_id == *video_id {
@@ -447,7 +379,6 @@ impl Queue {
     }
 }
 
-/// Fisher-Yates with a tiny xorshift source. Good enough for a play queue, no rand dependency.
 fn shuffle_in_place(items: &mut [Track]) {
     let mut seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -482,7 +413,6 @@ mod tests {
         assert_eq!(q.current_track().map(|t| t.title.clone()), Some("Album master".into()));
         assert_eq!(q.len(), 2, "the swap replaces the entry, it does not add one");
 
-        // A queue that moved on while the lookup ran is left alone.
         assert!(!q.swap_current(&VideoId("video".into()), track("late")));
         assert_eq!(q.current_track().map(|t| t.video_id.0.clone()), Some("audio".into()));
     }

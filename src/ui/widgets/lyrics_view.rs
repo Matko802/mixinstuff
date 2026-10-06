@@ -1,10 +1,3 @@
-//! The lyrics column. Port of LyricsView in ui/widgets/lyrics_view.py: follows
-//! the playing track, fetches its lyrics on tokio, renders them as tap-to-seek
-//! rows with the active line centred, and offers a picker for the source, the
-//! second line, other matches and a manual search.
-//!
-//! Two instances exist, one in the expanded player and one in the desktop
-//! cover view. Only the mapped one scrolls, so they never race each other.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -21,25 +14,19 @@ use crate::ui::context::UiContext;
 use crate::ui::widgets::fade_edges_bin::FadeEdgesBin;
 use crate::ui::widgets::lyric_rows::{Effects, InterludeRow, LyricRow, RowOptions, find_interludes};
 
-/// Autoscroll stands down this long after the listener scrolls by hand.
 const USER_SCROLL_PAUSE: Duration = Duration::from_secs(4);
-/// After a tap-to-seek, position ticks from before the seek are ignored this long.
 const SEEK_SETTLE: Duration = Duration::from_millis(600);
 const SCROLL_ANIMATION_MS: f64 = 500.0;
-/// Resting sizes in style.css, which the size preference multiplies.
 const BASE_FONT_EM: f64 = 1.82;
 const SUB_FONT_EM: f64 = 1.16;
 
 const SECOND_LINE_LABELS: [(&str, &str); 5] = [("off", "Off"), ("auto", "Auto"), ("romanization", "Romanization"), ("translation", "Translation"), ("background", "Background vocals")];
 
 thread_local! {
-    /// Every live view, so a display pref change reaches both.
     static VIEWS: RefCell<Vec<Weak<LyricsView>>> = const { RefCell::new(Vec::new()) };
-    /// One provider for the whole display: both views show the same size.
     static FONT_CSS: RefCell<Option<(gtk::CssProvider, f64)>> = const { RefCell::new(None) };
 }
 
-/// Both live views, the expanded player's and the desktop cover view's.
 pub fn live_views() -> Vec<Rc<LyricsView>> {
     VIEWS.with(|views| {
         views.borrow_mut().retain(|v| v.strong_count() > 0);
@@ -47,7 +34,6 @@ pub fn live_views() -> Vec<Rc<LyricsView>> {
     })
 }
 
-/// Push the type-size preference into the display's CSS.
 fn apply_font_scale(scale: f64) {
     FONT_CSS.with(|slot| {
         let mut slot = slot.borrow_mut();
@@ -57,7 +43,6 @@ fn apply_font_scale(scale: f64) {
         let Some(display) = gtk::gdk::Display::default() else { return };
         let provider = slot.take().map(|(p, _)| p).unwrap_or_else(|| {
             let provider = gtk::CssProvider::new();
-            // One step above the app stylesheet, still below user CSS.
             gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
             provider
         });
@@ -70,14 +55,12 @@ fn apply_font_scale(scale: f64) {
     });
 }
 
-/// What the scroll request is aimed at. Interlude rows share no line index, so they key off the widget.
 #[derive(Clone, PartialEq)]
 enum ScrollTarget {
     Line(usize),
     Interlude(InterludeRow),
 }
 
-/// What activating a row of the source list does.
 enum SourceAction {
     Switch(String),
     Search,
@@ -85,7 +68,6 @@ enum SourceAction {
     Nothing,
 }
 
-/// Track, cached sources, the source shown, the pinned one, and the spinner.
 type SourceRowsKey = (Option<String>, Vec<String>, Option<String>, Option<String>, bool);
 
 #[derive(Clone, PartialEq)]
@@ -118,32 +100,26 @@ pub struct LyricsView {
     search_list: gtk::ListBox,
 
     display: RefCell<DisplayPrefs>,
-    /// Invalidates in-flight fetches when the track changes.
     fetch_gen: Cell<u64>,
     video_id: RefCell<Option<String>>,
     lines: RefCell<Vec<LyricLine>>,
     synced: Cell<bool>,
     source: RefCell<Option<String>>,
     active_idx: Cell<Option<usize>>,
-    /// The row carrying a live cursor. Not always `active_idx`: while unmapped
-    /// the index moves without lighting anything, and a rebuild drops every row.
     lit_idx: Cell<Option<usize>>,
     rows: RefCell<HashMap<usize, LyricRow>>,
     interludes: RefCell<Vec<InterludeRow>>,
     lit_interlude: RefCell<Option<InterludeRow>>,
     last_pos: Cell<f64>,
     user_scrolled_at: Cell<Option<Instant>>,
-    /// Lines show unblurred while the listener scrolls.
     unblurred_for_scroll: Cell<bool>,
     suppress_activate: Cell<bool>,
     scroll_target: RefCell<Option<ScrollTarget>>,
     scroll_anim: RefCell<Option<gtk::TickCallbackId>>,
     seek_pending: Cell<Option<(f64, Instant)>>,
     source_actions: RefCell<Vec<SourceAction>>,
-    /// What the source rows were last built from.
     source_rows_key: RefCell<Option<SourceRowsKey>>,
     second_line_keys: RefCell<Vec<&'static str>>,
-    /// Results behind the rows of the matches and search lists.
     match_rows: RefCell<Vec<LyricsMatch>>,
     search_rows: RefCell<Vec<LyricsMatch>>,
     matches_source: RefCell<Option<String>>,
@@ -154,7 +130,6 @@ fn heading(text: &str) -> gtk::Label {
 }
 
 fn picker_list() -> gtk::ListBox {
-    // navigation-sidebar gives the row hover without the boxed-list card look.
     gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["navigation-sidebar", "lyrics-source-list"]).build()
 }
 
@@ -200,12 +175,10 @@ fn match_row(found: &LyricsMatch, source: Option<&str>) -> gtk::ListBoxRow {
     gtk::ListBoxRow::builder().activatable(true).child(&text).build()
 }
 
-/// A back button and a title, the header of the picker's second pages.
 fn sub_page(title: &gtk::Label, list: &gtk::ListBox, max_height: i32, extra: Option<&gtk::Widget>) -> (gtk::Box, gtk::Button) {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 6);
     let header = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     let back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text("Back to sources").build();
-    // The builder would replace the image-button class the icon brings.
     back.add_css_class("flat");
     header.append(&back);
     header.append(title);
@@ -213,7 +186,6 @@ fn sub_page(title: &gtk::Label, list: &gtk::ListBox, max_height: i32, extra: Opt
     if let Some(extra) = extra {
         page.append(extra);
     }
-    // Several matches per provider is normal, so this scrolls instead of growing past the window.
     let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).max_content_height(max_height).child(list).build();
     crate::ui::suppress_hover_while_scrolling(&scroller);
     page.append(&scroller);
@@ -237,20 +209,15 @@ impl LyricsView {
         let stack_overlay = gtk::Overlay::builder().child(&stack).build();
         root.append(&stack_overlay);
 
-        // -- loading page ------------------------------------------------
         let loading = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).valign(gtk::Align::Center).halign(gtk::Align::Center).vexpand(true).build();
         loading.append(&adw::Spinner::builder().width_request(36).height_request(36).build());
         stack.add_named(&loading, Some("loading"));
 
-        // -- empty page ----------------------------------------------------
         let status_page = adw::StatusPage::builder().icon_name("format-justify-fill-symbolic").title("No lyrics").description("No lyrics found for this track.").vexpand(true).build();
         stack.add_named(&status_page, Some("empty"));
 
-        // -- lyrics page -----------------------------------------------------
         let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).hexpand(true).vexpand(true).css_classes(["lyrics-scroller"]).build();
         crate::ui::suppress_hover_while_scrolling(&scroller);
-        // A small top margin keeps the first line out of the fade band. The
-        // large bottom one lets the last lines reach the viewport centre.
         let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::Single).margin_top(32).margin_bottom(400).margin_start(16).margin_end(16).css_classes(["lyrics-list"]).build();
         let clamp = adw::Clamp::builder().maximum_size(820).tightening_threshold(640).child(&list).build();
         scroller.set_child(Some(&clamp));
@@ -263,7 +230,6 @@ impl LyricsView {
         lyrics_page.append(&fade);
         stack.add_named(&lyrics_page, Some("lyrics"));
 
-        // -- source picker -----------------------------------------------------
         let picker_btn = gtk::MenuButton::builder()
             .icon_name("view-more-symbolic")
             .tooltip_text("Choose lyrics source")
@@ -290,7 +256,6 @@ impl LyricsView {
         spinner_content.append(&gtk::Label::builder().label("Searching\u{2026}").css_classes(["dim-label"]).build());
         let spinner_row = gtk::ListBoxRow::builder().selectable(false).activatable(false).child(&spinner_content).build();
 
-        // Which second lines exist is a property of the track, so the choice sits next to the lyrics too.
         let second_line_section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).visible(false).build();
         second_line_section.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         let second_header = heading("Second line");
@@ -314,12 +279,9 @@ impl LyricsView {
         picker_stack.add_named(&sources_page, Some("sources"));
         picker_stack.add_named(&matches_page, Some("matches"));
         picker_stack.add_named(&search_page, Some("search"));
-        // Scrolls when it would not fit: a popup taller than the space under
-        // the button is closed by GNOME Shell the moment it opens.
         let picker_scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).propagate_natural_width(true).child(&picker_stack).build();
         popover.set_child(Some(&picker_scroller));
         picker_btn.set_popover(Some(&popover));
-        // Over the whole stack, so it stays reachable when a track has no lyrics.
         stack_overlay.add_overlay(&picker_btn);
         stack.set_visible_child_name("empty");
 
@@ -384,7 +346,6 @@ impl LyricsView {
     }
 
     fn wire(self: &Rc<Self>, matches_back: &gtk::Button, search_back: &gtk::Button) {
-        // A weak handle per closure keeps the view free to drop with its window.
         macro_rules! weak {
             (|$this:ident $(, $arg:pat_param)*| $body:expr) => {{
                 let weak = Rc::downgrade(self);
@@ -402,7 +363,6 @@ impl LyricsView {
             }
         }));
         self.list.connect_row_activated(weak!(|v, _, row| v.on_row_activated(row)));
-        // Only the scroll controller: a drag gesture fired on incidental pointer movement.
         let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
         let weak = Rc::downgrade(self);
         scroll.connect_scroll(move |_, _, _| {
@@ -412,7 +372,6 @@ impl LyricsView {
             glib::Propagation::Proceed
         });
         self.scroller.add_controller(scroll);
-        // A finger dragging the list. Only a raw controller sees touches the scrolled window claims.
         let touch = gtk::EventControllerLegacy::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
         let weak = Rc::downgrade(self);
         touch.connect_event(move |_, event| {
@@ -426,8 +385,6 @@ impl LyricsView {
         self.scroller.add_controller(touch);
 
         self.popover.connect_closed(weak!(|v, _| v.show_picker_page("sources")));
-        // Logged, so a button that stops opening shows whether the tap arrived at
-        // all. A passive controller: a gesture here could change how the tap is handled.
         let taps = gtk::EventControllerLegacy::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
         taps.connect_event(|_, event| {
             use gtk::gdk::EventType;
@@ -466,9 +423,7 @@ impl LyricsView {
         state.connect_status_notify(weak!(|v, state| v.on_state_changed(state.status())));
     }
 
-    // -- track metadata ---------------------------------------------------------
 
-    /// Title, first artist and duration of the playing track, what the providers match on.
     fn track_query(&self) -> Option<TrackQuery> {
         let video_id = self.video_id.borrow().clone()?;
         let track = self.ctx.player.current_track().filter(|t| t.video_id.0 == video_id);
@@ -481,7 +436,6 @@ impl LyricsView {
         Some(TrackQuery::new(&video_id, title.as_deref(), artist.as_deref(), duration))
     }
 
-    // -- player signals -----------------------------------------------------------
 
     fn on_metadata_changed(self: &Rc<Self>, video_id: &str) {
         if self.video_id.borrow().as_deref() == Some(video_id) && !self.lines.borrow().is_empty() {
@@ -509,7 +463,6 @@ impl LyricsView {
             return;
         }
         if !self.root.is_mapped() {
-            // Keep the index current so becoming visible does not replay a stale activation.
             self.active_idx.set(self.index_for_position(pos));
             return;
         }
@@ -521,14 +474,12 @@ impl LyricsView {
         }
 
         let ms = (pos * 1000.0) as i64;
-        // An instrumental stretch takes over: the dots fill and the last sung line dims.
         if let Some(interlude) = self.interlude_at(ms) {
             self.enter_interlude(&interlude, ms);
             return;
         }
         if let Some(lit) = self.lit_interlude.borrow_mut().take() {
             lit.set_cursor_ms(-1);
-            // Force the next activation to scroll back onto the vocal line.
             self.active_idx.set(None);
         }
 
@@ -546,7 +497,6 @@ impl LyricsView {
         }
         let pos = self.last_pos.get();
         let ms = (pos * 1000.0) as i64;
-        // Re-activate even when the index did not move while hidden: the row was never scrolled to.
         self.active_idx.set(None);
         match self.interlude_at(ms) {
             Some(interlude) => {
@@ -557,9 +507,7 @@ impl LyricsView {
         }
     }
 
-    // -- fetch pipeline --------------------------------------------------------------
 
-    /// Drop this track's cached lyrics and fetch again from scratch.
     pub fn refresh(self: &Rc<Self>) {
         if let Some(video_id) = self.video_id.borrow().clone() {
             self.lyrics.cache().invalidate(&video_id);
@@ -568,7 +516,6 @@ impl LyricsView {
     }
 
     fn refresh_for_current_track(self: &Rc<Self>) {
-        // Wipe everything first so a late position tick cannot index stale lines.
         self.fetch_gen.set(self.fetch_gen.get() + 1);
         self.lines.borrow_mut().clear();
         self.synced.set(false);
@@ -608,7 +555,6 @@ impl LyricsView {
         self.show_result(&source, result, false);
     }
 
-    /// Render one provider's lyrics for the current track.
     fn show_result(self: &Rc<Self>, source: &str, result: LyricsResult, switched: bool) {
         self.synced.set(result.synced);
         self.lines.replace(result.lines);
@@ -638,10 +584,7 @@ impl LyricsView {
         self.stack.set_visible_child_name("empty");
     }
 
-    // -- display prefs -------------------------------------------------------------------
 
-    /// Re-read the display prefs and rebuild the rows in place. No refetch:
-    /// the lines already carry every second line the provider had.
     pub fn apply_display_prefs(self: &Rc<Self>) {
         let lyrics_prefs = self.lyrics.prefs();
         lyrics_prefs.invalidate();
@@ -667,7 +610,6 @@ impl LyricsView {
         }
     }
 
-    /// The second-line modes this track's lyrics can fill. Off and Auto come along once anything else does.
     fn available_second_lines(&self) -> Vec<&'static str> {
         let has = |text: &Option<String>| text.as_deref().is_some_and(|t| !t.trim().is_empty());
         let lines = self.lines.borrow();
@@ -678,17 +620,14 @@ impl LyricsView {
         SECOND_LINE_LABELS.iter().map(|(key, _)| *key).filter(|key| matches!(*key, "off" | "auto") || have.iter().any(|(k, present)| k == key && *present)).collect()
     }
 
-    /// The saved mode, or the default when these lyrics have nothing for it.
     fn effective_second_line_mode(&self) -> String {
         let mode = self.display.borrow().second_line_mode.clone();
         let available = self.available_second_lines();
         if mode == "off" || available.is_empty() || available.contains(&mode.as_str()) { mode } else { prefs::SECOND_LINE_DEFAULT.to_owned() }
     }
 
-    // -- rows ------------------------------------------------------------------------------
 
     fn clear_rows(&self) {
-        // No row is lit once they are all gone. A stale index would suppress the next clear.
         self.lit_idx.set(None);
         self.rows.borrow_mut().clear();
         self.interludes.borrow_mut().clear();
@@ -715,7 +654,6 @@ impl LyricsView {
         let options = RowOptions { second_line_mode: self.effective_second_line_mode(), effects, sweep: display.sweep, active_scale: display.active_scale };
         let lines = self.lines.borrow();
         let synced = self.synced.get();
-        // Interlude markers take rows of their own, so list position stops matching the line index.
         let mut pending: std::collections::VecDeque<(f64, f64)> = if synced { find_interludes(&lines).into() } else { Default::default() };
         let add_interlude = |(start, end): (f64, f64)| {
             let row = InterludeRow::new(start, end, effects);
@@ -727,12 +665,10 @@ impl LyricsView {
                 pending.pop_front();
                 add_interlude(gap);
             }
-            // A provider's empty marker line has no words. The interlude row stands in for it.
             if line.text.trim().is_empty() {
                 continue;
             }
             let row = LyricRow::new(line, i, sweep_end_ms(&lines, i, synced), &options);
-            // Unsynced text has no cursor, so every row is lit: full brightness reads as "no sync info".
             if !synced {
                 row.set_cursor_ms(0);
             }
@@ -766,7 +702,6 @@ impl LyricsView {
 
     fn enter_interlude(self: &Rc<Self>, row: &InterludeRow, ms: i64) {
         if self.lit_interlude.borrow().as_ref() != Some(row) {
-            // Dim whatever lyric line was lit before the break.
             if let Some(prev) = self.lit_idx.take().and_then(|i| self.rows.borrow().get(&i).cloned()) {
                 prev.set_cursor_ms(-1);
             }
@@ -780,7 +715,6 @@ impl LyricsView {
     }
 
     fn activate_row(self: &Rc<Self>, idx: Option<usize>, cursor_ms: i64) {
-        // A lyric line becoming current means no instrumental break is.
         if let Some(lit) = self.lit_interlude.borrow_mut().take() {
             lit.set_cursor_ms(-1);
         }
@@ -795,9 +729,7 @@ impl LyricsView {
         let Some(row) = self.rows.borrow().get(&idx).cloned() else { return };
         row.set_cursor_ms(cursor_ms);
         self.lit_idx.set(Some(idx));
-        // Only the full level blurs by distance, and this walk runs on every line change.
         self.restore_distances();
-        // Selection drives the :selected style and, through row-selected, the autoscroll.
         self.select_quietly(&row);
     }
 
@@ -821,9 +753,7 @@ impl LyricsView {
         self.ctx.player.seek(start);
     }
 
-    // -- autoscroll ----------------------------------------------------------------------------
 
-    /// The listener is scrolling: autoscroll pauses and the distance blur lifts, as in Apple Music.
     fn note_user_scroll(self: &Rc<Self>) {
         self.user_scrolled_at.set(Some(Instant::now()));
         if self.unblurred_for_scroll.replace(true) {
@@ -844,12 +774,10 @@ impl LyricsView {
         });
     }
 
-    /// Demo hook: a scripted scroll counts as the listener's.
     pub fn note_user_scroll_for_demo(self: &Rc<Self>) {
         self.note_user_scroll();
     }
 
-    /// Blur by distance from the active line again, when the level asks for it.
     fn restore_distances(&self) {
         if self.unblurred_for_scroll.get() || self.display.borrow().effects != "full" {
             return;
@@ -871,7 +799,6 @@ impl LyricsView {
                 None => return,
             },
         };
-        // A newer request supersedes this one before its deferred scroll fires.
         self.scroll_target.replace(Some(target.clone()));
         let weak = Rc::downgrade(self);
         let row = row.clone();
@@ -881,7 +808,6 @@ impl LyricsView {
             if view.scroll_target.borrow().as_ref() != Some(&target) {
                 return glib::ControlFlow::Break;
             }
-            // The row has no size until the list has been laid out.
             let Some(bounds) = row.compute_bounds(&view.list).filter(|b| b.height() > 0.0) else {
                 retries.set(retries.get() - 1);
                 return if retries.get() > 0 { glib::ControlFlow::Continue } else { glib::ControlFlow::Break };
@@ -897,7 +823,6 @@ impl LyricsView {
         });
     }
 
-    /// Ease the adjustment to `target`. An animation in flight is replaced, so calls retarget smoothly.
     fn animate_to(self: &Rc<Self>, adj: &gtk::Adjustment, target: f64) {
         if let Some(id) = self.scroll_anim.borrow_mut().take() {
             id.remove();
@@ -918,7 +843,6 @@ impl LyricsView {
                 return glib::ControlFlow::Continue;
             }
             if let Some(view) = weak.upgrade() {
-                // Returning Break removes the callback, so only forget the id.
                 std::mem::forget(view.scroll_anim.borrow_mut().take());
             }
             glib::ControlFlow::Break
@@ -926,12 +850,7 @@ impl LyricsView {
         self.scroll_anim.replace(Some(id));
     }
 
-    // -- source picker -------------------------------------------------------------------------------
 
-    /// Close the picker once the event that chose a row is fully handled. A
-    /// row is picked on touch release, and hiding the popup inside that
-    /// handler left the touch sequence half finished, after which taps on
-    /// the button did nothing until the view was rebuilt.
     fn close_picker(&self) {
         let button = self.picker_btn.downgrade();
         glib::idle_add_local_once(move || {
@@ -941,17 +860,12 @@ impl LyricsView {
         });
     }
 
-    /// The source list is a few short names. A match list has to keep "[A Cappella]" apart from "[Slowed]".
     fn show_picker_page(&self, name: &str) {
         self.popover.set_size_request(if name == "sources" { 200 } else { 340 }, -1);
         self.picker_stack.set_visible_child_name(name);
     }
 
-    /// Fill the picker before it shows. A popup that changes size in its
-    /// first moments is dismissed by GNOME Shell on a touchscreen, so the rows
-    /// are in place before the popup exists.
     fn prepare_picker(self: &Rc<Self>) {
-        // What fits between the button and the bottom of the window, less the popover's own margins.
         let root = self.picker_btn.root();
         if let Some((root, top)) = root.and_then(|root| self.picker_btn.compute_point(&root, &gtk::graphene::Point::zero()).map(|top| (root, top))) {
             let below = root.height() - top.y() as i32 - self.picker_btn.height() - 48;
@@ -965,7 +879,6 @@ impl LyricsView {
 
     fn on_picker_opened(self: &Rc<Self>) {
         let Some(query) = self.track_query() else { return };
-        // Providers with nothing cached yet run in the background and report as they finish.
         let (tx, rx) = async_channel::unbounded::<Alternative>();
         let lyrics = self.lyrics.clone();
         self.ctx.net.spawn(async move { lyrics.fetch_alternatives(&query, tx).await });
@@ -983,7 +896,6 @@ impl LyricsView {
                 let all_done = Lyrics::provider_names().iter().all(|name| reported.iter().any(|r| r == name) || cached.iter().any(|(s, _)| s == name));
                 view.refresh_source_rows(!all_done);
             }
-            // The channel closed: every provider has answered.
             if let Some(view) = weak.upgrade().filter(|v| v.fetch_gen.get() == request && v.picker_btn.is_active()) {
                 view.refresh_source_rows(false);
             }
@@ -995,8 +907,6 @@ impl LyricsView {
     }
 
     fn refresh_source_rows(self: &Rc<Self>, include_spinner: bool) {
-        // Only rebuilt when the rows would differ: cached sources report again
-        // right after the popup opens, and resizing it then closed it at once.
         let key = (self.video_id.borrow().clone(), self.cached_alternatives().into_iter().map(|(name, _)| name).collect::<Vec<_>>(), self.source.borrow().clone(), self.video_id.borrow().as_deref().and_then(|id| self.lyrics.cache().get_preferred(id)), include_spinner);
         if self.source_rows_key.borrow().as_ref() == Some(&key) {
             return;
@@ -1010,7 +920,6 @@ impl LyricsView {
         };
         let preferred = self.lyrics.cache().get_preferred(&video_id);
         let active = self.source.borrow().clone();
-        // In the order of the queue in Settings. Disabled providers still appear, at the bottom.
         let queue = self.lyrics.prefs().full_provider_order();
         let disabled = self.lyrics.prefs().disabled_providers();
         let mut alternatives = self.cached_alternatives();
@@ -1025,14 +934,12 @@ impl LyricsView {
             actions.push(SourceAction::Nothing);
         }
 
-        // Always offered, and the only way in when nothing matched at all.
         let search = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         search.append(&gtk::Image::from_icon_name("system-search-symbolic"));
         search.append(&gtk::Label::builder().label("Search by name\u{2026}").halign(gtk::Align::Start).hexpand(true).build());
         self.source_list.append(&gtk::ListBoxRow::builder().activatable(true).child(&search).build());
         actions.push(SourceAction::Search);
 
-        // Only once something is pinned, or it would be an undo for a choice nobody made.
         if let Some(preferred) = preferred {
             let reset = gtk::Box::new(gtk::Orientation::Vertical, 0);
             reset.append(&gtk::Label::builder().label("Use automatic choice").halign(gtk::Align::Start).build());
@@ -1043,17 +950,13 @@ impl LyricsView {
         self.source_actions.replace(actions);
     }
 
-    /// Provider name, what its timing is worth, and a checkmark on the one being shown.
     fn source_row(self: &Rc<Self>, source: &str, result: &LyricsResult, is_active: bool, is_preferred: bool) -> gtk::ListBoxRow {
         let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
         let text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).valign(gtk::Align::Center).build();
         text.append(&gtk::Label::builder().label(source).halign(gtk::Align::Start).ellipsize(pango::EllipsizeMode::End).build());
-        // "Pinned" is written out, not a tooltip: on a touchscreen a tooltip is
-        // a second popup, and GNOME Shell then closed this one the moment it opened.
         let detail = if is_preferred { format!("{} • Pinned", timing_words(result, true)) } else { timing_words(result, true).to_owned() };
         text.append(&gtk::Label::builder().label(detail).halign(gtk::Align::Start).css_classes(["dim-label", "caption"]).build());
         content.append(&text);
-        // Always present, transparent when inactive, so switching never shifts the other rows.
         content.append(&gtk::Image::builder().icon_name("object-select-symbolic").valign(gtk::Align::Center).opacity(if is_active { 1.0 } else { 0.0 }).build());
         if Lyrics::provider_supports_matches(source) {
             let more = gtk::Button::builder().icon_name("go-next-symbolic").valign(gtk::Align::Center).tooltip_text(format!("Other matches from {source}")).build();
@@ -1087,7 +990,6 @@ impl LyricsView {
             Some(SourceAction::Switch(source)) => {
                 let source = source.clone();
                 drop(actions);
-                // Pinned, so later plays of this track come back to the same source.
                 self.lyrics.cache().set_preferred(&video_id, Some(&source));
                 if let Some((_, result)) = self.cached_alternatives().into_iter().find(|(name, _)| *name == source) {
                     self.show_result(&source, result, true);
@@ -1098,8 +1000,6 @@ impl LyricsView {
         }
     }
 
-    /// Demo hook: open the source picker, switch to another source, then
-    /// open it again and log whether the popover shows.
     pub fn picker_demo(self: &Rc<Self>) {
         let log = |view: &LyricsView, step: &str| {
             tracing::info!(step, mapped = view.picker_btn.is_mapped(), visible = view.picker_btn.is_visible(), sensitive = view.picker_btn.is_sensitive(), active = view.picker_btn.is_active(), popover = view.popover.is_visible(), page = ?view.picker_stack.visible_child_name(), "demo: lyrics picker");
@@ -1159,7 +1059,6 @@ impl LyricsView {
         let mode = usize::try_from(index).ok().and_then(|i| self.second_line_keys.borrow().get(i).copied());
         if let Some(mode) = mode.filter(|m| *m != self.display.borrow().second_line_mode) {
             self.lyrics.prefs().set_second_line_mode(mode);
-            // Both views read the same pref.
             for view in live_views() {
                 view.apply_display_prefs();
             }
@@ -1167,9 +1066,7 @@ impl LyricsView {
         self.close_picker();
     }
 
-    // -- other matches and manual search -------------------------------------------------------------------
 
-    /// Show every match `source` has for the current track.
     fn open_matches(self: &Rc<Self>, source: &str) {
         let Some(query) = self.track_query() else { return };
         self.matches_title.set_label(source);
@@ -1188,7 +1085,6 @@ impl LyricsView {
         glib::spawn_future_local(async move {
             let matches = handle.await.unwrap_or_default();
             let Some(view) = weak.upgrade() else { return };
-            // A track change while searching invalidates the list.
             if view.fetch_gen.get() != request || view.matches_source.borrow().as_deref() != Some(source.as_str()) {
                 return;
             }
@@ -1204,7 +1100,6 @@ impl LyricsView {
     }
 
     fn open_search(&self) {
-        // Seeded with the title, so the common case is deleting the bracketed credits.
         if self.search_entry.text().is_empty() {
             if let Some(query) = self.track_query().filter(|q| !q.title.is_empty()) {
                 self.search_entry.set_text(&query.title);
@@ -1250,7 +1145,6 @@ impl LyricsView {
         let Some(query) = self.track_query() else { return };
         self.close_picker();
 
-        // Stored as this provider's result and pinned, so the choice survives the next play.
         let request = self.fetch_gen.get();
         let lyrics = self.lyrics.clone();
         let chosen = source.clone();
@@ -1265,8 +1159,6 @@ impl LyricsView {
     }
 }
 
-/// When line `idx` gives way to the next, in ms: its own end, else the next
-/// timed line's start. A blank marker line counts, since singing stops there.
 fn sweep_end_ms(lines: &[LyricLine], idx: usize, synced: bool) -> Option<i64> {
     if !synced {
         return None;

@@ -1,8 +1,3 @@
-//! YouTube and YouTube Music links, turned into what the app opens: a song to
-//! play, or a playlist, album or artist page. The common shapes parse here
-//! without a request. Anything else on a YouTube host, such as an @handle,
-//! goes to InnerTube's `navigation/resolve_url`, which answers with the
-//! endpoint the web app would follow.
 
 use serde_json::json;
 
@@ -12,25 +7,17 @@ use crate::net::items::owned_at;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Link {
-    /// A song or video, in the context of a playlist when the link names one.
     Song { video_id: String, playlist_id: Option<String> },
-    /// A playlist, or an album's OLAK5uy_ playlist, opened as a page.
     Playlist(String),
-    /// An album page, MPREb_ id.
     Album(String),
     Artist(String),
 }
 
-/// The app's own link scheme. The desktop entry registers it, so the system
-/// opens `musishark://open?url=<link>` here. `musishark://music.youtube.com/...`
-/// reads as the same link over https.
 pub const SCHEME: &str = "musishark";
 
 const HOSTS: [&str; 6] = ["music.youtube.com", "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"];
 
-/// Whether the text is a link to a YouTube host, the test the search field uses.
 pub fn is_youtube_url(text: &str) -> bool {
-    // A bare "youtube.com" typed into search is a search, not a link to nowhere.
     parse_url(text).is_some_and(|url| url.host_str().is_some_and(|host| HOSTS.contains(&host)) && (url.path() != "/" || url.query().is_some()))
 }
 
@@ -43,19 +30,15 @@ fn parse_url(text: &str) -> Option<reqwest::Url> {
     reqwest::Url::parse(&with_scheme).ok()
 }
 
-/// What a `musishark:` link carries: the `url` of `open?url=`, or the rest of
-/// the link as an https address.
 fn unwrap_scheme(rest: &str) -> Option<reqwest::Url> {
     if rest.starts_with("open") {
         let wrapper = reqwest::Url::parse(&format!("{SCHEME}://{rest}")).ok()?;
         let inner = wrapper.query_pairs().find(|(k, _)| k == "url").map(|(_, v)| v.into_owned())?;
-        // One level only: a link that wraps itself goes nowhere.
         return if inner.starts_with(SCHEME) { None } else { parse_url(&inner) };
     }
     reqwest::Url::parse(&format!("https://{rest}")).ok()
 }
 
-/// The link read without the network, or None when only YouTube can tell.
 pub fn parse(text: &str) -> Option<Link> {
     let url = parse_url(text)?;
     let host = url.host_str()?;
@@ -82,7 +65,6 @@ fn from_browse_id(id: &str) -> Option<Link> {
     if id.starts_with("MPREb") {
         Some(Link::Album(id.to_owned()))
     } else if id.starts_with("MPSP") {
-        // A podcast show opens on the playlist page, which knows the id.
         Some(Link::Playlist(id.to_owned()))
     } else if id.starts_with("UC") {
         Some(Link::Artist(id.to_owned()))
@@ -91,13 +73,11 @@ fn from_browse_id(id: &str) -> Option<Link> {
     }
 }
 
-/// The link, asking YouTube when the shape alone does not say.
 pub async fn resolve(api: &dyn Browse, text: &str) -> Result<Option<Link>, NetError> {
     if let Some(link) = parse(text) {
         return Ok(Some(link));
     }
     let Some(mut url) = parse_url(text).filter(|_| is_youtube_url(text)) else { return Ok(None) };
-    // The music client resolves only its own host. A youtube.com handle comes back as a plain URL.
     let _ = url.set_host(Some("music.youtube.com"));
     let response = api.post("navigation/resolve_url", json!({ "url": url.as_str() })).await?;
     if let Some(video_id) = owned_at(&response, "/endpoint/watchEndpoint/videoId") {
@@ -156,7 +136,6 @@ mod tests {
         assert_eq!(parse("https://www.youtube.com/@RickAstleyYT"), None, "a handle needs YouTube to resolve");
     }
 
-    /// `cargo test -- --ignored a_handle_resolves --nocapture`
     #[tokio::test]
     #[ignore]
     async fn a_handle_resolves() {

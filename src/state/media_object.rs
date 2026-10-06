@@ -1,5 +1,3 @@
-//! GObject wrapper for a `MediaItem`, so library sections can live in
-//! `gio::ListStore` models and feed `ListBox::bind_model`.
 
 use std::cell::RefCell;
 
@@ -45,16 +43,8 @@ impl MediaObject {
     }
 }
 
-/// Bring a store in line with `items`, leaving unchanged rows as they are.
-///
-/// Replacing the whole store rebinds every row, and a rebound card starts from
-/// a blank cover, which is the flicker seen when the library reloads. Rows
-/// whose item is identical keep their object, so the view never touches them.
 pub fn sync_store(store: &gio::ListStore, items: Vec<MediaItem>) {
     let current: Vec<MediaItem> = (0..store.n_items()).filter_map(|index| store.item(index).and_downcast::<MediaObject>()).map(|object| object.item()).collect();
-    // What matches at each end stays put, and the span between is replaced in
-    // one go. One change means one signal, and a reload that changed nothing
-    // means none at all, so the view is not rebuilt behind the listener.
     let head = current.iter().zip(items.iter()).take_while(|(a, b)| same_row(a, b)).count();
     let rest = current.len().min(items.len()) - head;
     let tail = current.iter().rev().zip(items.iter().rev()).take(rest).take_while(|(a, b)| same_row(a, b)).count();
@@ -65,13 +55,6 @@ pub fn sync_store(store: &gio::ListStore, items: Vec<MediaItem>) {
     store.splice(head as u32, (current.len() - head - tail) as u32, &replacements);
 }
 
-/// Whether two rows are the same as far as the view is concerned.
-///
-/// YouTube signs thumbnail addresses per request, so two fetches of an
-/// unchanged library hand back different addresses for the same picture.
-/// Comparing them raw marks nearly every row changed, the view rebuilds and
-/// every cover blinks. The signature is dropped for the comparison; the row
-/// keeps the address it already had, which is the one that still works.
 fn same_row(a: &MediaItem, b: &MediaItem) -> bool {
     if a.thumb == b.thumb {
         return a == b;
@@ -134,8 +117,6 @@ mod tests {
         assert_eq!(store.item(0).and_downcast::<MediaObject>().unwrap().item().thumb, first.thumb);
     }
 
-    /// One changed row must not disturb the rest, or the grid rebuilds and
-    /// every cover blinks.
     #[test]
     fn a_single_change_moves_a_single_row() {
         let store = gio::ListStore::new::<MediaObject>();

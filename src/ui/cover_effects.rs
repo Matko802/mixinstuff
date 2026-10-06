@@ -1,9 +1,3 @@
-//! Port of ui/cover_effects.py: a heavily blurred copy of the cover for the
-//! Amberol-style background, and the accent color extracted from it. Both run
-//! on the network runtime, with the image work on blocking threads, and both
-//! are cached so a repeated lookup for the same cover is free.
-//! The disk layout is the Python app's: raw cover bytes under
-//! <cache>/thumbs/<sha1 of url>, blurred PNGs under <cache>/covers_blurred.
 #![allow(dead_code)]
 
 mod pil;
@@ -23,41 +17,27 @@ use pil::Filter;
 const MAX_BLUR_CACHE_ENTRIES: usize = 48;
 const MAX_COLOR_CACHE_ENTRIES: usize = 128;
 
-/// PIL GaussianBlur radius, and the side of the square PNG it is applied to.
 const BLUR_RADIUS: u32 = 42;
 const BLUR_OUTPUT_SIZE: u32 = 720;
 
-// Accent selection, in OkLCh. Below MIN_ACCENT_CHROMA a color reads as gray.
-// Accents look best near IDEAL_ACCENT_LIGHTNESS, falling off over ACCENT_LIGHTNESS_SPREAD.
 const MIN_ACCENT_CHROMA: f64 = 0.045;
 const IDEAL_ACCENT_LIGHTNESS: f64 = 0.62;
 const ACCENT_LIGHTNESS_SPREAD: f64 = 0.32;
-/// Monochrome covers get the full treatment, in grays. Featureless ones get nothing.
-/// This is the OkLCh lightness spread across the cover: solid fills measure 0,
-/// the lowest real cover in 300 measured 0.03. Only colorless covers reach this test.
 const MIN_COVER_DETAIL: f64 = 0.05;
 
-// Blurred-background normalization. A fixed tint left the album art deciding how legible the chrome was.
-// Dark: median luminance to 0.025, highlights capped at 0.12.
-// Light: blend toward white until the 2nd-percentile luminance hits 0.35.
 const BLUR_DARK_MEDIAN: f64 = 0.025;
 const BLUR_DARK_HIGHLIGHT_CAP: f64 = 0.12;
 const BLUR_LIGHT_FLOOR: f64 = 0.35;
 const BLUR_MAX_GAIN: f64 = 3.0;
 
-/// A blurred, normalized cover on disk.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BlurredCover {
     pub path: PathBuf,
-    /// (typical, worst for text) relative luminance the image landed on.
-    /// Callers derive the colors going on top from it.
     pub backdrop: (f64, f64),
 }
 
-/// A small least-recently-used map, OrderedDict with move_to_end and popitem(last=False).
 struct Lru<K, V> {
     limit: usize,
-    // Oldest first.
     entries: Vec<(K, V)>,
 }
 
@@ -83,19 +63,13 @@ impl<K: PartialEq, V: Clone> Lru<K, V> {
     }
 }
 
-/// None records a cover the pipeline declined, so it is not decoded again.
 static BLUR_CACHE: Mutex<Lru<(String, bool), Option<BlurredCover>>> = Mutex::new(Lru::new(MAX_BLUR_CACHE_ENTRIES));
-/// None records "no usable accent".
 static COLOR_CACHE: Mutex<Lru<String, Option<Rgb>>> = Mutex::new(Lru::new(MAX_COLOR_CACHE_ENTRIES));
 
-/// One fetch per cover. On a track change the blur and the accent both want the
-/// same bytes. The second caller waits for the first, then reads the disk cache.
 static INFLIGHT: LazyLock<Mutex<HashMap<String, watch::Receiver<bool>>>> = LazyLock::new(Default::default);
-/// Python ran these on a pool of two threads. A 720 px blur holds several MB while it runs.
 static EFFECT_SLOTS: Semaphore = Semaphore::const_new(2);
 
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
-/// Cap the wait so a stuck leader does not hang its followers.
 const FOLLOWER_TIMEOUT: Duration = Duration::from_secs(20);
 
 fn thumb_cache_key(url: &str) -> String {
@@ -115,13 +89,11 @@ async fn read_thumb_cache(cache_dir: &Path, url: &str) -> Option<Vec<u8>> {
     tokio::fs::read(thumb_cache_path(cache_dir, url)).await.ok().filter(|bytes| !bytes.is_empty())
 }
 
-/// The copy the texture cache kept of a remote cover, for when it cannot be fetched.
 async fn read_cover_disk_copy(url: &str) -> Option<Vec<u8>> {
     let path = crate::ui::cover::disk_copy(url)?;
     tokio::fs::read(path).await.ok().filter(|bytes| !bytes.is_empty())
 }
 
-/// Write to a sibling tmp file then rename, so a partial write is never read as a cover.
 async fn write_thumb_cache(cache_dir: &Path, url: &str, bytes: &[u8]) {
     let path = thumb_cache_path(cache_dir, url);
     let tmp = path.with_extension("tmp");
@@ -135,9 +107,6 @@ async fn write_thumb_cache(cache_dir: &Path, url: &str, bytes: &[u8]) {
     }
 }
 
-/// A YouTube video thumbnail, then its lower-resolution variants. Anything else is tried as is.
-/// maxres and sd only exist for high-resolution uploads, hq, mq and default always do.
-/// Nothing above the requested quality is tried: that only finds something missing more often.
 fn yt_thumb_fallback_urls(url: &str) -> Vec<String> {
     const FALLBACKS: [&str; 5] = ["maxresdefault", "sddefault", "hqdefault", "mqdefault", "default"];
     static YT_THUMB_RE: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"^(https?://i\.ytimg\.com/vi/[^/]+/)([^/.?]+)(\.[A-Za-z]+)(\?.*)?$").unwrap());
@@ -154,9 +123,6 @@ fn yt_thumb_fallback_urls(url: &str) -> Vec<String> {
     out
 }
 
-/// The path behind a file:// cover or a bare absolute path.
-/// The ?m=<mtime> cache-buster on a local playlist cover comes off first.
-/// glib reads the address, so `file:///C:/...` becomes a Windows path.
 fn local_cover_path(url: &str) -> Option<PathBuf> {
     if url.starts_with("file://") {
         let bare = url.rfind('?').map_or(url, |q| &url[..q]);
@@ -165,7 +131,6 @@ fn local_cover_path(url: &str) -> Option<PathBuf> {
     Path::new(url).is_absolute().then(|| PathBuf::from(url))
 }
 
-/// Clears the in-flight entry and wakes the followers, also when the fetch is aborted.
 struct Leader {
     url: String,
     done: watch::Sender<bool>,
@@ -178,12 +143,10 @@ impl Drop for Leader {
     }
 }
 
-/// Cached or downloaded bytes for `url`. Port of _ensure_image_bytes.
 async fn ensure_image_bytes(http: &reqwest::Client, cache_dir: &Path, url: &str) -> Option<Vec<u8>> {
     if url.is_empty() {
         return None;
     }
-    // Local covers skip the thumb cache: the bytes are already on disk.
     if let Some(path) = local_cover_path(url) {
         return match tokio::fs::read(&path).await {
             Ok(bytes) => Some(bytes),
@@ -224,7 +187,6 @@ async fn ensure_image_bytes(http: &reqwest::Client, cache_dir: &Path, url: &str)
                 return read_cover_disk_copy(url).await;
             }
         };
-        // Only a 404 walks to the next fallback. A different URL fixes nothing for a timeout or a DNS failure.
         if response.status() == reqwest::StatusCode::NOT_FOUND {
             continue;
         }
@@ -234,7 +196,6 @@ async fn ensure_image_bytes(http: &reqwest::Client, cache_dir: &Path, url: &str)
         };
         return match bytes {
             Ok(bytes) => {
-                // Cached under the requested URL, whichever fallback served the bytes.
                 write_thumb_cache(cache_dir, url, &bytes).await;
                 Some(bytes.to_vec())
             }
@@ -248,7 +209,6 @@ async fn ensure_image_bytes(http: &reqwest::Client, cache_dir: &Path, url: &str)
     None
 }
 
-/// Run image work on a blocking thread, two at a time.
 async fn run_effect<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     let _slot = EFFECT_SLOTS.acquire().await.ok()?;
     tokio::task::spawn_blocking(work).await.ok()
@@ -264,13 +224,11 @@ fn decode(bytes: &[u8]) -> Option<RgbImage> {
     }
 }
 
-/// Relative luminance per 8-bit pixel, through a table of the 256 linearized channel values.
 fn pixel_luminances(img: &RgbImage) -> Vec<f64> {
     static LINEAR: LazyLock<[f64; 256]> = LazyLock::new(|| std::array::from_fn(|i| color_utils::srgb_to_linear(i as f64 / 255.0)));
     img.pixels().map(|p| 0.2126 * LINEAR[usize::from(p[0])] + 0.7152 * LINEAR[usize::from(p[1])] + 0.0722 * LINEAR[usize::from(p[2])]).collect()
 }
 
-/// Sorted relative luminances of a 48x48 sample.
 fn blur_luminances(img: &RgbImage) -> Vec<f64> {
     let mut values = pixel_luminances(&pil::resize(img, 48, 48, Filter::Bicubic));
     values.sort_by(f64::total_cmp);
@@ -281,10 +239,8 @@ fn percentile(values: &[f64], fraction: f64) -> f64 {
     values[(values.len() - 1).min((values.len() as f64 * fraction) as usize)]
 }
 
-/// Bring a blurred cover into the scheme's luminance band.
 fn normalize_blur(img: &RgbImage, dark: bool) -> RgbImage {
     if dark {
-        // Blending toward black is a scale in sRGB. One gain dims a bright cover and lifts a near-black one.
         let values = blur_luminances(img);
         let mut gain = (BLUR_DARK_MEDIAN / percentile(&values, 0.5).max(1e-5)).powf(1.0 / 2.4);
         gain = gain.clamp(0.05, BLUR_MAX_GAIN);
@@ -294,8 +250,6 @@ fn normalize_blur(img: &RgbImage, dark: bool) -> RgbImage {
         }
         return pil::brightness(img, gain);
     }
-    // Light: lift toward white until the darkest areas, which set worst-case text contrast, clear the floor.
-    // The search runs on a 48x48 proxy, the full image is blended once.
     let proxy = pil::resize(img, 48, 48, Filter::Bicubic);
     let (mut lo, mut hi) = (0.0, 1.0);
     for _ in 0..12 {
@@ -309,9 +263,6 @@ fn normalize_blur(img: &RgbImage, dark: bool) -> RgbImage {
     pil::blend_toward_white(img, hi)
 }
 
-/// The blurred, normalized image and its backdrop luminances. None for a featureless cover.
-/// One verdict for both effects: a cover that keeps its backdrop while its accent
-/// falls back to the system accent mixes two unrelated colors.
 fn render_blur(img: &RgbImage, dark: bool) -> Option<(RgbImage, (f64, f64))> {
     pick_accent(img)?;
     let (w, h) = img.dimensions();
@@ -321,7 +272,6 @@ fn render_blur(img: &RgbImage, dark: bool) -> Option<(RgbImage, (f64, f64))> {
     let blurred = pil::gaussian_blur(&resized, BLUR_RADIUS as f32);
     let normalized = normalize_blur(&pil::saturation(&blurred, 1.25), dark);
     let values = blur_luminances(&normalized);
-    // Typical brightness, plus the end worst for text.
     let backdrop = (percentile(&values, 0.5), percentile(&values, if dark { 0.98 } else { 0.02 }));
     Some((normalized, backdrop))
 }
@@ -340,9 +290,6 @@ fn save_png(img: &RgbImage, path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Blur `url`, normalized into the luminance band of the dark or light scheme. See normalize_blur.
-/// None on failure or for a cover the accent pipeline declined. Cached per (url, dark).
-/// `cache_dir` is Paths::cache_dir. Runs on the network runtime: call through NetHandle::spawn.
 pub async fn get_blurred_cover(http: reqwest::Client, cache_dir: PathBuf, url: String, dark: bool) -> Option<BlurredCover> {
     if url.is_empty() {
         return None;
@@ -356,7 +303,6 @@ pub async fn get_blurred_cover(http: reqwest::Client, cache_dir: PathBuf, url: S
 
     let bytes = ensure_image_bytes(&http, &cache_dir, &url).await?;
     let path = blur_cache_path(&cache_dir, &url, dark);
-    // Some(None) is a declined cover, None a failure. Only the first is remembered.
     let rendered = run_effect(move || {
         let img = decode(&bytes)?;
         let Some((blurred, backdrop)) = render_blur(&img, dark) else { return Some(None) };
@@ -373,7 +319,6 @@ pub async fn get_blurred_cover(http: reqwest::Client, cache_dir: PathBuf, url: S
     rendered
 }
 
-/// Sorted OkLCh lightnesses of a coarse sample of the cover.
 fn cover_lightnesses(img: &RgbImage) -> Vec<f64> {
     let small = pil::resize(img, 32, 32, Filter::Bicubic);
     let mut values: Vec<f64> = small.pixels().map(|p| color_utils::rgb_to_oklch((f64::from(p[0]) / 255.0, f64::from(p[1]) / 255.0, f64::from(p[2]) / 255.0)).0).collect();
@@ -381,7 +326,6 @@ fn cover_lightnesses(img: &RgbImage) -> Vec<f64> {
     values
 }
 
-/// Spread between the cover's dark and light ends, in OkLCh lightness.
 pub fn cover_detail(img: &RgbImage) -> f64 {
     let values = cover_lightnesses(img);
     if values.is_empty() {
@@ -391,9 +335,7 @@ pub fn cover_detail(img: &RgbImage) -> f64 {
     values[(n * 0.95) as usize] - values[(n * 0.05) as usize]
 }
 
-/// The cover's accent, or None when the cover is featureless. See get_dominant_color.
 pub fn pick_accent(img: &RgbImage) -> Option<Rgb> {
-    // 128 px and 32 bins. A coarse palette spends every bin on shades of white on a mostly-white cover.
     let img = pil::thumbnail(img, 128, 128, Filter::Lanczos);
     let counts = pil::quantize_median_cut(&img, 32);
     let total = f64::from(counts.iter().map(|(count, _)| count).sum::<u32>().max(1));
@@ -403,13 +345,11 @@ pub fn pick_accent(img: &RgbImage) -> Option<Rgb> {
     for (count, entry) in counts {
         let rgb = (f64::from(entry[0]) / 255.0, f64::from(entry[1]) / 255.0, f64::from(entry[2]) / 255.0);
         let (lightness, chroma, _) = color_utils::rgb_to_oklch(rgb);
-        // Near-black and near-white are not accents, and neither is gray, however much of the cover it is.
         if !(0.12..=0.95).contains(&lightness) || chroma < MIN_ACCENT_CHROMA {
             continue;
         }
         let share = f64::from(count) / total;
         let lightness_weight = (-((lightness - IDEAL_ACCENT_LIGHTNESS) / ACCENT_LIGHTNESS_SPREAD).powf(2.0)).exp();
-        // Chroma is capped so one neon speck cannot outrank the region that defines the cover.
         let score = chroma.min(0.18) * share.powf(0.3) * lightness_weight;
         if score > best_score {
             best_score = score;
@@ -420,8 +360,6 @@ pub fn pick_accent(img: &RgbImage) -> Option<Rgb> {
         return best;
     }
 
-    // No chromatic bin. A monochrome cover still gets a neutral, a featureless one gets nothing.
-    // The median lightness, not the most common: white line art on black is mostly black.
     if cover_detail(&img) < MIN_COVER_DETAIL {
         return None;
     }
@@ -430,10 +368,6 @@ pub fn pick_accent(img: &RgbImage) -> Option<Rgb> {
     Some(color_utils::oklch_to_rgb(median.clamp(0.35, 0.85), 0.0, 0.0))
 }
 
-/// The accent color of the cover at `url`, or None for a featureless cover or a failure. Cached per URL.
-/// Scores palette bins in OkLCh on chroma, lightness near the middle, and share of the cover damped by share ** 0.3.
-/// Monochrome covers return a neutral gray.
-/// `cache_dir` is Paths::cache_dir. Runs on the network runtime: call through NetHandle::spawn.
 pub async fn get_dominant_color(http: reqwest::Client, cache_dir: PathBuf, url: String) -> Option<Rgb> {
     if url.is_empty() {
         return None;
@@ -452,7 +386,6 @@ mod tests {
     use super::pil::fixtures::*;
     use super::*;
 
-    // Expected values are what cover_effects.py and Pillow 12.3 return for the same synthetic covers. See tools/cover_effects_ref.py (in git history, removed with the Python app).
     const EPS: f64 = 1e-6;
 
     fn close(got: Rgb, want: Rgb) -> bool {
@@ -482,7 +415,6 @@ mod tests {
     fn a_monochrome_cover_gets_a_neutral_and_a_featureless_one_nothing() {
         let got = pick_accent(&gray_ramp(300, 200)).expect("a neutral");
         assert!(close(got, (0.5137254855563773, 0.5137254855563773, 0.5137254855563773)), "{got:?}");
-        // A dark ramp has its median lifted to the 0.35 lightness floor.
         let got = pick_accent(&pil::brightness(&gray_ramp(300, 200), 0.3)).expect("a neutral");
         assert!(close(got, (0.22901253948049455, 0.22901253948049455, 0.22901253948049455)), "{got:?}");
         assert_eq!(pick_accent(&flat(300, 300)), None);
@@ -537,9 +469,7 @@ mod tests {
             yt_thumb_fallback_urls(&format!("{base}/maxresdefault.jpg")),
             ["maxresdefault", "sddefault", "hqdefault", "mqdefault", "default"].map(|q| format!("{base}/{q}.jpg"))
         );
-        // The signing query rides along, and nothing above the request is tried.
         assert_eq!(yt_thumb_fallback_urls(&format!("{base}/hqdefault.jpg?sqp=x&rs=y")), ["hqdefault", "mqdefault", "default"].map(|q| format!("{base}/{q}.jpg?sqp=x&rs=y")));
-        // An unknown variant walks the whole list.
         assert_eq!(yt_thumb_fallback_urls(&format!("{base}/hq720.jpg")).len(), 6);
         assert_eq!(yt_thumb_fallback_urls(&format!("{base}/default.jpg")), [format!("{base}/default.jpg")]);
         for other in ["https://lh3.googleusercontent.com/abc=w544-h544-l90-rj", "https://i.ytimg.com/vi_webp/abc123/sddefault.webp"] {
@@ -558,7 +488,6 @@ mod tests {
 
     #[test]
     fn local_covers_lose_their_cache_buster() {
-        // A real path, so the address is valid wherever the tests run.
         let file = std::env::temp_dir().join("Mix.jpg");
         let uri = glib::filename_to_uri(&file, None).unwrap();
         assert_eq!(local_cover_path(&format!("{uri}?m=1712")), Some(file.clone()));
@@ -592,10 +521,8 @@ mod tests {
         assert_pillow("smooth_517x389_pipeline_dark", &saved, (720, 720), 0x1c3fb7e37c8fb591);
         assert!(!PathBuf::from(format!("{}.tmp", cover.path.display())).exists());
 
-        // The memory cache answers without the source.
         std::fs::remove_file(&source).unwrap();
         assert_eq!(get_blurred_cover(reqwest::Client::new(), cache.clone(), url.clone(), true).await, Some(cover.clone()));
-        // A PNG that went missing is not handed out.
         std::fs::remove_file(&cover.path).unwrap();
         assert_eq!(get_blurred_cover(reqwest::Client::new(), cache, url, true).await, None);
     }
@@ -632,8 +559,6 @@ mod tests {
         assert_eq!(get_blurred_cover(reqwest::Client::new(), PathBuf::from("/nowhere"), String::new(), true).await, None);
     }
 
-    /// Fetches a thumbnail whose maxres variant is a 404, so the chain has to walk down.
-    /// `cargo test -- --ignored live_fallback --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_fallback() {
@@ -647,8 +572,6 @@ mod tests {
         assert!(INFLIGHT.lock().unwrap().is_empty());
     }
 
-    /// Runs both effects on real covers and prints what to hold against `tools/cover_effects_ref.py <files>`.
-    /// `MUSISHARK_COVERS=/a.jpg:/b.jpg cargo test -- --ignored compare_covers --nocapture`
     #[test]
     #[ignore]
     fn compare_covers() {

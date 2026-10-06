@@ -1,7 +1,3 @@
-//! The release notes shown once after an update, with a donation banner. The
-//! notes come from the newest `<release>` in the metainfo, which is compiled
-//! in so the dialog and the packages always agree on the version. A release
-//! with two lists shows the first one, the highlights, and counts the second.
 
 use std::rc::Rc;
 use std::sync::LazyLock;
@@ -16,7 +12,6 @@ const METAINFO: &str = include_str!("../../io.github.matko802.Musishark.metainfo
 pub const KOFI_URL: &str = "https://ko-fi.com/M8P12091FB";
 pub const RELEASES_URL: &str = "https://github.com/Matko802/musishark/releases";
 pub const SPONSORS_URL: &str = "https://github.com/sponsors/m-obeid";
-/// Pref keys shared with the onboarding wizard.
 pub const SHOW_PREF: &str = "show_release_notes";
 pub const SEEN_PREF: &str = "last_seen_version";
 pub const DONATION_PREF: &str = "show_donation_prompt";
@@ -26,15 +21,12 @@ pub struct Release {
     pub version: String,
     pub date: String,
     pub summary: String,
-    /// The first list of the description.
     pub items: Vec<String>,
-    /// Entries in any further list, mentioned as a count.
     pub more: usize,
 }
 
 static LATEST: LazyLock<Option<Release>> = LazyLock::new(|| parse_latest(METAINFO));
 
-/// The version the packages carry, from the metainfo. Falls back to the crate version.
 pub fn current_version() -> &'static str {
     LATEST.as_ref().map(|r| r.version.as_str()).unwrap_or(env!("CARGO_PKG_VERSION"))
 }
@@ -62,7 +54,6 @@ fn parse_latest(xml: &str) -> Option<Release> {
     })
 }
 
-/// True when this version has not been shown yet and the user still wants the notes.
 pub fn due(ctx: &App) -> bool {
     let prefs = ctx.paths.read_prefs();
     let shown = prefs.get(SHOW_PREF).and_then(|v| v.as_bool()).unwrap_or(true);
@@ -74,15 +65,12 @@ pub fn mark_seen(ctx: &App) {
     save(ctx, SEEN_PREF, current_version());
 }
 
-/// Open a web page from a dialog or the window.
 pub fn open_url(parent: &impl IsA<gtk::Widget>, url: &str) {
     let window = parent.root().and_downcast::<gtk::Window>();
     gtk::UriLauncher::new(url).launch(window.as_ref(), None::<&gtk::gio::Cancellable>, |_| {});
 }
 
-/// Ko-fi and GitHub Sponsors buttons, for the banner and the wizard.
 pub fn donate_buttons() -> adw::WrapBox {
-    // A wrap box, so the two pills stack on a phone instead of widening the dialog.
     let row = adw::WrapBox::builder().child_spacing(12).line_spacing(12).align(0.5).halign(gtk::Align::Center).build();
     for (label, icon, url) in [("Ko-fi", "ko-fi-symbolic", KOFI_URL), ("GitHub Sponsors", "github-symbolic", SPONSORS_URL)] {
         let button = gtk::Button::builder().css_classes(["pill"]).build();
@@ -97,7 +85,6 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
     let release = latest()?;
     mark_seen(ctx);
 
-    // Notes, laid out like Bazaar's: title, date, the changes, a closing line, one link.
     let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_top(6).margin_bottom(24).margin_start(18).margin_end(18).build();
     let title = gtk::Label::builder().label(format!("What's New in {}?", release.version)).css_classes(["title-2"]).wrap(true).justify(gtk::Justification::Center).build();
     column.append(&title);
@@ -137,11 +124,8 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&adw::HeaderBar::builder().show_title(false).css_classes(["flat"]).build());
     toolbar.set_content(Some(&scroller));
-    // Breakpoints want a minimum size on the dialog.
     let dialog = adw::Dialog::builder().title("What's New").content_width(560).content_height(720).width_request(300).height_request(400).child(&toolbar).build();
     if pref_bool(ctx, DONATION_PREF, true) {
-        // Pinned under the notes on a desktop. Narrow, it took half the sheet, so there it
-        // scrolls with the notes. The dialog's own width decides, so a live resize moves it.
         let banner = donation_banner();
         toolbar.add_bottom_bar(&banner);
         toolbar.set_bottom_bar_style(adw::ToolbarStyle::Flat);
@@ -166,7 +150,6 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> Option<adw::Dialog> {
     Some(dialog)
 }
 
-/// The banner under the notes. Off with the `show_donation_prompt` pref.
 fn donation_banner() -> gtk::Box {
     let banner = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).css_classes(["donation-banner"]).build();
     banner.append(&gtk::Label::builder().label("This version of Musishark was made possible by users like you!").css_classes(["title-2"]).wrap(true).justify(gtk::Justification::Center).build());

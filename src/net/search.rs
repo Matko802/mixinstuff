@@ -1,7 +1,3 @@
-//! Search endpoint and response parser. The `ytmusicapi` crate has no search,
-//! so this builds on its `send_request`, following ytmusicapi (Python)
-//! `search` and `parse_search_results`: one unfiltered call for the mixed
-//! shelves plus filtered calls, merged and deduplicated like search.py did.
 
 use std::sync::Arc;
 
@@ -24,7 +20,6 @@ pub enum SearchFilter {
 }
 
 impl SearchFilter {
-    /// The `params` blobs ytmusicapi sends for each filter.
     fn params(self) -> &'static str {
         match self {
             SearchFilter::Songs => "EgWKAQIIAWoKEAoQAxAEEAkQBQ%3D%3D",
@@ -50,12 +45,10 @@ impl SearchFilter {
 
 #[derive(Clone, Debug, Default)]
 pub struct SearchResults {
-    /// The "Top result" card, when the unfiltered search offered one.
     pub top_result: Option<MediaItem>,
     pub items: Vec<MediaItem>,
 }
 
-/// One search call. `filter` narrows the results to a kind.
 pub async fn search(client: &dyn Browse, query: &str, filter: Option<SearchFilter>) -> Result<SearchResults, NetError> {
     let mut body = json!({ "query": query });
     if let Some(filter) = filter {
@@ -65,7 +58,6 @@ pub async fn search(client: &dyn Browse, query: &str, filter: Option<SearchFilte
     Ok(parse_search_response(&response, filter.map(SearchFilter::kind)))
 }
 
-/// Unfiltered plus songs, artists, playlists and albums in parallel, merged in that order.
 pub async fn search_all(client: Arc<dyn Browse>, query: String) -> Result<SearchResults, NetError> {
     let filters = [None, Some(SearchFilter::Songs), Some(SearchFilter::Artists), Some(SearchFilter::CommunityPlaylists), Some(SearchFilter::Albums)];
     let calls = filters.iter().map(|f| {
@@ -108,7 +100,6 @@ pub async fn search_all(client: Arc<dyn Browse>, query: String) -> Result<Search
     Ok(merged)
 }
 
-/// Await a set of futures concurrently without adding a futures dependency.
 pub(crate) async fn futures_join_all<F>(futures: impl IntoIterator<Item = F>) -> Vec<F::Output>
 where
     F: std::future::Future + Send + 'static,
@@ -124,10 +115,7 @@ where
     out
 }
 
-// -- parsing -------------------------------------------------------------
 
-/// Walk every shelf of a search response into items. `filter_kind` is the
-/// kind a filtered call asked for, since those shelves carry no type run.
 pub fn parse_search_response(response: &Value, filter_kind: Option<ItemKind>) -> SearchResults {
     let mut results = SearchResults::default();
     let Some(sections) = response
@@ -139,7 +127,6 @@ pub fn parse_search_response(response: &Value, filter_kind: Option<ItemKind>) ->
     for section in sections {
         if let Some(card) = section.get("musicCardShelfRenderer") {
             let top = parse_card_shelf(card);
-            // Songs listed under an artist card carry no artist of their own.
             let inherited: Vec<Person> = match &top {
                 Some(t) if t.kind == ItemKind::Artist => vec![Person { name: t.title.clone(), id: Some(t.id.clone()) }],
                 Some(t) => t.artists.clone(),
@@ -229,7 +216,6 @@ fn is_explicit(renderer: &Value) -> bool {
         .unwrap_or(false)
 }
 
-/// Text runs of a flex column with the " • " separators dropped, keeping browse ids.
 fn column_runs(renderer: &Value, index: usize) -> Vec<(String, Option<String>)> {
     renderer
         .pointer(&format!("/flexColumns/{index}/musicResponsiveListItemFlexColumnRenderer/text/runs"))
@@ -292,7 +278,6 @@ fn is_year(text: &str) -> bool {
     text.trim().len() == 4 && text.trim().chars().all(|c| c.is_ascii_digit())
 }
 
-/// One `musicResponsiveListItemRenderer` in a shelf.
 fn parse_list_item(renderer: &Value, shelf_kind: Option<ItemKind>) -> Option<MediaItem> {
     let title = renderer
         .pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
@@ -301,12 +286,10 @@ fn parse_list_item(renderer: &Value, shelf_kind: Option<ItemKind>) -> Option<Med
     let mut runs = column_runs(renderer, 1);
     runs.extend(column_runs(renderer, 2));
 
-    // Unfiltered shelves lead the subtitle with the type word.
     let leading_kind = runs.first().and_then(|(t, _)| kind_from_type_word(t));
     let mut item_type = None;
     if let Some(kind) = leading_kind {
         let word = runs[0].0.trim().to_owned();
-        // Album says which kind of release. Podcast, Profile and Episode say what the row opens.
         if kind == ItemKind::Album || matches!(word.as_str(), "Podcast" | "Profile" | "Episode") {
             item_type = Some(word);
         }
@@ -318,7 +301,6 @@ fn parse_list_item(renderer: &Value, shelf_kind: Option<ItemKind>) -> Option<Med
     let kind = match (&watch, &browse) {
         (Some((_, video_type)), _) => match video_type.as_deref() {
             Some("MUSIC_VIDEO_TYPE_ATV") => ItemKind::Song,
-            // A podcast episode plays like any other video. The row says what it is.
             Some(t) if t.contains("PODCAST") || t.contains("EPISODE") => {
                 item_type = Some("Episode".to_owned());
                 ItemKind::Video
@@ -402,7 +384,6 @@ fn parse_list_item(renderer: &Value, shelf_kind: Option<ItemKind>) -> Option<Med
     Some(item)
 }
 
-/// The "Top result" `musicCardShelfRenderer`.
 fn parse_card_shelf(card: &Value) -> Option<MediaItem> {
     let title = card.pointer("/title/runs/0/text").and_then(Value::as_str)?.to_owned();
     let on_tap = card.pointer("/title/runs/0/navigationEndpoint").or_else(|| card.get("onTap"))?;
@@ -531,7 +512,6 @@ mod tests {
         assert!(item.explicit);
     }
 
-    /// Prints the raw sub-items of the top-result card. `cargo test -- --ignored live_dump_card --nocapture`.
     #[tokio::test]
     #[ignore]
     async fn live_dump_card() {
@@ -550,7 +530,6 @@ mod tests {
         }
     }
 
-    /// Prints thumbnail URLs per result. `cargo test -- --ignored live_thumbs --nocapture`.
     #[tokio::test]
     #[ignore]
     async fn live_thumbs() {
@@ -565,7 +544,6 @@ mod tests {
         }
     }
 
-    /// Hits the network. Run with `cargo test -- --ignored live_search --nocapture`.
     #[tokio::test]
     #[ignore]
     async fn live_search() {

@@ -1,4 +1,3 @@
-//! LRC text (`[mm:ss.xx] words`) and the clean-up the LRC sources need: production credits NetEase prepends, store watermarks Apple prepends, and the parallel translation and romanization tracks NetEase ships.
 
 use std::sync::LazyLock;
 
@@ -6,30 +5,23 @@ use regex::Regex;
 
 use super::model::LyricLine;
 
-/// Store watermarks Apple prepends to some tracks. Matched only against the opening lines, so a lyric that mentions buying something mid-song is untouched.
 const LYRIC_WATERMARKS: [&str; 4] = ["purchase your tracks", "lyrics licensed", "lyrics provided by", "unauthorized reproduction"];
 
-/// How many opening lines may be watermarks.
 const WATERMARK_LIMIT: usize = 2;
 
 const CREDIT_KEYWORDS: [&str; 19] =
     ["作词", "作曲", "编曲", "編曲", "制作人", "製作人", "出品人", "混音", "母带", "監製", "监制", "演唱", "和声", "录音", "lyricist", "composer", "arranger", "producer", "mixed by"];
 
-/// How far a secondary line's stamp may sit from the main line's, in seconds.
 const SECONDARY_TOLERANCE: f64 = 0.45;
 
 static TIMESTAMP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[(\d+):(\d{1,2})(?:[.:](\d{1,3}))?\]").unwrap());
 
-/// Which field a parallel LRC track fills.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Secondary {
     Romanization,
     Translation,
 }
 
-/// Parse LRC into lines sorted by start time.
-///
-/// A line may carry several stamps, one per repeat. Instrumental gaps arrive as stamps with no text and are kept, so the active line still advances through them. Metadata tags such as `[ar:...]` carry no numeric stamp and are skipped.
 pub fn parse_lrc_text(lrc: &str) -> Vec<LyricLine> {
     let mut out = Vec::new();
     for raw_line in lrc.lines() {
@@ -49,14 +41,10 @@ pub fn parse_lrc_text(lrc: &str) -> Vec<LyricLine> {
     out
 }
 
-/// Unsynced lyrics: one line per non-blank row of text.
 pub fn plain_lines(text: &str) -> Vec<LyricLine> {
     text.lines().map(str::trim).filter(|l| !l.is_empty()).map(|l| LyricLine::new(None, l)).collect()
 }
 
-/// Merge a parallel LRC track into `lines`, answering how many lines got a value.
-///
-/// NetEase stamps a track's translation and romanization against the same clock as the main lyric, but with their own line counts: credits and empty interludes are often in one and not the other. Index position is useless, so the match is the nearest secondary line within the tolerance.
 pub fn attach_secondary_lrc(lines: &mut [LyricLine], lrc: &str, key: Secondary) -> usize {
     let secondary: Vec<LyricLine> = parse_lrc_text(lrc).into_iter().filter(|l| !l.text.trim().is_empty()).collect();
     if lines.is_empty() || secondary.is_empty() {
@@ -78,7 +66,6 @@ pub fn attach_secondary_lrc(lines: &mut [LyricLine], lrc: &str, key: Secondary) 
         }
         let Some(best) = best else { continue };
         let text = best.text.trim();
-        // A "translation" identical to the original is padding: NetEase does this for lines already in the target language.
         if text.is_empty() || text == line.text.trim() {
             continue;
         }
@@ -91,7 +78,6 @@ pub fn attach_secondary_lrc(lines: &mut [LyricLine], lrc: &str, key: Secondary) 
     matched
 }
 
-/// Drop the production credits NetEase and a few others prepend, such as `Lyricist: X` and its Chinese forms. Only contiguously from the start, so a credit-shaped lyric in the middle of the song stays put.
 pub fn strip_leading_credits(lines: Vec<LyricLine>) -> Vec<LyricLine> {
     let is_credit = |line: &LyricLine| {
         let text = line.text.trim();
@@ -102,7 +88,6 @@ pub fn strip_leading_credits(lines: Vec<LyricLine>) -> Vec<LyricLine> {
     lines.into_iter().skip(first_lyric).collect()
 }
 
-/// Drop a store watermark from the top of a lyric. Apple serves some tracks with "(Purchase your tracks today)" first, stamped like any other line.
 pub fn strip_leading_watermarks(mut lines: Vec<LyricLine>) -> Vec<LyricLine> {
     let is_watermark = |line: &LyricLine| {
         let lowered = line.text.trim().to_lowercase();
@@ -154,7 +139,6 @@ mod tests {
     #[test]
     fn a_secondary_track_matches_by_time_not_by_index() {
         let mut lines = parse_lrc_text("[00:10.00] 千本桜\n[00:20.00] 夜ニ紛レ\n[00:30.00] hello\n[00:40.00] 君ノ声");
-        // One credit line more than the main track, stamps rounded differently, one line missing.
         let roma = "[00:00.00] credit\n[00:10.30] senbonzakura\n[00:19.70] yoru ni magire\n[00:30.00] hello\n[00:41.00] too far";
         assert_eq!(attach_secondary_lrc(&mut lines, roma, Secondary::Romanization), 2);
         assert_eq!(lines[0].romanization.as_deref(), Some("senbonzakura"));

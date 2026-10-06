@@ -1,12 +1,3 @@
-//! TTML lyrics, the format Apple Music, BetterLyrics and BiniLyrics serve.
-//!
-//! Each `<p>` is a line. Word-level `<span begin end>` children become `parts` for the karaoke sweep. The second line comes from three places, all optional:
-//!
-//! - `<span ttm:role="x-bg">`: background vocals nested in the line they answer, with word spans of their own.
-//! - `ttm:role="x-translation"` and `x-roman` inline spans.
-//! - Apple's `<iTunesMetadata>` translation and transliteration blocks, matched to a line by its `itunes:key`.
-//!
-//! Attributes are looked up by local name, because the namespace URIs differ between the Apple, BetterLyrics and BiniLyrics deployments.
 
 use std::collections::HashMap;
 
@@ -14,7 +5,6 @@ use roxmltree::{Document, Node, ParsingOptions};
 
 use super::model::{Align, LyricLine, LyricPart};
 
-/// Parse a TTML time expression to seconds: bare seconds ("24.111"), M:SS.sss ("1:03.364") or H:MM:SS.sss. None when it is anything else, so the caller degrades to unsynced lines.
 pub fn time_to_seconds(value: &str) -> Option<f64> {
     let parts: Vec<&str> = value.split(':').collect();
     let whole = |s: &str| s.trim().parse::<i64>().ok().map(|v| v as f64);
@@ -27,7 +17,6 @@ pub fn time_to_seconds(value: &str) -> Option<f64> {
     }
 }
 
-/// What one `<p>`, or one background span, holds.
 struct ParsedLine<'a, 'input> {
     parts: Vec<LyricPart>,
     text: String,
@@ -36,17 +25,14 @@ struct ParsedLine<'a, 'input> {
     romanization: Option<String>,
 }
 
-/// An attribute by local name, whatever its namespace.
 fn attr<'a>(node: Node<'a, '_>, local: &str) -> Option<&'a str> {
     node.attributes().find(|a| a.name() == local).map(|a| a.value())
 }
 
-/// A timing attribute, which TTML never namespaces.
 fn time_attr(node: Node, name: &str) -> Option<f64> {
     node.attribute(name).and_then(time_to_seconds)
 }
 
-/// All text under a node, whitespace-collapsed.
 fn deep_text(node: Node) -> String {
     let raw: String = node.descendants().filter(|n| n.is_text()).filter_map(|n| n.text()).collect();
     collapse(&raw)
@@ -56,14 +42,10 @@ fn collapse(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// True when the source put whitespace right after a span. Japanese and Chinese TTML has none between syllables, and adding it puts gaps in the lyric.
 fn has_space_after(node: Node) -> bool {
     node.tail().and_then(|t| t.chars().next()).is_some_and(char::is_whitespace)
 }
 
-/// Walk the children of a `<p>` or of an `x-bg` span, which share a shape.
-///
-/// Roles are checked before timing: a background or translation span carries `begin` and `end` too and would otherwise read as one more word of the lead vocal. Text between spans is kept whichever branch its neighbour took, so removing a background span does not swallow the space after it.
 fn parse_line<'a, 'input>(elem: Node<'a, 'input>) -> ParsedLine<'a, 'input> {
     let mut line = ParsedLine { parts: Vec::new(), text: String::new(), backgrounds: Vec::new(), translation: None, romanization: None };
     let mut chunks = String::new();
@@ -97,9 +79,6 @@ fn parse_line<'a, 'input>(elem: Node<'a, 'input>) -> ParsedLine<'a, 'input> {
     line
 }
 
-/// Apple's per-line translations and transliterations from the `<iTunesMetadata>` head, keyed by the `itunes:key` of the `<p>` they belong to.
-///
-/// Only the first block of each kind is read. A track with several translation languages gets the one listed first, which is the one Apple's own client shows by default.
 fn side_texts(root: Node) -> (HashMap<String, String>, HashMap<String, String>) {
     let mut translations = HashMap::new();
     let mut transliterations = HashMap::new();
@@ -124,14 +103,10 @@ fn side_texts(root: Node) -> (HashMap<String, String>, HashMap<String, String>) 
     (translations, transliterations)
 }
 
-/// The `xml:id` of the first voice declared in the head.
-///
-/// Apple tags every line with `ttm:agent`. Lines of the first agent stay on the leading edge in Apple's own client, and everything else, the second singer and the group parts, goes to the opposite one.
 fn primary_agent<'a>(root: Node<'a, '_>) -> Option<&'a str> {
     root.descendants().filter(|n| n.is_element() && n.tag_name().name() == "agent").find_map(|n| attr(n, "id").filter(|id| !id.is_empty()))
 }
 
-/// Turn a TTML document into normalized lines. Empty when it does not parse.
 pub fn ttml_to_lines(ttml: &str) -> Vec<LyricLine> {
     let options = ParsingOptions { allow_dtd: true, ..ParsingOptions::default() };
     let doc = match Document::parse_with_options(ttml, options) {
@@ -153,7 +128,6 @@ pub fn ttml_to_lines(ttml: &str) -> Vec<LyricLine> {
         }
         let mut line = LyricLine::new(time_attr(elem, "begin"), parsed.text);
         line.end = time_attr(elem, "end");
-        // Parts are only worth keeping when at least one is timed. Otherwise the view falls back to line-level rendering.
         if parsed.parts.iter().any(|p| p.start.is_some()) {
             line.parts = parsed.parts;
         }
@@ -166,7 +140,6 @@ pub fn ttml_to_lines(ttml: &str) -> Vec<LyricLine> {
                 continue;
             }
             if sub.parts.is_empty() {
-                // A background group with no word spans still has its own begin and end, so it is kept as one timed chunk.
                 bg_parts.push(LyricPart { start: time_attr(bg, "begin"), end: time_attr(bg, "end"), text: sub.text.clone(), space_after: true });
             } else {
                 bg_parts.extend(sub.parts);
@@ -180,7 +153,6 @@ pub fn ttml_to_lines(ttml: &str) -> Vec<LyricLine> {
             }
         }
 
-        // Duets: lines of any voice but the first sit against the opposite edge.
         if let (Some(primary), Some(agent)) = (primary, attr(elem, "agent").filter(|a| !a.is_empty()))
             && agent != primary
         {

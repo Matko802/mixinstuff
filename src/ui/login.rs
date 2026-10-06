@@ -1,10 +1,3 @@
-//! The sign-in window: Google's own sign-in page in a WebKit view, nothing
-//! else. The view watches the first authenticated request to
-//! music.youtube.com and captures its headers, falling back to the cookie jar
-//! when WebKit redacts the Cookie header. That ends in `YtMusic::login`,
-//! which writes headers_auth.json and publishes the auth state the rest of
-//! the app follows. The Python app also offered browser.json and pasted
-//! headers; those tabs are gone.
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -47,7 +40,6 @@ impl LoginDialog {
 
         let webview = webkit6::WebView::new();
         if let Some(settings) = WebViewExt::settings(&webview) {
-            // Google blocks unknown browsers; look like a desktop Firefox.
             settings.set_user_agent(Some(BROWSER_UA));
             settings.set_enable_javascript(true);
             settings.set_enable_webgl(true);
@@ -75,7 +67,6 @@ impl LoginDialog {
             skip.connect_clicked(move |_| win.close());
         }
         {
-            // Closing without signing in is a choice. Startup stops asking until the next sign-in.
             let weak = Rc::downgrade(&dialog);
             dialog.window.connect_close_request(move |_| {
                 if let Some(d) = weak.upgrade() {
@@ -118,7 +109,6 @@ impl LoginDialog {
         self.web_status.set_visible(true);
     }
 
-    /// The first authenticated browse request carries everything we need.
     fn on_resource_load_started(self: &Rc<Self>, request: &webkit6::URIRequest) {
         if self.finished.get() {
             return;
@@ -150,7 +140,6 @@ impl LoginDialog {
                 }
             });
         } else {
-            // WebKit redacts the Cookie header here; read the jar instead.
             self.fetch_cookies_from_jar();
         }
     }
@@ -199,14 +188,12 @@ impl LoginDialog {
         });
     }
 
-    /// Drop the embedded browser's cookies once the app has its own copy.
     fn clear_webkit_cookies(&self) {
         if let Some(manager) = self.webview.network_session().and_then(|s| s.website_data_manager()) {
             manager.clear(webkit6::WebsiteDataTypes::COOKIES, glib::TimeSpan::from_seconds(0), None::<&gtk::gio::Cancellable>, |_| {});
         }
     }
 
-    /// Run `YtMusic::login` on the runtime and report back on the GTK thread.
     fn login_with(self: &Rc<Self>, input: String, done: impl Fn(&Rc<Self>, bool) + 'static) {
         let client = self.ctx.net.client().clone();
         let handle = self.ctx.net.spawn(async move { client.login(&input).await });
@@ -233,7 +220,6 @@ impl LoginDialog {
     }
 }
 
-/// Pref set when the listener closed the sign-in without signing in.
 pub const LOGIN_SKIPPED_PREF: &str = "login_skipped";
 
 pub fn login_skipped(paths: &crate::paths::Paths) -> bool {
