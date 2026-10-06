@@ -1,10 +1,3 @@
-//! Port of ui/pages/playlist.py, which album.py only subclassed to force the
-//! album view. One page serves user playlists, Liked Music, albums (MPRE and
-//! OLAK ids), uploaded albums, radios and the virtual Downloads list.
-//!
-//! The track list is a ListView over a flattened model: a one-item header
-//! store carrying the whole header widget, then the filtered track store, so
-//! the header scrolls with the rows and the view stays virtualized.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -29,22 +22,15 @@ use crate::ui::widgets::add_to_playlist::AddToPlaylistPopover;
 use crate::ui::widgets::track_row::{TrackRow, TrackRowHost};
 use crate::ui::{copy_to_clipboard, toast};
 
-// Sort dropdown positions. The first five come straight off the track data;
-// the last two need a side fetch, so they are appended rather than slotted in.
 const SORT_LABELS: [&str; 7] = ["Default", "Title (A-Z)", "Artist (A-Z)", "Album (A-Z)", "Duration", "Most viewed", "Recently added"];
 
-/// Delay the live refresh when something is on screen already, so the
-/// chunked re-render does not fight the page-open animation.
 const AUTO_REFRESH_DELAY: Duration = Duration::from_millis(2000);
-/// Long enough for AdwNavigationView's page transition to finish.
 const TRANSITION_GATE: Duration = Duration::from_millis(350);
 const FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
-/// Longest side of an uploaded playlist cover.
 const COVER_MAX_PIXELS: i32 = 1024;
 const INITIAL_LIMIT: usize = 200;
 const PLACEHOLDER_ICON: &str = "media-playlist-audio-symbolic";
 
-/// What a card knew about the playlist before the page fetched it.
 #[derive(Clone, Debug, Default)]
 pub struct InitialData {
     pub title: String,
@@ -55,7 +41,6 @@ pub struct InitialData {
 type TitleListener = Box<dyn Fn(&str)>;
 type PageAction = Box<dyn Fn(&Rc<PlaylistPage>)>;
 
-/// The header strings _fetch_playlist_details built for update_ui.
 struct HeaderText {
     title: String,
     description: String,
@@ -65,7 +50,6 @@ struct HeaderText {
 
 enum Fetched {
     Details(Box<PlaylistDetails>),
-    /// An OLAK chart list read raw: title and rows, nothing else.
     Raw { title: Option<String>, tracks: Vec<Track> },
 }
 
@@ -110,7 +94,6 @@ pub struct PlaylistPage {
     privacy_text: RefCell<Option<String>>,
     full_description: RefCell<String>,
     description_expanded: Cell<bool>,
-    /// The rows: order, search, selection and sort metrics in one place.
     tracks: RefCell<TrackList>,
     current_limit: Cell<usize>,
     is_loading_more: Cell<bool>,
@@ -133,15 +116,12 @@ pub struct PlaylistPage {
     on_title: RefCell<Option<TitleListener>>,
     compact: Cell<bool>,
     me: RefCell<Weak<PlaylistPage>>,
-    /// The deferred write of the last fetch, latest wins.
     cache_write: RefCell<Option<glib::SourceId>>,
-    /// Header fields of the last fetch, reused when the full track list lands.
     cache_entry: RefCell<Option<CachedPlaylist>>,
 }
 
 impl PlaylistPage {
     pub fn new(ctx: Rc<UiContext>) -> Rc<Self> {
-        // -- header ------------------------------------------------------
         let header_container = gtk::Box::builder().orientation(gtk::Orientation::Vertical).margin_top(24).margin_bottom(12).build();
         let header_info_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(24).valign(gtk::Align::Start).build();
         let cover = CoverImage::new(ctx.net.clone(), 200);
@@ -182,7 +162,6 @@ impl PlaylistPage {
         header_info_box.append(&details_col);
         header_container.append(&header_info_box);
 
-        // -- sort row ----------------------------------------------------
         let sort_dropdown = gtk::DropDown::from_strings(&SORT_LABELS);
         sort_dropdown.set_valign(gtk::Align::Center);
         sort_dropdown.add_css_class("pill");
@@ -193,7 +172,6 @@ impl PlaylistPage {
         sort_row.append(&sort_dir_btn);
         let select_btn = gtk::ToggleButton::builder().icon_name("selection-mode-symbolic").css_classes(["flat", "circular"]).tooltip_text("Select multiple songs").build();
         let spacer = gtk::Box::builder().hexpand(true).build();
-        // Small inline spinner just left of the multi-select button while tracks load.
         let content_spinner = adw::Spinner::builder().valign(gtk::Align::Center).margin_end(4).visible(false).build();
         content_spinner.set_size_request(18, 18);
         sort_row.append(&spacer);
@@ -201,7 +179,6 @@ impl PlaylistPage {
         sort_row.append(&select_btn);
         header_container.append(&sort_row);
 
-        // -- selection bar -----------------------------------------------
         let selection_bar = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).margin_top(8).margin_bottom(4).visible(false).build();
         let selection_count_label = gtk::Label::builder().label("0 selected").css_classes(["caption"]).ellipsize(gtk::pango::EllipsizeMode::End).hexpand(true).xalign(0.0).build();
         selection_bar.append(&selection_count_label);
@@ -217,7 +194,6 @@ impl PlaylistPage {
         sel_overflow_menu.append(Some("Deselect All"), Some("page.sel_none"));
         sel_overflow_btn.set_menu_model(Some(&sel_overflow_menu));
         selection_bar.append(&sel_overflow_btn);
-        // Cancel is an X icon so it fits next to the others on narrow viewports.
         let sel_cancel_btn = gtk::Button::builder().icon_name("window-close-symbolic").css_classes(["flat"]).tooltip_text("Cancel selection").build();
         selection_bar.append(&sel_cancel_btn);
         header_container.append(&selection_bar);
@@ -225,12 +201,9 @@ impl PlaylistPage {
         let empty_label = gtk::Label::builder().label("This playlist has no songs").css_classes(["dim-label"]).margin_top(24).halign(gtk::Align::Center).visible(false).build();
         header_container.append(&empty_label);
 
-        // -- models and list view ----------------------------------------
         let header_store = gio::ListStore::new::<glib::Object>();
         header_store.append(&glib::Object::new::<glib::Object>());
         let track_store = gio::ListStore::new::<TrackObject>();
-        // No filter attached until a search runs: a filter callback per item on
-        // every items-changed is wasted work while the search bar is empty.
         let filter_model = gtk::FilterListModel::new(Some(track_store.clone()), None::<gtk::CustomFilter>);
         let master = gio::ListStore::new::<gio::ListModel>();
         master.append(&header_store);
@@ -238,7 +211,6 @@ impl PlaylistPage {
         let flatten = gtk::FlattenListModel::new(Some(master));
         let selection = gtk::NoSelection::new(Some(flatten.clone()));
         let factory = gtk::SignalListItemFactory::new();
-        // One-column grid: a ListView keeps 200 rows alive, a grid about 30.
         let songs_list = gtk::GridView::builder().model(&selection).factory(&factory).min_columns(1).max_columns(1).build();
         songs_list.add_css_class("playlist-view");
         songs_list.set_margin_start(12);
@@ -333,7 +305,6 @@ impl PlaylistPage {
         });
         page.me.replace(Rc::downgrade(&page));
 
-        // The filter reads the page's search text, like _track_filter_func.
         {
             let weak = Rc::downgrade(&page);
             page.track_filter.set_filter_func(move |obj| {
@@ -389,7 +360,6 @@ impl PlaylistPage {
         self.playlist_id.borrow().clone()
     }
 
-    /// The window sets its title from this, like the header-title-changed signal.
     pub fn set_on_header_title(&self, f: impl Fn(&str) + 'static) {
         self.on_title.replace(Some(Box::new(f)));
     }
@@ -400,9 +370,6 @@ impl PlaylistPage {
         }
     }
 
-    /// Demo hook: what the Play button does.
-    /// Demo hook: set the playlist cover from a file, what the edit dialog
-    /// does once a crop has been chosen.
     pub fn set_cover_for_demo(self: &Rc<Self>, image: PathBuf) {
         let old_cover = self.cover.url().unwrap_or_default();
         let title = self.title_text.borrow().clone();
@@ -413,7 +380,6 @@ impl PlaylistPage {
         self.save_edits(title.clone(), desc.clone(), privacy.clone(), title, desc, privacy, Some(image), old_cover);
     }
 
-    /// Demo hook: type into the search box and pick a sort order.
     pub fn sift_for_demo(self: &Rc<Self>, filter: Option<&str>, sort: Option<u32>) {
         if let Some(sort) = sort {
             self.sort_dropdown.set_selected(sort);
@@ -428,19 +394,15 @@ impl PlaylistPage {
         self.on_play_clicked();
     }
 
-    /// The inline spinner the header-bar refresh polls, like Python's content_spinner.
     pub fn content_spinner_visible(&self) -> bool {
         self.content_spinner.is_visible()
     }
 
-    /// Whether the header-bar refresh button applies: user playlists only,
-    /// not albums, uploads or derived content.
     pub fn is_refreshable(&self) -> bool {
         let Some(pid) = self.playlist_id() else { return false };
         !(pid.starts_with("MPRE") || pid.starts_with("OLAK") || pid.starts_with("FEmusic_library_privately_owned") || pid.is_empty())
     }
 
-    // -- wiring -----------------------------------------------------------
 
     fn wire_factory(self: &Rc<Self>, factory: &gtk::SignalListItemFactory) {
         let weak = Rc::downgrade(self);
@@ -592,15 +554,12 @@ impl PlaylistPage {
         let weak = Rc::downgrade(self);
         self.read_more.borrow().connect_activate_link(move |_, _| {
             if let Some(p) = weak.upgrade() {
-                // Deferred: swapping the label during the signal is unsafe.
                 glib::idle_add_local_once(move || p.toggle_description());
             }
             glib::Propagation::Stop
         });
     }
 
-    /// The "page." actions the more menu and selection overflow use.
-    /// Repaint row badges as downloads are queued, finish, or are removed.
     fn wire_downloads(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
         self.ctx.on_download(move |event| {
@@ -646,7 +605,6 @@ impl PlaylistPage {
         self.stack.insert_action_group("page", Some(&group));
     }
 
-    // -- header title -----------------------------------------------------
 
     fn on_scroll(self: &Rc<Self>, adj: &gtk::Adjustment) {
         let value = adj.value();
@@ -665,9 +623,7 @@ impl PlaylistPage {
         self.refresh_more_menu(self.is_editable.get());
     }
 
-    // -- loading ----------------------------------------------------------
 
-    /// Port of load_playlist. `initial` is what the card knew, shown while the fetch runs.
     pub fn load_playlist(self: &Rc<Self>, playlist_id: &str, initial: Option<InitialData>) {
         if self.playlist_id.borrow().as_deref() != Some(playlist_id) {
             self.playlist_id.replace(Some(playlist_id.to_owned()));
@@ -699,7 +655,6 @@ impl PlaylistPage {
             }
             match &initial.thumb {
                 Some(thumb) => {
-                    // Prefer the on-disk cover: same image, no round trip.
                     let local = self.ctx.paths.local_playlist_cover(&initial.title).map(|p| p.to_string_lossy().into_owned());
                     let cover_url = local.unwrap_or_else(|| thumb.clone());
                     if self.cover.url().as_deref() != Some(cover_url.as_str()) {
@@ -710,9 +665,6 @@ impl PlaylistPage {
                 None => self.cover.clear(),
             }
             self.stack.set_visible_child_name("content");
-            // Optimistic render from the disk cache while the fresh fetch runs.
-            // The delayed fetch only applies when rows are showing, so the
-            // cache read decides the schedule once it lands.
             let mut rendered = false;
             if let Some(cached) = self.ctx.net.caches().cached_tracks(playlist_id) {
                 self.apply_cached_tracks(cached);
@@ -740,7 +692,6 @@ impl PlaylistPage {
         self.populate_from_disk_cache(playlist_id, None, false);
     }
 
-    /// A playlist kept on this device: rendered from the store in one go.
     fn load_local(self: &Rc<Self>, playlist_id: &str) {
         let Some(details) = self.ctx.local.details(playlist_id) else {
             self.update_ui(HeaderText { title: "Playlist Not Found".into(), description: String::new(), meta1: "Playlist".into(), meta2: "0 songs".into() }, Vec::new(), Vec::new(), false, Some(0), false);
@@ -752,9 +703,6 @@ impl PlaylistPage {
         self.apply_fetch(playlist_id, Fetched::Details(Box::new(details)), false);
     }
 
-    /// Port of _populate_from_disk_cache: read the cached copy on the
-    /// runtime, render its header and rows, then let the live fetch follow.
-    /// `rendered` says rows are already showing from the memory cache.
     fn populate_from_disk_cache(self: &Rc<Self>, playlist_id: &str, initial: Option<InitialData>, rendered: bool) {
         if Self::is_virtual(playlist_id) {
             self.schedule_details_fetch(playlist_id, rendered);
@@ -783,7 +731,6 @@ impl PlaylistPage {
         });
     }
 
-    /// Port of _apply_disk_cache_header: the full header from the cached copy.
     fn apply_disk_cache_header(self: &Rc<Self>, cached: &CachedPlaylist, initial: Option<&InitialData>) {
         let pid = self.playlist_id().unwrap_or_default();
         let title = if !cached.title.is_empty() { cached.title.clone() } else { initial.map(|i| i.title.clone()).unwrap_or_default() };
@@ -830,8 +777,6 @@ impl PlaylistPage {
         }
         self.is_album_view.set(is_album);
         self.sort_row.set_visible(n > 0 && !is_album);
-        // Ownership is in the cached header too, so the menu offers Edit and
-        // Delete right away rather than only once the live fetch lands.
         let owned = playlists::owns_playlist(&cached.playlist_id, cached.meta.author_raw.first().map(|a| a.name.as_str()), cached.meta.collaborators.as_deref(), self.account_name().as_deref());
         self.is_owned.set(owned);
         self.is_editable.set(self.ctx.net.client().is_authenticated() && !is_album && owned);
@@ -846,9 +791,6 @@ impl PlaylistPage {
         }
     }
 
-    /// Port of _write_disk_cache with the deferred write of
-    /// _schedule_playlist_cache_write: the serialization waits until the
-    /// page has rendered, and back-to-back writes collapse into the last.
     fn schedule_disk_cache_write(self: &Rc<Self>, entry: CachedPlaylist) {
         if Self::is_virtual(&entry.playlist_id) || entry.tracks.is_empty() || !self.ctx.online.is_online() {
             return;
@@ -893,8 +835,6 @@ impl PlaylistPage {
         }
     }
 
-    /// Render rows from the in-memory cache while the live fetch runs, what
-    /// _apply_disk_cache_tracks did with the disk cache.
     fn apply_cached_tracks(self: &Rc<Self>, cached: Vec<Track>) {
         self.tracks.borrow_mut().set(cached.clone());
         self.empty_label.set_visible(cached.is_empty());
@@ -920,7 +860,6 @@ impl PlaylistPage {
         }
     }
 
-    /// Port of _load_playlist_offline: the cached copy is the whole page.
     fn load_playlist_offline(self: &Rc<Self>, playlist_id: &str, initial: Option<InitialData>) {
         let caches = self.ctx.net.caches().clone();
         let id = playlist_id.to_owned();
@@ -987,8 +926,6 @@ impl PlaylistPage {
         }
     }
 
-    /// Port of _fetch_playlist_details: pick the endpoint by id shape, fetch
-    /// on the runtime, then build the header on the GTK thread.
     fn fetch_playlist_details(self: &Rc<Self>, playlist_id: &str, incremental: bool) {
         if Self::is_virtual(playlist_id) || crate::local_library::is_local(playlist_id) {
             self.is_fully_loaded.set(true);
@@ -1030,7 +967,6 @@ impl PlaylistPage {
         });
     }
 
-    /// The tail of _fetch_playlist_details: strings for the header, then update_ui.
     fn apply_fetch(self: &Rc<Self>, playlist_id: &str, fetched: Fetched, incremental: bool) {
         let mut details = match fetched {
             Fetched::Raw { title, tracks } => {
@@ -1054,21 +990,18 @@ impl PlaylistPage {
         let song_count = count_text(track_len, is_podcast);
 
         let (count_str, is_owned, author, album_type) = if is_local {
-            // The likes list is yours but not something to rename or delete.
             let owned = playlist_id != crate::local_library::LIKED_ID;
             (song_count.clone(), owned, crate::local_library::HERE.to_owned(), None)
         } else if is_upload {
             let author = details.author.iter().map(|a| glib::markup_escape_text(&a.name).to_string()).collect::<Vec<_>>().join(", ");
             (song_count.clone(), false, author, Some("Upload".to_owned()))
         } else if playlist_id == "LM" {
-            // Liked Music shows no year, as the Python branch set year = None.
             details.year = None;
             (song_count.clone(), false, "You".to_owned(), None)
         } else if is_album {
             self.audio_playlist_id.replace(details.audio_playlist_id.clone());
             let track_count = details.track_count.unwrap_or(track_len as u32);
             let album_type = crate::net::cache::Caches::release_kind(track_count);
-            // Cards elsewhere only have YouTube's label, which calls some EPs singles.
             self.ctx.net.caches().set_album_track_count(playlist_id, track_count);
             let author = artist_markup(&details.author);
             let owned = playlists::is_own_playlist(&details, playlist_id, self.account_name().as_deref());
@@ -1101,7 +1034,6 @@ impl PlaylistPage {
             meta1_parts.push("Playlist".to_owned());
         } else {
             if is_podcast {
-                // A show has no privacy to speak of.
                 self.privacy_text.replace(None);
                 meta1_parts.push("Podcast".to_owned());
             } else {
@@ -1132,9 +1064,6 @@ impl PlaylistPage {
                 }
             }
         }
-        // Python started this from the fetch thread before update_ui ran on the
-        // main loop. update_ui marks a first render fully fetched, so it must
-        // start first here as well or a long playlist stops at the first pages.
         if !incremental && !is_album && track_count.is_some_and(|count| (track_len as u32) < count) {
             self.start_background_full_fetch();
         }
@@ -1146,7 +1075,6 @@ impl PlaylistPage {
         self.update_ui(HeaderText { title, description: details.description, meta1: meta1_parts.join(" • "), meta2: meta2_parts.join(" • ") }, thumbnails, tracks, incremental, track_count, is_owned);
     }
 
-    // -- update UI --------------------------------------------------------
 
     #[allow(clippy::too_many_arguments)]
     fn update_ui(self: &Rc<Self>, text: HeaderText, thumbnails: Vec<String>, tracks: Vec<Track>, append: bool, total_tracks: Option<u32>, is_owned: bool) {
@@ -1156,7 +1084,6 @@ impl PlaylistPage {
         self.description_text.replace(text.description.clone());
         self.name_label.set_label(&text.title);
 
-        // A partial live fetch must not regress a richer view already rendered.
         let existing_count = self.tracks.borrow().fetched().len();
         let keep_richer = !append && existing_count > tracks.len();
 
@@ -1222,9 +1149,6 @@ impl PlaylistPage {
                 self.ctx.net.caches().set_cached_tracks(&pid, tracks.clone());
             }
             if !keep_richer {
-                // The fresh list is at least as long as what was rendered from the cache, so
-                // it replaces both views. Leaving the cached `fetched` in place hid songs added
-                // since: the queue came from it, and a click on a new row found no such track.
                 self.tracks.borrow_mut().set(tracks.clone());
                 self.sort_dropdown.set_selected(SORT_DEFAULT);
                 self.populate_tracks_chunked(tracks);
@@ -1255,7 +1179,6 @@ impl PlaylistPage {
         self.desc_box.set_visible(true);
     }
 
-    /// Port of _toggle_description: the link label is replaced to dodge GTK's visited colour.
     fn toggle_description(self: &Rc<Self>) {
         let expanded = !self.description_expanded.get();
         self.description_expanded.set(expanded);
@@ -1275,17 +1198,12 @@ impl PlaylistPage {
         self.connect_read_more();
     }
 
-    // -- store helpers ----------------------------------------------------
 
     fn clear_track_store(&self) {
         self.track_store.remove_all();
-        // A new token cancels any chunker still pumping from an older render.
         self.populate_token.set(self.populate_token.get() + 1);
     }
 
-    /// Port of _populate_tracks_chunked: the first batch at once so the page
-    /// transition has rows to paint, the rest pumped on idle after the
-    /// transition, eighty at a time.
     fn populate_tracks_chunked(self: &Rc<Self>, tracks: Vec<Track>) {
         const FIRST: usize = 40;
         const BATCH: usize = 80;
@@ -1319,14 +1237,11 @@ impl PlaylistPage {
         }
     }
 
-    /// Bring the rows in line with `tracks`, touching only what differs.
-    /// Emptying the store mid-scroll lost the position and hung for seconds.
     fn sync_track_store(self: &Rc<Self>, tracks: Vec<Track>) {
         let old: Vec<String> = (0..self.track_store.n_items()).filter_map(|i| self.track_store.item(i).and_downcast::<TrackObject>()).map(|t| t.track().video_id.0).collect();
         let new: Vec<String> = tracks.iter().map(|t| t.video_id.0.clone()).collect();
         let (prefix, suffix) = crate::state::queue_entry::shared_ends(&old, &new);
         if prefix == old.len() && prefix < new.len() {
-            // A pure append: pumped like the first render, so no frame takes all of it.
             self.populate_token.set(self.populate_token.get() + 1);
             let token = self.populate_token.get();
             let tracks = Rc::new(tracks);
@@ -1356,10 +1271,7 @@ impl PlaylistPage {
         }
     }
 
-    // -- scroll / lazy load -----------------------------------------------
 
-    /// Port of load_more: slice from the fetched list when it is complete,
-    /// hit the network only for infinite lists.
     fn load_more(self: &Rc<Self>) {
         if self.is_fully_fetched.get() {
             let new_tracks = self.tracks.borrow_mut().render_chunk(50);
@@ -1391,8 +1303,6 @@ impl PlaylistPage {
         }
     }
 
-    /// Port of _start_background_full_fetch: get every row, then refresh the
-    /// list, the queue and the duration once they land.
     fn start_background_full_fetch(self: &Rc<Self>) {
         if self.is_fully_fetched.get() {
             return;
@@ -1415,8 +1325,6 @@ impl PlaylistPage {
                 Ok(Ok(tracks)) if !tracks.is_empty() => {
                     tracing::info!(count = tracks.len(), "background fetch complete");
                     page.ctx.net.caches().set_cached_tracks(&id, tracks.clone());
-                    // The full list replaces the partial one in the disk cache, header fields kept.
-                    // The borrow must end before schedule_disk_cache_write replaces the cell.
                     let entry = page.cache_entry.borrow().clone();
                     if let Some(mut entry) = entry {
                         entry.tracks = tracks.clone();
@@ -1445,7 +1353,6 @@ impl PlaylistPage {
         if sort_type != SORT_DEFAULT || self.tracks.borrow().descending() {
             self.reorder_playlist(sort_type);
         } else if let Some(tracks) = &tracks {
-            // The live list may differ from the rendered one: refresh without a manual reload.
             let new_ids: Vec<&str> = tracks.iter().map(|t| t.video_id.as_str()).collect();
             let cur_ids: Vec<String> = self.tracks.borrow().rendered().iter().map(|t| t.video_id.0.clone()).collect();
             if !new_ids.is_empty() && new_ids != cur_ids.iter().map(String::as_str).collect::<Vec<_>>() && !self.tracks.borrow().filtering() {
@@ -1456,7 +1363,6 @@ impl PlaylistPage {
         }
         self.content_spinner.set_visible(false);
 
-        // Complete the snapshot the queue took when Play beat the fetch.
         if let Some(pid) = self.playlist_id() {
             if self.ctx.player.queue_source_id().as_deref() == Some(pid.as_str()) {
                 let queue_len = self.ctx.player.queue_tracks().len();
@@ -1484,9 +1390,7 @@ impl PlaylistPage {
         self.stats_label.set_label(&parts.join(" • "));
     }
 
-    // -- filter -----------------------------------------------------------
 
-    /// Port of filter_content: debounced, immediate when clearing.
     pub fn filter_content(self: &Rc<Self>, text: &str) {
         let pending = text.trim().to_lowercase();
         self.pending_filter_text.replace(pending.clone());
@@ -1512,7 +1416,6 @@ impl PlaylistPage {
             let rows = self.tracks.borrow().visible();
             let objects: Vec<TrackObject> = rows.into_iter().map(TrackObject::new).collect();
             self.track_store.splice(0, self.track_store.n_items(), &objects);
-            // Keep the filter attached only while a search is active.
             if !text.is_empty() {
                 self.filter_model.set_filter(Some(&self.track_filter));
             } else {
@@ -1532,7 +1435,6 @@ impl PlaylistPage {
         }
     }
 
-    // -- playback ---------------------------------------------------------
 
     fn on_list_activate(self: &Rc<Self>, position: u32) {
         let Some(track) = self.flatten.item(position).and_downcast::<TrackObject>().map(|t| t.track()) else { return };
@@ -1548,17 +1450,11 @@ impl PlaylistPage {
         self.cover.url()
     }
 
-    /// Port of _play_track: jump inside the live queue when it came from this
-    /// page, otherwise queue the page's rows with covers filled in.
     fn play_track(self: &Rc<Self>, track: &Track) {
         let video_id = track.video_id.0.clone();
         if video_id.is_empty() {
             return;
         }
-        // Offline only downloaded songs play. Every tap used to be dropped,
-        // so a downloaded playlist did nothing without a connection. The
-        // offline answer can be a stale probe from a phone waking up, so a
-        // song that needs the network asks again before giving up.
         if !self.ctx.online.is_online() && !self.ctx.downloads.is_downloaded(&video_id) {
             let weak = Rc::downgrade(self);
             let track = track.clone();
@@ -1597,7 +1493,6 @@ impl PlaylistPage {
         }
     }
 
-    /// Port of _best_queue: the full list only under the forward default sort.
     fn best_queue(&self) -> Vec<Track> {
         let list = self.tracks.borrow();
         if self.is_fully_fetched.get() && !list.fetched().is_empty() && list.sort_type() == SORT_DEFAULT && !list.descending() {
@@ -1606,8 +1501,6 @@ impl PlaylistPage {
         list.rendered().to_vec()
     }
 
-    /// Offline the queue keeps downloaded songs only. None are known, so it empties.
-    /// Port of _filter_queue_offline: with no connection only downloaded songs play.
     fn offline_filter_queue(&self, tracks: Vec<Track>) -> Vec<Track> {
         if self.ctx.online.is_online() {
             return tracks;
@@ -1645,9 +1538,7 @@ impl PlaylistPage {
         }
     }
 
-    // -- more menu --------------------------------------------------------
 
-    /// Mark the menu for a rebuild the next time its popover opens.
     fn refresh_more_menu(&self, is_owned: bool) {
         self.more_menu_pending_owned.set(is_owned);
         self.more_menu_dirty.set(true);
@@ -1707,13 +1598,16 @@ impl PlaylistPage {
     fn on_start_radio(&self) {
         let pid = self.audio_playlist_id.borrow().clone().or_else(|| self.playlist_id());
         let Some(pid) = pid else { return };
+        if pid.starts_with("sc:") {
+            self.ctx.player.start_radio(None, Some(pid));
+            toast(&self.stack, "Starting radio...");
+            return;
+        }
         let radio_id = if pid.starts_with("RDAMPL") { pid } else { format!("RDAMPL{pid}") };
         self.ctx.player.start_radio(None, Some(radio_id));
         toast(&self.stack, "Starting radio...");
     }
 
-    /// Port of _on_download_all: every track the page knows, tagged with the
-    /// playlist so the .m3u8 mirror follows.
     fn on_download_all(&self) {
         let tracks = self.all_tracks();
         if tracks.is_empty() {
@@ -1752,10 +1646,7 @@ impl PlaylistPage {
         }
     }
 
-    // -- library membership -----------------------------------------------
 
-    /// Port of is_in_library: never blocks. A cold cache answers false and
-    /// warms in the background, then the menu is corrected.
     fn is_in_library(self: &Rc<Self>, check_id: &str) -> bool {
         if check_id.is_empty() || !self.ctx.net.client().is_authenticated() {
             return false;
@@ -1820,7 +1711,6 @@ impl PlaylistPage {
         });
     }
 
-    // -- multi-select -----------------------------------------------------
 
     fn on_select_toggled(self: &Rc<Self>, active: bool) {
         self.multi_select.set(active);
@@ -1851,7 +1741,6 @@ impl PlaylistPage {
         }
     }
 
-    /// Every realized row, found the way Python walked the ListView's children.
     fn live_rows(&self) -> Vec<Rc<TrackRow>> {
         let mut rows = Vec::new();
         let mut child = self.songs_list.first_child();
@@ -1877,7 +1766,6 @@ impl PlaylistPage {
         }
     }
 
-    /// Port of _get_visible_tracks: the filtered rows under a search, else everything known.
     fn visible_tracks(&self) -> Vec<Track> {
         let list = self.tracks.borrow();
         if list.filtering() { list.matches() } else { list.source().to_vec() }
@@ -1901,7 +1789,6 @@ impl PlaylistPage {
         self.selection_count_label.set_label(&format!("{count} of {total} selected"));
     }
 
-    /// Selected tracks in the current sort order.
     fn selected_tracks(&self) -> Vec<Track> {
         self.tracks.borrow().selected_tracks()
     }
@@ -1926,7 +1813,6 @@ impl PlaylistPage {
         if crate::local_library::is_local(&pid) {
             let ids: Vec<String> = items.iter().map(|(video_id, _)| video_id.clone()).collect();
             if pid == crate::local_library::LIKED_ID {
-                // Removing from the likes list is an unlike, so every heart follows.
                 for id in &ids {
                     self.ctx.player.set_like_status(crate::model::VideoId(id.clone()), LikeStatus::Indifferent);
                 }
@@ -1983,10 +1869,7 @@ impl PlaylistPage {
         toast(&self.stack, &format!("Copied debug data for {} tracks", tracks.len()));
     }
 
-    // -- sort -------------------------------------------------------------
 
-    /// Point the arrow at the order on screen. Most viewed and recently added
-    /// run biggest first untoggled, so their icon is the flip of the toggle.
     fn refresh_sort_dir_icon(&self) {
         let mut descending = self.tracks.borrow().descending();
         if matches!(self.sort_dropdown.selected(), SORT_VIEWS | SORT_ADDED) {
@@ -2010,8 +1893,6 @@ impl PlaylistPage {
         self.ctx.net.caches().drop_sort_metrics(&browse_id);
     }
 
-    /// Neither number rides along on a track: fetch it once per playlist,
-    /// then reorder when it lands.
     fn fetch_sort_metric(self: &Rc<Self>, sort_type: u32) {
         let Some(pid) = self.playlist_id().filter(|p| p != "DOWNLOADS" && p != "HISTORY") else {
             self.sort_metric_unavailable(sort_type, false);
@@ -2102,7 +1983,6 @@ impl PlaylistPage {
         }
     }
 
-    // -- row context menu -------------------------------------------------
 
     fn open_row_menu(self: &Rc<Self>, row: &Rc<TrackRow>, x: f64, y: f64) {
         let Some(track) = row.track() else { return };
@@ -2200,10 +2080,7 @@ impl PlaylistPage {
         self.update_duration_from_all_tracks();
     }
 
-    // -- refresh, virtual lists -------------------------------------------
 
-    /// Port of _invalidate_disk_cache: drop cached state so a smaller fetch
-    /// after a deletion replaces the old render.
     fn invalidate_disk_cache(&self) {
         if let Some(pid) = self.playlist_id() {
             self.ctx.net.caches().drop_cached_tracks(&pid);
@@ -2220,14 +2097,12 @@ impl PlaylistPage {
         self.is_fully_loaded.set(false);
     }
 
-    /// Port of refresh_in_place, what the header-bar refresh button calls.
     pub fn refresh_in_place(self: &Rc<Self>) {
         let Some(pid) = self.playlist_id() else { return };
         if pid == "DOWNLOADS" {
             self.clear_track_store();
             self.tracks.borrow_mut().clear();
             self.stack.set_visible_child_name("loading");
-            // No downloads database yet: the list is empty.
             let weak = Rc::downgrade(self);
             glib::idle_add_local_once(move || {
                 if let Some(p) = weak.upgrade() {
@@ -2254,7 +2129,6 @@ impl PlaylistPage {
         self.load_playlist(&pid, None);
     }
 
-    /// Set up the page as the Downloads or History list before its rows arrive.
     pub fn prepare_virtual(&self, id: &str) {
         self.playlist_id.replace(Some(id.to_owned()));
         self.is_fully_loaded.set(true);
@@ -2262,7 +2136,6 @@ impl PlaylistPage {
         self.stack.set_visible_child_name("loading");
     }
 
-    /// Port of _reshow_virtual and _fill_downloads_page.
     pub fn show_virtual(self: &Rc<Self>, title: &str, tracks: Vec<Track>, meta1: &str) {
         self.tracks.borrow_mut().set(tracks.clone());
         let total: u32 = tracks.iter().filter_map(|t| t.duration_seconds).sum();
@@ -2278,8 +2151,6 @@ impl PlaylistPage {
         let handle = self.ctx.net.spawn(save_playlist_cover(http, auth, path, url.to_owned()));
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            // A replaced file keeps its path, and the texture cache is keyed by
-            // path, so the page would keep drawing the old picture.
             if handle.await.unwrap_or(false) {
                 if let Some(page) = weak.upgrade() {
                     crate::ui::cover::forget_texture(&shown);
@@ -2291,7 +2162,6 @@ impl PlaylistPage {
         });
     }
 
-    // -- cover menu, edit, delete -----------------------------------------
 
     fn on_cover_right_click(self: &Rc<Self>, x: f64, y: f64) {
         let url = self.cover.url();
@@ -2385,9 +2255,6 @@ impl PlaylistPage {
         });
     }
 
-    /// Port of _show_edit_dialog. The Python save job only mirrored the new
-    /// cover locally and reloaded; this one also sends the changed title,
-    /// description and privacy to the edit endpoint.
     fn show_edit_dialog(self: &Rc<Self>) {
         let dialog = adw::Dialog::builder().title("Edit Playlist").content_width(500).build();
         let main_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
@@ -2441,8 +2308,6 @@ impl PlaylistPage {
                     let cover_row = cover_row.clone();
                     crate::ui::crop_dialog::show(&window, pixbuf, move |cropped| {
                         let temp = std::env::temp_dir().join(format!("musishark_crop_{}.png", std::process::id()));
-                        // YouTube shows the cover at 1024 at most, and a phone
-                        // photo would otherwise be a several megabyte upload.
                         let cropped = match cropped.width().max(cropped.height()) > COVER_MAX_PIXELS {
                             true => cropped.scale_simple(COVER_MAX_PIXELS, COVER_MAX_PIXELS, gtk::gdk_pixbuf::InterpType::Bilinear).unwrap_or(cropped),
                             false => cropped,
@@ -2473,7 +2338,6 @@ impl PlaylistPage {
                 let old_desc = p.description_text.borrow().clone();
                 let old_privacy = p.privacy_text.borrow().clone().unwrap_or_else(|| "PUBLIC".to_owned()).to_uppercase();
 
-                // Optimistic update.
                 p.name_label.set_label(&new_title);
                 p.title_text.replace(new_title.clone());
                 if !new_desc.trim().is_empty() {
@@ -2502,8 +2366,6 @@ impl PlaylistPage {
         let clean_desc = new_desc.trim().to_owned();
         let changed = clean_title != old_title.trim() || clean_desc != old_desc.trim() || new_privacy != old_privacy;
         if crate::local_library::is_local(&pid) {
-            // Title and description only. A local list has no privacy and no uploaded cover,
-            // though the cover mirror on disk still keys on the title like any other.
             let title = (!clean_title.is_empty() && clean_title != old_title.trim()).then_some(clean_title.as_str());
             let desc = (clean_desc != old_desc.trim()).then_some(clean_desc.as_str());
             self.ctx.local.edit(&pid, title, desc);
@@ -2546,10 +2408,6 @@ impl PlaylistPage {
                 },
                 None => tracing::warn!("no session for the cover upload"),
             }
-            // Keep a local copy so the page shows the new cover at once. The
-            // sidecar stays on the address of the cover being replaced: the
-            // mirror then leaves this file alone until YouTube serves a
-            // different one, which is the uploaded image.
             if let Some(dst) = cover_dst {
                 if let Some(dir) = dst.parent() {
                     let _ = tokio::fs::create_dir_all(dir).await;
@@ -2564,12 +2422,9 @@ impl PlaylistPage {
         glib::spawn_future_local(async move {
             let _ = handle.await;
             let Some(page) = weak.upgrade() else { return };
-            // The cover behind that path is a different picture now.
             if let Some(path) = mirrored {
                 crate::ui::cover::forget_texture(&path.to_string_lossy());
             }
-            // A new cover keeps the address it had, so the library is told
-            // outright rather than left to spot a difference.
             if had_cover {
                 page.ctx.nav.refresh_library_card(&pid);
             }
@@ -2579,7 +2434,6 @@ impl PlaylistPage {
         });
     }
 
-    // -- compact mode -----------------------------------------------------
 
     pub fn set_compact_mode(&self, compact: bool) {
         self.compact.set(compact);
@@ -2658,7 +2512,6 @@ impl TrackRowHost for PlaylistPage {
     }
 }
 
-// -- free helpers ---------------------------------------------------------
 
 fn row_of(item: &gtk::ListItem) -> Option<Rc<TrackRow>> {
     unsafe { item.data::<Rc<TrackRow>>("track-row") }.map(|p| unsafe { p.as_ref() }.clone())
@@ -2670,7 +2523,6 @@ fn read_more_label(text: &str) -> gtk::Label {
     label
 }
 
-/// The first 200 characters, cut at a word, with an ellipsis.
 fn truncate_description(text: &str) -> String {
     let head: String = text.chars().take(200).collect();
     match head.rfind(' ') {
@@ -2687,7 +2539,6 @@ fn capitalize(text: String) -> String {
     }
 }
 
-/// "1 hr 5 min" or "4 min 12 sec", what the header stats show.
 fn long_duration(total: u32) -> String {
     let hours = total / 3600;
     let minutes = (total % 3600) / 60;
@@ -2695,7 +2546,6 @@ fn long_duration(total: u32) -> String {
     if hours > 0 { format!("{hours} hr {minutes} min") } else { format!("{minutes} min {seconds} sec") }
 }
 
-/// "12 songs", or "12 episodes" on a podcast show.
 fn count_text(n: usize, podcast: bool) -> String {
     match (podcast, n) {
         (true, 1) => "1 episode".to_owned(),
@@ -2705,14 +2555,12 @@ fn count_text(n: usize, podcast: bool) -> String {
     }
 }
 
-/// "1 hr 5 min" or "4 min", what the virtual lists show.
 fn short_duration(total: u32) -> String {
     let hours = total / 3600;
     let minutes = (total % 3600) / 60;
     if hours > 0 { format!("{hours} hr {minutes} min") } else { format!("{minutes} min") }
 }
 
-/// `<a href='artist:ID'>Name</a>` per artist, plain when there is no id.
 fn artist_markup(artists: &[Person]) -> String {
     artists
         .iter()
@@ -2727,7 +2575,6 @@ fn artist_markup(artists: &[Person]) -> String {
         .join(", ")
 }
 
-/// Port of get_yt_music_link: albums share their OLAK playlist, MPRE ids are internal.
 fn yt_music_link(item_id: &str, is_album: bool, audio_playlist_id: Option<&str>) -> String {
     if item_id.is_empty() {
         return String::new();
@@ -2747,7 +2594,6 @@ fn yt_music_link(item_id: &str, is_album: bool, audio_playlist_id: Option<&str>)
     format!("https://music.youtube.com/playlist?list={item_id}")
 }
 
-/// The endpoint side of _fetch_playlist_details, on the runtime.
 async fn fetch_details(api: &ytmusicapi::YTMusicClient, http: &reqwest::Client, auth: Option<crate::model::HttpAuth>, id: String, limit: usize) -> Result<Fetched, NetError> {
     let mut playlist_id = id;
     if playlist_id.starts_with("OLAK") {
@@ -2768,7 +2614,6 @@ async fn fetch_details(api: &ytmusicapi::YTMusicClient, http: &reqwest::Client, 
     }
     if playlist_id.starts_with("FEmusic_library_privately_owned") {
         let mut album = playlists::get_upload_album(api, &playlist_id).await?;
-        // Cross-reference every uploaded song to fill missing artists and art.
         let all_songs = playlists::get_upload_songs(api).await.unwrap_or_default();
         let by_id: HashMap<&str, &Track> = all_songs.iter().map(|s| (s.video_id.as_str(), s)).collect();
         let album_thumb = album.thumbnails.last().cloned();
@@ -2802,17 +2647,14 @@ async fn fetch_details(api: &ytmusicapi::YTMusicClient, http: &reqwest::Client, 
         let details = playlists::get_album(api, &playlist_id).await?;
         return Ok(Fetched::Details(Box::new(details)));
     }
-    // A show lists every episode at once: there is no count to page towards.
     if playlists::is_podcast(&playlist_id) {
         let details = playlists::get_podcast(api, &playlist_id, None).await?;
         return Ok(Fetched::Details(Box::new(details)));
     }
-    // Brand new playlists take a moment to appear: retry like the Python page.
     let mut last_err = None;
     for attempt in 0..3 {
         match playlists::get_playlist(api, &playlist_id, Some(limit)).await {
             Ok(details) if !details.title.is_empty() => return Ok(Fetched::Details(Box::new(details))),
-            // A podcast's own playlist id answers with rows and no header. Its show page has one.
             Err(err) if attempt == 0 && playlist_id.starts_with("PL") => match playlists::get_podcast(api, &format!("MPSP{playlist_id}"), None).await {
                 Ok(details) => return Ok(Fetched::Details(Box::new(details))),
                 Err(_) => {
@@ -2837,9 +2679,6 @@ async fn fetch_details(api: &ytmusicapi::YTMusicClient, http: &reqwest::Client, 
     Err(last_err.unwrap_or_else(|| NetError::Message("Failed to fetch playlist after retries".into())))
 }
 
-/// Port of get_playlist_full's first two stages: ytmusicapi, then the raw
-/// continuation walk when the count says rows are missing. The yt-dlp flat
-/// enumeration stage is not ported.
 async fn get_playlist_full(api: &ytmusicapi::YTMusicClient, playlist_id: &str) -> Result<Vec<Track>, NetError> {
     let details = playlists::get_playlist(api, playlist_id, None).await?;
     let mut tracks = details.tracks;

@@ -1,10 +1,3 @@
-//! Video id to playable URI.
-//!
-//! `StreamResolver` is the seam that lets the port ship before a native
-//! InnerTube player endpoint exists. `YtDlpResolver` shells out to the same
-//! yt-dlp the Python app embeds, with the same format policy. A native
-//! resolver later implements the same trait and nothing above it changes.
-//! Both go through `StreamCache`, which is file-compatible with the Python one.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -35,11 +28,9 @@ pub enum ResolveError {
 
 pub trait StreamResolver: Send + Sync {
     fn resolve(&self, video_id: VideoId, auth: Option<HttpAuth>) -> BoxFuture<'_, Result<StreamInfo, ResolveError>>;
-    /// Drop a cached URI after it failed mid-play.
     fn invalidate(&self, video_id: &VideoId) -> BoxFuture<'_, ()>;
 }
 
-// Same policy as ydl_opts in player.py.
 const YTDLP_FORMAT: &str = "bestaudio[acodec=opus]/bestaudio[protocol=https]/bestaudio[protocol=http]/bestaudio/best";
 const YTDLP_FORMAT_SORT: &str = "proto:https,acodec:opus";
 const YTDLP_PLAYER_CLIENTS: &str = "youtube:player_client=web_music,mweb,tv,web_safari,android_vr,android,ios";
@@ -59,16 +50,17 @@ impl YtDlpResolver {
 
     async fn run(&self, video_id: &VideoId, auth: Option<&HttpAuth>) -> Result<StreamInfo, ResolveError> {
         let url = format!("https://music.youtube.com/watch?v={video_id}");
+        self.run_url(&url, video_id, auth, true).await
+    }
+
+    pub(crate) async fn run_url(&self, url: &str, video_id: &VideoId, auth: Option<&HttpAuth>, youtube: bool) -> Result<StreamInfo, ResolveError> {
         let mut cmd = helper_command(&self.binary);
-        cmd.args(["-j", "--no-playlist", "--no-warnings", "-f", YTDLP_FORMAT, "-S", YTDLP_FORMAT_SORT])
-            .args(["--extractor-args", YTDLP_PLAYER_CLIENTS])
-            .args(["--js-runtimes", "node"]);
-        // YouTube serves the web_music client's formats only against a PO
-        // token bound to the video. Uploaded songs come from no other client,
-        // so without this they look unavailable, and ordinary songs lose their
-        // seekable Opus formats.
-        if let Some(token) = self.tokens.for_video(video_id.as_str()).await {
-            cmd.arg("--extractor-args").arg(crate::net::potoken::extractor_arg(&token));
+        cmd.args(["-j", "--no-playlist", "--no-warnings", "-f", YTDLP_FORMAT, "-S", YTDLP_FORMAT_SORT]);
+        if youtube {
+            cmd.args(["--extractor-args", YTDLP_PLAYER_CLIENTS]).args(["--js-runtimes", "node"]);
+            if let Some(token) = self.tokens.for_video(video_id.as_str()).await {
+                cmd.arg("--extractor-args").arg(crate::net::potoken::extractor_arg(&token));
+            }
         }
         let cookie_file = match auth {
             Some(auth) => {
@@ -139,7 +131,6 @@ impl StreamResolver for YtDlpResolver {
     }
 }
 
-/// Serves fixed URIs for `demo:` ids and delegates everything else.
 pub struct DemoResolver {
     inner: Arc<dyn StreamResolver>,
     uris: HashMap<String, String>,
@@ -165,7 +156,6 @@ impl StreamResolver for DemoResolver {
     }
 }
 
-/// Disk cache of resolved URIs. Layout matches player/cache.py: `<id>.json` with url + timestamp.
 pub struct StreamCache {
     dir: PathBuf,
     puts: std::sync::atomic::AtomicUsize,
@@ -199,7 +189,6 @@ impl StreamCache {
             let _ = tokio::fs::remove_file(&path).await;
             return None;
         }
-        // Touch for LRU eviction.
         let _ = tokio::task::spawn_blocking(move || std::fs::File::open(&path).and_then(|f| f.set_modified(SystemTime::now()))).await;
         Some(entry.url)
     }
@@ -211,7 +200,6 @@ impl StreamCache {
                 tracing::warn!(%err, %video_id, "stream cache write failed");
             }
         }
-        // A scan of 500 files per resolved track is waste. Every so often holds the cap.
         if self.puts.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % Self::EVICT_EVERY == 0 {
             let dir = self.dir.clone();
             let _ = tokio::task::spawn_blocking(move || evict_old(&dir, Self::MAX_ENTRIES)).await;
@@ -244,7 +232,6 @@ fn now_secs() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
 }
 
-/// Netscape cookie jar for yt-dlp, created 0600 and removed after the run.
 pub async fn write_netscape_cookies(dir: &Path, cookie_header: &str) -> std::io::Result<PathBuf> {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     let path = dir.join(format!("ytdlp-cookies-{}-{nanos}.txt", std::process::id()));
@@ -272,12 +259,10 @@ pub async fn write_netscape_cookies(dir: &Path, cookie_header: &str) -> std::io:
     Ok(path)
 }
 
-/// A `Command` for a helper program (yt-dlp, node, ffmpeg).
 pub fn helper_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     Command::new(program)
 }
 
-/// PATH lookup plus the install spots the Python app checked.
 pub fn find_executable(name: &str) -> Option<PathBuf> {
     let name = &format!("{name}{}", std::env::consts::EXE_SUFFIX);
     let mut candidates: Vec<PathBuf> = Vec::new();

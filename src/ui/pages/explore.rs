@@ -1,6 +1,3 @@
-//! Port of ui/pages/search.py: the Explore feed (mood and genre pills, new
-//! releases, videos, trending and the charts) and the search results view
-//! with its toggle tabs.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -11,49 +8,48 @@ use gtk::glib;
 
 use crate::model::{ItemKind, MediaItem};
 use crate::net::explore::{self, Category, ChartArtist, Charts, ExploreData, Trend};
+use crate::net::provider::{self, Provider};
 use crate::net::search::{SearchResults, search_all};
 use crate::ui::context::{NavRequest, UiContext};
 use crate::ui::cover::CoverImage;
 use crate::ui::pages::{activate_item, attach_item_menu, clear_children, loading_box};
+use crate::ui::provider_bar::ProviderBar;
 use crate::ui::toast;
 use crate::ui::widgets::media_card::{CardOptions, MediaCard};
 use crate::ui::widgets::scroll_box::HorizontalScrollBox;
 use crate::ui::widgets::song_list::{SONG_THUMB_SIZE, search_subtitle, song_row_with_subtitle};
 use crate::ui::widgets::song_row::SongRow;
 
-/// How many pills a category row shows before it offers View All.
 const PILL_LIMIT: usize = 20;
-/// Gap between chart cards, which search.py sets on the strip itself.
 const CHART_STRIP_SPACING: i32 = 12;
-/// Gap between sections, tightened for the phone layout by set_compact_mode.
 const SECTION_SPACING: i32 = 24;
 const SECTION_SPACING_COMPACT: i32 = 16;
-/// Section caps, straight from update_explore_ui.
 const NEW_RELEASE_LIMIT: usize = 10;
 const VIDEO_LIMIT: usize = 5;
 const TRENDING_LIMIT: usize = 5;
 const CHART_ARTIST_LIMIT: usize = 20;
 
 pub struct ExplorePage {
+    root: gtk::Box,
     stack: gtk::Stack,
     explore_box: gtk::Box,
     results_stack: gtk::Stack,
     toggle_container: gtk::Box,
     ctx: Rc<UiContext>,
+    provider_bar: Rc<ProviderBar>,
+    landing: RefCell<String>,
     cards: RefCell<Vec<Rc<MediaCard>>>,
     scrollers: RefCell<Vec<Rc<HorizontalScrollBox>>>,
     toggle_group: RefCell<Option<adw::ToggleGroup>>,
     song_rows: RefCell<Vec<Rc<SongRow>>>,
     explore_rows: RefCell<Vec<Rc<SongRow>>>,
     last_results: RefCell<Vec<MediaItem>>,
+    results_provider: RefCell<String>,
     current_query: RefCell<Option<String>>,
     inflight: RefCell<Option<tokio::task::AbortHandle>>,
     explore_inflight: RefCell<Option<tokio::task::AbortHandle>>,
-    /// ISO country code the charts are drawn for, shared with the Python app's prefs.
     charts_country: RefCell<String>,
-    /// The feed as it was last drawn, so a pill can be followed without refetching.
     data: RefCell<Option<ExploreData>>,
-    /// The chart country menu and the codes behind its rows.
     country_menu: RefCell<Option<(gtk::DropDown, Vec<String>)>>,
     explore_loaded: Cell<bool>,
     explore_loading: Cell<bool>,
@@ -64,7 +60,6 @@ impl ExplorePage {
     pub fn new(ctx: Rc<UiContext>) -> Rc<Self> {
         let stack = gtk::Stack::builder().vexpand(true).build();
 
-        // Results: tab strip plus a stack of result pages.
         let results_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         let toggle_container = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).halign(gtk::Align::Center).margin_start(12).margin_end(12).build();
         let toggle_viewport = gtk::Viewport::builder().hscroll_policy(gtk::ScrollablePolicy::Natural).child(&toggle_container).build();
@@ -87,11 +82,32 @@ impl ExplorePage {
         stack.set_visible_child_name("explore");
 
         let country = ctx.paths.read_prefs().get("charts_country").and_then(|v| v.as_str()).unwrap_or("ZZ").to_owned();
+        let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        let slot: Rc<RefCell<Option<std::rc::Weak<ExplorePage>>>> = Rc::new(RefCell::new(None));
+        let provider_bar = ProviderBar::new(ctx.paths.clone(), {
+            let slot = slot.clone();
+            move || {
+                let Some(page) = slot.borrow().as_ref().and_then(|w| w.upgrade()) else { return };
+                let query = page.current_query.borrow().clone();
+                match query {
+                    Some(q) => {
+                        page.current_query.replace(None);
+                        page.show_results(&q);
+                    }
+                    None => page.load_explore_data(true),
+                }
+            }
+        });
+        root.append(provider_bar.widget());
+        root.append(&stack);
         let page = Rc::new(Self {
+            root,
             stack,
             explore_box,
             results_stack,
             toggle_container,
+            provider_bar,
+            landing: RefCell::new(provider::YOUTUBE.to_owned()),
             ctx,
             cards: RefCell::new(Vec::new()),
             scrollers: RefCell::new(Vec::new()),
@@ -99,6 +115,7 @@ impl ExplorePage {
             song_rows: RefCell::new(Vec::new()),
             explore_rows: RefCell::new(Vec::new()),
             last_results: RefCell::new(Vec::new()),
+            results_provider: RefCell::new(provider::YOUTUBE.to_owned()),
             current_query: RefCell::new(None),
             inflight: RefCell::new(None),
             explore_inflight: RefCell::new(None),
@@ -110,13 +127,12 @@ impl ExplorePage {
             explore_retry: Cell::new(0),
         });
         let weak = Rc::downgrade(&page);
+        slot.replace(Some(weak.clone()));
         glib::idle_add_local_once(move || {
             if let Some(p) = weak.upgrade() {
                 p.load_explore_data(false);
             }
         });
-        // Port of _check_and_reset_if_empty: coming back to the tab with no
-        // search running shows the feed, and loads it if it never arrived.
         let weak = Rc::downgrade(&page);
         page.stack.connect_map(move |_| {
             let Some(p) = weak.upgrade() else { return };
@@ -129,8 +145,25 @@ impl ExplorePage {
         page
     }
 
-    pub fn widget(&self) -> &gtk::Stack {
-        &self.stack
+    pub fn widget(&self) -> &gtk::Box {
+        &self.root
+    }
+
+    pub fn sync_provider(self: &Rc<Self>) {
+        self.provider_bar.refresh();
+        let want = self.provider_bar.active().id().to_owned();
+        let query = self.current_query.borrow().clone();
+        if let Some(q) = query {
+            if *self.results_provider.borrow() != want {
+                self.current_query.replace(None);
+                self.show_results(&q);
+            }
+            return;
+        }
+        if self.explore_loaded.get() && *self.landing.borrow() == want {
+            return;
+        }
+        self.load_explore_data(true);
     }
 
     pub fn set_compact(&self, compact: bool) {
@@ -139,7 +172,6 @@ impl ExplorePage {
         } else {
             self.stack.remove_css_class("compact");
         }
-        // Sections sit closer together on a phone, feed and result tabs alike.
         let spacing = if compact { SECTION_SPACING_COMPACT } else { SECTION_SPACING };
         self.explore_box.set_spacing(spacing);
         let mut child = self.results_stack.first_child();
@@ -154,7 +186,6 @@ impl ExplorePage {
         }
     }
 
-    /// Back to the feed, after the search bar closes. Cancels a running search.
     pub fn show_explore(&self) {
         self.current_query.replace(None);
         if let Some(handle) = self.inflight.borrow_mut().take() {
@@ -163,11 +194,7 @@ impl ExplorePage {
         self.stack.set_visible_child_name("explore");
     }
 
-    // -- explore feed -----------------------------------------------------
 
-    /// Port of load_explore_data: one fetch at a time, skipped once the feed
-    /// is there unless forced. A forced load cancels the one in flight, so a
-    /// country change is never swallowed by the fetch it replaces.
     pub fn load_explore_data(self: &Rc<Self>, force: bool) {
         if (self.explore_loading.get() || self.explore_loaded.get()) && !force {
             return;
@@ -184,6 +211,36 @@ impl ExplorePage {
             self.update_explore_ui(None);
             return;
         }
+        let want = self.provider_bar.active();
+        if want == Provider::SoundCloud {
+            self.clear_explore();
+            self.explore_box.append(&loading_box("Loading…"));
+            let sc = self.ctx.net.soundcloud().clone();
+            let handle = self.ctx.net.spawn(async move { sc.charts().await });
+            self.explore_inflight.replace(Some(handle.abort_handle()));
+            let weak = Rc::downgrade(self);
+            glib::spawn_future_local(async move {
+                let outcome = handle.await;
+                let Some(page) = weak.upgrade() else { return };
+                if page.provider_bar.active() != want {
+                    return;
+                }
+                let Ok(result) = outcome else { return };
+                page.explore_inflight.borrow_mut().take();
+                match result {
+                    Ok(sections) if !sections.is_empty() => {
+                        page.landing.replace(want.id().to_owned());
+                        page.render_chart_sections(sections);
+                    }
+                    Ok(_) => page.update_explore_ui(None),
+                    Err(err) => {
+                        tracing::warn!(%err, "soundcloud charts failed");
+                        page.update_explore_ui(None);
+                    }
+                }
+            });
+            return;
+        }
         if self.explore_box.first_child().is_none() {
             self.explore_box.append(&loading_box("Loading…"));
         }
@@ -196,11 +253,13 @@ impl ExplorePage {
         glib::spawn_future_local(async move {
             let outcome = handle.await;
             let Some(page) = weak.upgrade() else { return };
-            // An aborted fetch was replaced; the load that replaced it owns the state.
             let Ok(result) = outcome else { return };
             page.explore_inflight.borrow_mut().take();
             match result {
-                Ok(data) => page.update_explore_ui(Some(data)),
+                Ok(data) => {
+                    page.landing.replace(want.id().to_owned());
+                    page.update_explore_ui(Some(data));
+                }
                 Err(err) => {
                     tracing::warn!(%err, "explore fetch failed");
                     page.update_explore_ui(None);
@@ -209,8 +268,6 @@ impl ExplorePage {
         });
     }
 
-    /// Port of update_explore_ui. No data means offline, or a failure that is
-    /// retried three times with growing delays before the Retry button.
     fn update_explore_ui(self: &Rc<Self>, data: Option<ExploreData>) {
         self.explore_loading.set(false);
         let Some(data) = data else {
@@ -266,10 +323,6 @@ impl ExplorePage {
     }
 
     fn populate_explore(self: &Rc<Self>, data: &ExploreData) {
-        // The separated grids when the categories call answered, the feed's
-        // own single row when it did not. "For you" is picked for the account
-        // and leads, the way the Moods & Genres page orders them.
-        // Podcasts lead the genre pills, since YouTube keeps them behind a Home chip rather than a genre.
         let with_podcasts = |pills: &[Category]| {
             let podcasts = Category { title: "Podcasts".to_owned(), params: crate::net::explore::PODCASTS_KEY.to_owned() };
             std::iter::once(podcasts).chain(pills.iter().cloned()).collect::<Vec<_>>()
@@ -291,8 +344,6 @@ impl ExplorePage {
         self.set_compact(self.ctx.compact.get());
     }
 
-    /// A scrolling row of pills. Past twenty it ends with View All, which
-    /// opens the full list on its own page.
     fn add_pill_section(self: &Rc<Self>, title: &str, categories: &[Category]) {
         if categories.is_empty() {
             return;
@@ -300,8 +351,6 @@ impl ExplorePage {
         let section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
         section.append(&heading(title));
         let scroll_box = HorizontalScrollBox::new();
-        // Outside the scrolled window: a margin within it is empty space for
-        // the overlay scrollbar to draw a line in.
         scroll_box.widget().set_margin_bottom(12);
         let strip = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).build();
         for category in categories.iter().take(PILL_LIMIT) {
@@ -324,7 +373,6 @@ impl ExplorePage {
         self.scrollers.borrow_mut().push(scroll_box);
     }
 
-    /// One boxed list of rows, what add_section built for every feed shelf.
     fn add_row_section(self: &Rc<Self>, title: &str, items: &[MediaItem]) {
         if items.is_empty() {
             return;
@@ -332,8 +380,6 @@ impl ExplorePage {
         self.add_song_list(&self.explore_box, title, items, &self.explore_rows);
     }
 
-    /// Demo hook: pick a chart country through the menu itself, so the
-    /// reload runs the same way a click on it does.
     pub fn pick_chart_country_for_demo(&self, code: &str) -> bool {
         let menu = self.country_menu.borrow();
         let Some((dropdown, codes)) = menu.as_ref() else { return false };
@@ -342,7 +388,6 @@ impl ExplorePage {
         true
     }
 
-    /// Demo hook: follow the first genre pill, the way a click on it does.
     pub fn open_first_category_for_demo(&self) -> bool {
         let data = self.data.borrow();
         let Some(category) = data.as_ref().and_then(|d| d.genres.first().or_else(|| d.moods.first())) else { return false };
@@ -350,7 +395,6 @@ impl ExplorePage {
         true
     }
 
-    /// Demo hook: the View All at the end of the genre row.
     pub fn open_all_moods_for_demo(&self) -> bool {
         let data = self.data.borrow();
         let Some(items) = data.as_ref().map(|d| if d.genres.is_empty() { d.moods.clone() } else { d.genres.clone() }) else { return false };
@@ -361,10 +405,7 @@ impl ExplorePage {
         true
     }
 
-    // -- charts -----------------------------------------------------------
 
-    /// Port of _add_charts_sections: the heading with its country menu, the
-    /// chart playlists as cards, then the ranked artists.
     fn add_charts(self: &Rc<Self>, charts: &Charts) {
         let header = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
         header.append(&gtk::Label::builder().label("Charts").css_classes(["title-3"]).halign(gtk::Align::Start).hexpand(true).build());
@@ -373,8 +414,6 @@ impl ExplorePage {
         }
         self.explore_box.append(&header);
 
-        // A premium account gets daily and weekly rows where everyone else
-        // gets one trending row.
         self.add_chart_playlists("Trending", &charts.videos);
         self.add_chart_playlists("Daily", &charts.daily);
         self.add_chart_playlists("Weekly", &charts.weekly);
@@ -382,8 +421,6 @@ impl ExplorePage {
         self.add_chart_artists("Top Artists", &charts.artists);
     }
 
-    /// The country menu, built only once YouTube has told us the choices.
-    /// Selecting one saves the code both apps read and reloads the feed.
     fn country_dropdown(self: &Rc<Self>, codes: &[String]) -> Option<gtk::DropDown> {
         if codes.is_empty() {
             return None;
@@ -392,7 +429,6 @@ impl ExplorePage {
         let names: Vec<&str> = options.iter().map(|(_, name)| name.as_str()).collect();
         let dropdown = gtk::DropDown::from_strings(&names);
         dropdown.add_css_class("flat");
-        // Select before connecting, so restoring the saved country is not a change.
         if let Some(index) = options.iter().position(|(code, _)| *code == *self.charts_country.borrow()) {
             dropdown.set_selected(index as u32);
         }
@@ -415,7 +451,6 @@ impl ExplorePage {
         Some(dropdown)
     }
 
-    /// Port of _add_chart_playlists: a card strip of chart playlists.
     fn add_chart_playlists(self: &Rc<Self>, title: &str, items: &[MediaItem]) {
         if items.is_empty() {
             return;
@@ -424,7 +459,6 @@ impl ExplorePage {
         section.append(&heading(title));
         let scroll_box = HorizontalScrollBox::new();
         scroll_box.widget().set_margin_bottom(8);
-        // A chart strip keeps its own spacing at every width, like the Python page.
         let strip = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(CHART_STRIP_SPACING).build();
         for item in items {
             let card = MediaCard::new(&self.ctx, item.clone(), CardOptions { title_lines: 2, ..CardOptions::default() });
@@ -440,8 +474,6 @@ impl ExplorePage {
         self.scrollers.borrow_mut().push(scroll_box);
     }
 
-    /// Port of _add_chart_artists: rank, trend arrow, picture, name and
-    /// subscriber count, opening the artist page.
     fn add_chart_artists(self: &Rc<Self>, title: &str, artists: &[ChartArtist]) {
         if artists.is_empty() {
             return;
@@ -492,11 +524,7 @@ impl ExplorePage {
         self.explore_box.append(&section);
     }
 
-    // -- search results ---------------------------------------------------
 
-    /// Search YouTube Music through the client on the tokio runtime and lay
-    /// the results out in tabs like update_results. A newer query cancels the
-    /// older request, and a stale reply is dropped when it lands.
     pub fn show_results(self: &Rc<Self>, query: &str) {
         let query = query.trim().to_owned();
         if query.is_empty() {
@@ -510,7 +538,6 @@ impl ExplorePage {
         if let Some(handle) = self.inflight.borrow_mut().take() {
             handle.abort();
         }
-        // Port of _search_local: without a network, search what is on disk.
         if !self.ctx.online.is_online() {
             let items = local_results(&self.ctx.downloads.all(), &query);
             self.render_results(&query, SearchResults { top_result: None, items });
@@ -518,6 +545,32 @@ impl ExplorePage {
         }
         self.stack.set_visible_child_name("loading");
 
+        let want = self.provider_bar.active();
+        if want == Provider::SoundCloud {
+            let sc = self.ctx.net.soundcloud().clone();
+            let lookup = query.clone();
+            let handle = self.ctx.net.spawn(async move { sc.search(&lookup).await });
+            self.inflight.replace(Some(handle.abort_handle()));
+            let weak = Rc::downgrade(self);
+            glib::spawn_future_local(async move {
+                let outcome = handle.await;
+                let Some(page) = weak.upgrade() else { return };
+                if page.current_query.borrow().as_deref() != Some(query.as_str()) || page.provider_bar.active() != want {
+                    return;
+                }
+                page.inflight.borrow_mut().take();
+                match outcome {
+                    Ok(Ok(results)) => page.render_results(&query, results),
+                    Ok(Err(err)) => {
+                        tracing::warn!(%err, %query, "soundcloud search failed");
+                        toast(&page.stack, &format!("Search failed: {err}"));
+                        page.render_results(&query, SearchResults::default());
+                    }
+                    Err(_) => {}
+                }
+            });
+            return;
+        }
         let client = self.ctx.net.client().api();
         let handle = self.ctx.net.spawn(search_all(client, query.clone()));
         self.inflight.replace(Some(handle.abort_handle()));
@@ -525,7 +578,7 @@ impl ExplorePage {
         glib::spawn_future_local(async move {
             let outcome = handle.await;
             let Some(page) = weak.upgrade() else { return };
-            if page.current_query.borrow().as_deref() != Some(query.as_str()) {
+            if page.current_query.borrow().as_deref() != Some(query.as_str()) || page.provider_bar.active() != want {
                 return;
             }
             page.inflight.borrow_mut().take();
@@ -543,6 +596,7 @@ impl ExplorePage {
 
     fn render_results(self: &Rc<Self>, query: &str, results: SearchResults) {
         self.stack.set_visible_child_name("results");
+        self.results_provider.replace(self.provider_bar.active().id().to_owned());
         clear_children(&self.results_stack);
         clear_children(&self.toggle_container);
         self.toggle_group.replace(None);
@@ -582,7 +636,6 @@ impl ExplorePage {
         let videos: Vec<MediaItem> = all.iter().filter(|r| r.kind == ItemKind::Video).cloned().collect();
 
         let main = make_tab("Main", "main", "Main");
-        // Only a card YouTube sent as the top result earns the heading.
         let rest = if has_top {
             self.add_result_section(&main, "Top Result", &all[..1]);
             &all[1..]
@@ -609,7 +662,6 @@ impl ExplorePage {
             if !albums.is_empty() {
                 self.add_result_section(&tab, "Albums", &albums);
             }
-            // Episodes sit apart from music videos, under the heading Python gave them.
             let (episodes, videos): (Vec<MediaItem>, Vec<MediaItem>) = videos.into_iter().partition(|v| v.item_type.as_deref() == Some("Episode"));
             if !videos.is_empty() {
                 self.add_result_section(&tab, "Videos", &videos);
@@ -632,7 +684,6 @@ impl ExplorePage {
         self.toggle_group.replace(Some(group));
     }
 
-    /// Same path a click on the first song row takes. Used by the demo.
     pub fn activate_first_playable(&self) -> bool {
         let results = self.last_results.borrow();
         let pool: Vec<MediaItem> = results.iter().filter(|i| i.kind.is_playable()).cloned().collect();
@@ -646,14 +697,20 @@ impl ExplorePage {
         }
     }
 
+    fn render_chart_sections(self: &Rc<Self>, sections: Vec<crate::net::home::HomeSection>) {
+        self.explore_loading.set(false);
+        self.explore_loaded.set(true);
+        self.explore_retry.set(0);
+        self.clear_explore();
+        for section in &sections {
+            self.add_song_list(&self.explore_box, &section.title, &section.items, &self.explore_rows);
+        }
+    }
+
     fn add_result_section(self: &Rc<Self>, parent: &gtk::Box, title: &str, items: &[MediaItem]) {
         self.add_song_list(parent, title, items, &self.song_rows);
     }
 
-    /// A boxed list: SongRow for songs and videos, the simple row for
-    /// collections. Activating a song queues every playable row of the
-    /// section, like on_row_activated. The feed and the result tabs keep
-    /// their rows in separate sinks, so reloading one leaves the other alone.
     fn add_song_list(self: &Rc<Self>, parent: &gtk::Box, title: &str, items: &[MediaItem], rows: &RefCell<Vec<Rc<SongRow>>>) {
         let section = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
         section.append(&heading(title));
@@ -689,13 +746,10 @@ fn heading(title: &str) -> gtk::Label {
     gtk::Label::builder().label(title).css_classes(["heading"]).halign(gtk::Align::Start).build()
 }
 
-/// The first `limit` items of a shelf, what update_explore_ui sliced off.
 fn capped(items: &[MediaItem], limit: usize) -> &[MediaItem] {
     &items[..items.len().min(limit)]
 }
 
-/// The centred icon, title and caption the Python explore page builds inline
-/// for its offline and retry states.
 fn status_box(icon: &str, title: &str, subtitle: Option<&str>) -> gtk::Box {
     let status = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).valign(gtk::Align::Center).halign(gtk::Align::Center).vexpand(true).build();
     status.append(&gtk::Image::builder().icon_name(icon).pixel_size(48).css_classes(["dim-label"]).build());
@@ -706,7 +760,6 @@ fn status_box(icon: &str, title: &str, subtitle: Option<&str>) -> gtk::Box {
     status
 }
 
-/// Downloads whose title, artist or album contains the query, as song results.
 fn local_results(downloads: &[crate::downloads::store::Entry], query: &str) -> Vec<MediaItem> {
     let needle = query.to_lowercase();
     downloads

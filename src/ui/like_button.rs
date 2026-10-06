@@ -1,5 +1,3 @@
-//! Port of ui.utils.LikeButton: click toggles like, hold or right-click
-//! opens a small popover with the dislike action.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -96,10 +94,6 @@ impl LikeButton {
         &self.button
     }
 
-    /// Point the button at a track. Hidden when there is no track.
-    /// `status` is what the row's own source says, or None when it does not
-    /// know: a card off a carousel carries no rating, and seeding the session
-    /// cache with its guess would tell every other row the song is unrated.
     pub fn set_data(&self, video_id: Option<VideoId>, status: Option<LikeStatus>) {
         let Some(video_id) = video_id.filter(|v| !v.0.is_empty()) else {
             self.video_id.replace(None);
@@ -109,8 +103,7 @@ impl LikeButton {
             return;
         };
         let client = self.player.net().client();
-        // Without a session the local library is the only source of likes.
-        if !client.auth_state().has_session() {
+        if video_id.is_soundcloud() || !client.auth_state().has_session() {
             let liked = self.player.local().is_liked(video_id.as_str());
             self.video_id.replace(Some(video_id));
             self.status.set(if liked { LikeStatus::Like } else { LikeStatus::Indifferent });
@@ -118,8 +111,6 @@ impl LikeButton {
             self.button.set_visible(true);
             return;
         }
-        // What this session has seen wins: it is the only thing that knows
-        // about a like the listener has just made.
         let resolved = match (client.known_like_status(video_id.as_str()), status) {
             (Some(known), _) => known,
             (None, Some(status)) => {
@@ -181,7 +172,6 @@ impl LikeButton {
 
 impl Drop for LikeButton {
     fn drop(&mut self) {
-        // The popover is a child GtkButton's dispose does not unparent.
         self.popover.unparent();
     }
 }

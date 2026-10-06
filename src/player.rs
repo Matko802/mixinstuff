@@ -1,9 +1,3 @@
-//! Playback controller. Owns the queue and drives the audio thread.
-//!
-//! This is the Rust home of what Player (player.py) did on the GTK thread:
-//! queue mutation, repeat and shuffle, the load generation counter, and the
-//! reaction to audio events. It never blocks. Stream resolution runs on the
-//! tokio runtime and comes back through `glib::spawn_future_local`.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -25,19 +19,13 @@ use gtk::glib;
 
 const STREAM_RETRY_MAX: u8 = 2;
 
-/// `history_mode`, the pref both apps read: when a play is recorded.
 const HISTORY_IMMEDIATE: &str = "immediate";
 const HISTORY_AFTER_30S: &str = "after_30s";
 const HISTORY_NEVER: &str = "never";
-/// The video type of a song, as opposed to a music video.
 const AUDIO_VIDEO_TYPE: &str = "MUSIC_VIDEO_TYPE_ATV";
-/// How long "after_30s" waits. YT Music counts a play at about this point.
 const HISTORY_THRESHOLD_SECS: f64 = 30.0;
-/// How long after a volume change made here the sink's own reports are taken
-/// as echoes of it. Windows' sink reports late and sometimes the value before.
 const VOLUME_ECHO_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// The track handed to playbin ahead of time, so the switch has no gap.
 #[derive(Clone)]
 struct Armed {
     index: usize,
@@ -45,8 +33,6 @@ struct Armed {
     video_id: VideoId,
 }
 
-/// Port of _summarize_yt_dlp_error: the part of a resolver or pipeline error
-/// a person would put in a toast. The first sentence after "ERROR:", capped.
 fn summarize_error(message: &str) -> String {
     let message = message.split_once("ERROR:").map_or(message, |(_, rest)| rest).trim();
     let sentence = [". ", "; "].iter().find_map(|sep| message.split_once(sep)).map_or(message, |(first, _)| first);
@@ -54,7 +40,6 @@ fn summarize_error(message: &str) -> String {
     if trimmed.is_empty() { "Could not load this track".to_owned() } else { trimmed.chars().take(140).collect() }
 }
 
-/// A play as the scrobbler sees it: a fresh one, or the same one under better metadata.
 #[derive(Clone, Debug)]
 pub enum PlayEvent {
     Started(Track),
@@ -70,47 +55,25 @@ pub struct Player {
     audio: AudioHandle,
     audio_events: RefCell<Option<AudioEvents>>,
     net: NetHandle,
-    /// What is already on disk, checked before a stream is resolved.
     downloads: Arc<Downloads>,
-    /// Likes without an account land here instead of on the network.
     local: Arc<LocalLibrary>,
-    /// The stream behind what is playing, for the Stream Info panel.
     loaded: RefCell<Option<StreamInfo>>,
-    /// Allocator for load generations. Monotonic, never reused.
     counter: Cell<u64>,
-    /// Generation of the stream the pipeline should be playing right now.
     current: Cell<u64>,
-    /// When the app last set the volume, so the sink's echo of it is ignored.
     volume_set_at: Cell<Option<std::time::Instant>>,
-    /// The track pre-armed for a gapless switch, if any.
     armed_next: RefCell<Option<Armed>>,
     inflight: RefCell<Option<AbortHandle>>,
     retries: Cell<u8>,
-    /// Spectrum frames keyed by stream time, what _viz_queue held: released
-    /// once the sink has reached them, so the bars follow the audible sound.
     viz_queue: RefCell<std::collections::VecDeque<(i64, Vec<f32>)>>,
-    /// Load generation the queued frames belong to. A gapless switch restarts
-    /// stream time, so frames from the old stream would sit in the queue's
-    /// front with times the new play-head never reaches, and the drain would
-    /// hand back nothing until the length cap evicted them.
     viz_generation: Cell<u64>,
-    /// The last position tick and its arrival time, interpolated between ticks.
     position_mark: Cell<Option<(std::time::Instant, f64)>>,
-    /// A radio extension is in flight, like _is_fetching_infinite.
     infinite_fetching: Cell<bool>,
-    /// Counter behind the queue stamps play_then_radio hands out.
     stamp: Cell<u64>,
-    /// When a play is written to the account's history.
     history_mode: RefCell<String>,
-    /// The video this session has already recorded, so it records once.
     history_recorded: RefCell<Option<String>>,
-    /// The video already written to the play log on this device.
     local_logged: RefCell<Option<String>>,
-    /// Videos already looked up for an audio twin, so the lookup is paid once.
     swap_checked: RefCell<std::collections::HashSet<String>>,
-    /// Told when a play starts or its metadata is corrected. See `on_play`.
     play_listeners: RefCell<Vec<PlayListener>>,
-    /// Set while the audio-version swap writes its metadata, so the source id survives it.
     swapping: Cell<bool>,
 }
 
@@ -146,8 +109,6 @@ impl Player {
         })
     }
 
-    /// Follow plays for the app's lifetime. A metadata re-emit mid-load never
-    /// arrives as Started, so a listening clock is not restarted by one.
     pub fn on_play(&self, listener: impl Fn(&PlayEvent) + 'static) {
         self.play_listeners.borrow_mut().push(Box::new(listener));
     }
@@ -158,9 +119,6 @@ impl Player {
         }
     }
 
-    /// Port of _precache_next: resolve the three tracks either side of the
-    /// playing one, so Next, Previous and a short jump start from the stream
-    /// cache. One after another on the runtime, and only what is not on disk.
     fn precache_neighbours(&self) {
         const REACH: usize = 3;
         let (tracks, current) = {
@@ -189,11 +147,8 @@ impl Player {
         });
     }
 
-    /// A track queued from a search or a shelf often has no album, which
-    /// leaves Discord's art caption and the scrobble's album blank. The watch
-    /// panel knows it, so it is asked once per play, off the hot path.
     fn backfill_album(&self, track: &Track) {
-        if track.album.is_some() || track.video_id.0.is_empty() || track.is_upload() || track.video_id.0.starts_with("demo:") {
+        if track.album.is_some() || track.video_id.0.is_empty() || track.is_upload() || track.video_id.0.starts_with("demo:") || track.video_id.is_soundcloud() {
             return;
         }
         let api = self.net.client().api();
@@ -204,14 +159,11 @@ impl Player {
         glib::spawn_future_local(async move {
             let album = handle.await.ok().and_then(Result::ok).and_then(|w| w.tracks.into_iter().map(|t| t.track).find(|t| t.video_id == video_id)).and_then(|t| t.album);
             if let (Some(player), Some(album)) = (weak.upgrade(), album) {
-                // Only the album: the row's own title and artists stay as the listener saw them.
                 player.refresh_track_metadata(&Track { video_id, album: Some(album), ..Track::default() });
             }
         });
     }
 
-    /// Port of _apply_metadata: fresh title, artists, album and art for a
-    /// track, written over every copy in the queue and over what is playing.
     pub fn refresh_track_metadata(&self, fresh: &Track) {
         if !self.queue.borrow_mut().refresh_metadata(fresh) {
             return;
@@ -224,7 +176,6 @@ impl Player {
         }
     }
 
-    /// Change when plays are written to the account's history, live.
     pub fn set_history_mode(&self, mode: &str) {
         self.history_mode.replace(mode.to_owned());
     }
@@ -249,16 +200,10 @@ impl Player {
         self.queue.borrow().repeat()
     }
 
-    /// Whether Next and Previous have anywhere to go, for the transport bar
-    /// and the system controls. The queue decides; nobody re-derives it.
     pub fn bounds(&self) -> Bounds {
         self.queue.borrow().bounds(self.state.position())
     }
 
-    /// Port of pull_visualizer_bands: the spectrum frame the sink is playing
-    /// right now, or None while paused or stopped so the bars fall. The most
-    /// recent entry whose stream time the play-head has reached wins;
-    /// entries more than a second behind are dropped.
     pub fn pull_visualizer_bands(&self) -> Option<Vec<f32>> {
         if self.state.status() != PlaybackStatus::Playing {
             return None;
@@ -296,10 +241,28 @@ impl Player {
         &self.local
     }
 
-    /// Rate a track. Applies locally at once, reverts if the server rejects it.
-    /// Without a session the like lives in the local library instead.
     pub fn set_like_status(&self, video_id: VideoId, status: LikeStatus) {
         let client = self.net.client().clone();
+        if video_id.is_soundcloud() {
+            let known = self.queue.borrow().tracks().iter().find(|t| t.video_id == video_id).cloned();
+            let track = self.local.track_or_stub(&video_id, known);
+            self.local.set_liked(&track, status == LikeStatus::Like);
+            self.apply_like_locally(&video_id, status);
+            self.state.emit_queue_changed();
+            let sc = self.net.soundcloud().clone();
+            let id = video_id.0.clone();
+            self.net.spawn(async move {
+                let Some(crate::net::soundcloud::ScId::Track(n)) = crate::net::soundcloud::parse_sc_id(&id) else { return };
+                let synced = match status {
+                    LikeStatus::Like => sc.like(n).await,
+                    _ => sc.unlike(n).await,
+                };
+                if let Err(err) = synced {
+                    tracing::debug!(%err, "soundcloud like not synced");
+                }
+            });
+            return;
+        }
         if !client.auth_state().has_session() {
             let known = self.queue.borrow().tracks().iter().find(|t| t.video_id == video_id).cloned();
             let track = self.local.track_or_stub(&video_id, known);
@@ -345,7 +308,6 @@ impl Player {
         }
     }
 
-    /// Attach the event pumps to the GTK main context. Call once, from startup.
     pub fn start(self: &Rc<Self>) {
         let Some(events) = self.audio_events.borrow_mut().take() else {
             return;
@@ -382,7 +344,6 @@ impl Player {
             }
         });
 
-        // Deferred validation of the saved session, same as check_auth() in window.py.
         let client = self.net.client().clone();
         self.net.spawn(async move {
             if let Err(err) = client.validate().await {
@@ -397,10 +358,7 @@ impl Player {
         self.audio.shutdown();
     }
 
-    // -- queue API (public surface for the UI) ----------------------------
 
-    /// Load a queue and select `start_index` without starting playback.
-    /// Used for the demo queue and, later, for restoring the last session.
     pub fn stage_tracks(&self, tracks: Vec<Track>, start_index: usize) {
         self.abort_inflight();
         self.disarm_gapless();
@@ -460,7 +418,6 @@ impl Player {
 
     pub fn clear_queue(&self) {
         self.abort_inflight();
-        // A fresh generation makes any in-flight resolution stale.
         self.current.set(self.alloc_generation());
         self.queue.borrow_mut().clear();
         self.audio.send(AudioCommand::Stop);
@@ -491,7 +448,6 @@ impl Player {
         self.sync_queue_model();
     }
 
-    /// Shuffle on or off, for callers that know which they want.
     pub fn set_shuffle(&self, on: bool) {
         if self.queue.borrow().shuffle() != on {
             self.toggle_shuffle();
@@ -501,11 +457,9 @@ impl Player {
     pub fn set_repeat(&self, mode: RepeatMode) {
         self.queue.borrow_mut().set_repeat(mode);
         self.state.set_repeat(mode);
-        // Repeat changes what follows the current track, so what is armed may be wrong.
         self.resync_gapless();
     }
 
-    /// Carry out what the queue decided.
     fn apply(&self, step: Step) {
         match step {
             Step::Load(_) => {
@@ -517,13 +471,11 @@ impl Player {
                 self.stop();
                 self.mark_current(None);
             }
-            // A deduped batch can leave a radio dry before the halfway trigger fires.
             Step::Extend => self.force_radio_extend(),
             Step::Stay => {}
         }
     }
 
-    // -- transport API ----------------------------------------------------
 
     pub fn play(&self) {
         if self.queue.borrow().current().is_none() {
@@ -554,7 +506,6 @@ impl Player {
     }
 
     pub fn seek(&self, seconds: f64) {
-        // Queued spectrum frames belong to the old position on either side of the seek.
         self.clear_visualizer_queue();
         self.audio.send(AudioCommand::Seek { seconds });
         let target = seconds.max(0.0);
@@ -562,8 +513,6 @@ impl Player {
         self.state.emit_seeked(target);
     }
 
-    /// The state takes the new level at once; the sink's report of it would
-    /// arrive late and, while dragging, behind the pointer.
     pub fn set_volume(&self, volume: f64) {
         let volume = volume.clamp(0.0, 1.0);
         self.volume_set_at.set(Some(std::time::Instant::now()));
@@ -577,7 +526,6 @@ impl Player {
         self.audio.send(AudioCommand::SetMute(muted));
     }
 
-    // -- loading ----------------------------------------------------------
 
     fn alloc_generation(&self) -> u64 {
         let g = self.counter.get() + 1;
@@ -597,11 +545,6 @@ impl Player {
         }
     }
 
-    /// Keep the armed track in step with the queue after an edit.
-    ///
-    /// Only an edit that changes what follows the current track makes the
-    /// armed URI wrong. Disarming on every edit meant a radio extension, which
-    /// appends to the queue, cancelled gapless for the rest of the track.
     fn resync_gapless(&self) {
         let armed = self.armed_next.borrow().as_ref().map(|a| a.video_id.clone());
         let wanted = {
@@ -617,9 +560,7 @@ impl Player {
         }
     }
 
-    /// Start playing the queue's current index under a new generation.
     fn load_current(&self) {
-        // A new stream restarts stream time; queued frames would mislead the drain.
         self.clear_visualizer_queue();
         let (index, track) = {
             let q = self.queue.borrow();
@@ -637,12 +578,6 @@ impl Player {
         let generation = self.alloc_generation();
         self.current.set(generation);
         self.retries.set(0);
-        // Resolution can take seconds for an uncached stream, and the pipeline
-        // would keep playing the old track throughout. Tear it down now, as
-        // Player.set_queue and play_queue_index did. The Stopped event this
-        // raises carries the old generation, so the Loading state set below
-        // survives it. Gapless never comes through here: the pipeline swaps
-        // to the armed URI on its own and reports StreamStarted.
         self.audio.send(AudioCommand::Stop);
 
         self.mark_current(Some(index));
@@ -658,9 +593,7 @@ impl Player {
         self.spawn_resolve(track, generation, false);
     }
 
-    /// Resolve `track` on the runtime; on success either load it or arm it for gapless.
     fn spawn_resolve(&self, track: Track, generation: u64, arm_only: bool) {
-        // A downloaded file needs no resolve and plays offline.
         if let Some(uri) = self.downloads.local_path(track.video_id.as_str()).and_then(|p| glib::filename_to_uri(&p, None).ok()) {
             tracing::debug!(video_id = %track.video_id, "playing the downloaded file");
             if !arm_only {
@@ -673,24 +606,16 @@ impl Player {
             }
             return;
         }
-        let auth = self.net.client().media_auth();
+        let auth = if track.video_id.is_soundcloud() { None } else { self.net.client().media_auth() };
         let resolver = self.net.resolver().clone();
         let video_id = track.video_id.clone();
         let resolve_auth = auth.clone();
-        // Port of the swap _fetch_and_play does before yt-dlp runs: a music
-        // video's audio twin is the cleaner album master, and its id is what
-        // the stream cache should be keyed on, so this has to happen first.
-        let swap = !arm_only && self.wants_audio_version(&track);
+        let swap = !arm_only && !track.video_id.is_soundcloud() && self.wants_audio_version(&track);
         let api = self.net.client().api();
         let handle = self.net.spawn(async move {
             if !swap {
                 return (None, resolver.resolve(video_id, resolve_auth).await);
             }
-            // The lookup is the slow half, over a second for some videos, so the
-            // video's own stream resolves alongside it. Most lookups find no twin
-            // and that stream is the one to play. When there is a twin the extra
-            // resolve cost nothing but a request, and the twin resolves in a
-            // fraction of a second through the player endpoint.
             let lookup = async {
                 match crate::net::playlists::find_audio_version(&api, video_id.as_str()).await {
                     Ok(twin) => twin,
@@ -734,14 +659,12 @@ impl Player {
                 return;
             }
             player.inflight.borrow_mut().take();
-            // Everything below reads the track that is actually going to play.
             let track = match twin {
                 Some(twin) => player.apply_audio_version(&track, twin),
                 None => track,
             };
             match result {
                 Ok(info) => {
-                    // The bars show LIVE from the stream itself, so a queue entry that did not know still gets it.
                     if !arm_only && crate::audio::is_live_uri(&info.uri) {
                         player.state.set_live(true);
                     }
@@ -773,9 +696,6 @@ impl Player {
         });
     }
 
-    /// What is playing and how, for the Stream Info panel in the expanded
-    /// player. The pipeline half is queried on the audio thread; `full` keeps
-    /// the whole signed URI, which is what the Copy button wants.
     pub async fn stream_debug(&self, full: bool) -> String {
         let mut lines = Vec::new();
         let track = self.current_track();
@@ -795,7 +715,6 @@ impl Player {
             if !format.is_empty() {
                 lines.push(format!("Format:     {format}"));
             }
-            // Signed urls run to several hundred characters, too wide for the panel.
             let uri = match full || info.uri.len() <= 96 {
                 true => info.uri.clone(),
                 false => format!("{}…", &info.uri[..96]),
@@ -816,12 +735,9 @@ impl Player {
         self.apply(step);
     }
 
-    /// Pre-resolve the following track and hand its URI to playbin for a gapless switch.
     fn arm_gapless(&self) {
         let next = {
             let q = self.queue.borrow();
-            // A live stream fires about-to-finish a few seconds in, at the end of each
-            // fragment, and playbin would take the armed track as its cue to switch.
             if q.current_track().is_some_and(|t| t.is_live) {
                 return;
             }
@@ -836,12 +752,10 @@ impl Player {
         self.spawn_resolve(track, generation, true);
     }
 
-    // -- event application ------------------------------------------------
 
     fn on_audio_event(&self, event: AudioEvent) {
         match event {
             AudioEvent::VolumeChanged { volume, muted } => {
-                // A change from outside (the system mixer, another app) still lands.
                 let echo = self.volume_set_at.get().is_some_and(|at| at.elapsed() < VOLUME_ECHO_WINDOW);
                 if !echo && (self.state.volume() - volume).abs() > 1e-3 {
                     self.state.set_volume(volume);
@@ -913,7 +827,6 @@ impl Player {
                 let track = self.queue.borrow().current_track().cloned();
                 let Some(track) = track else { return };
                 if self.retries.get() < STREAM_RETRY_MAX {
-                    // googlevideo hosts rotate; a fresh resolution usually lands on a healthy one.
                     self.retries.set(self.retries.get() + 1);
                     let resolver = self.net.resolver().clone();
                     let vid = track.video_id.clone();
@@ -974,7 +887,6 @@ impl Player {
                     queue.clear();
                 }
                 queue.push_back((stream_time, bands));
-                // About three seconds at the element's 30 Hz tick.
                 while queue.len() > 90 {
                     queue.pop_front();
                 }
@@ -1002,16 +914,12 @@ impl Player {
         }
     }
 
-    // -- state mirroring --------------------------------------------------
 
     fn apply_track_metadata(&self, track: Option<&Track>) {
-        // A different track ends whatever swap the last one went through. The
-        // swap itself sets the source id first and keeps the new id, so it survives this.
         let incoming = track.map(|t| t.video_id.0.as_str()).unwrap_or_default();
         if incoming != self.state.video_id() && !self.swapping.get() {
             self.state.set_source_video_id(String::new());
         }
-        // A new track is a fresh gate, whichever way it started playing.
         if track.map(|t| t.video_id.0.as_str()) != self.history_recorded.borrow().as_deref() {
             self.history_recorded.replace(None);
         }
@@ -1025,8 +933,6 @@ impl Player {
             Some(t) => {
                 self.state.set_title(t.title.clone());
                 self.state.set_artist(t.artist.clone());
-                // The id before the address: covers look the track's own
-                // downloaded art up by id when the address changes.
                 self.state.set_video_id(t.video_id.0.clone());
                 self.state
                     .set_thumbnail_url(t.thumb.clone().unwrap_or_default());
@@ -1047,11 +953,6 @@ impl Player {
         }
     }
 
-    /// Whether this track is worth a lookup for its audio twin.
-    ///
-    /// Uploads have no counterpart, and a track that says it is already the
-    /// audio version needs no lookup. Anything else is asked about once per
-    /// session: the answer costs a request, and it does not change.
     fn wants_audio_version(&self, track: &Track) -> bool {
         if track.video_id.0.is_empty() || track.entity_id.is_some() {
             return false;
@@ -1059,16 +960,12 @@ impl Player {
         if track.video_type.as_deref() == Some(AUDIO_VIDEO_TYPE) {
             return false;
         }
-        // An episode has no song twin, and a search for one finds a stranger.
         if track.is_episode() {
             return false;
         }
         self.swap_checked.borrow_mut().insert(track.video_id.0.clone())
     }
 
-    /// Put the audio twin in the playing slot, keeping what the queue entry
-    /// already knew. Port of the swap block in _fetch_and_play: the id, the
-    /// type, and the three display fields move over, the rest stays.
     fn apply_audio_version(&self, previous: &Track, twin: Track) -> Track {
         let mut swapped = previous.clone();
         swapped.video_id = twin.video_id.clone();
@@ -1088,14 +985,11 @@ impl Player {
         if !self.queue.borrow_mut().swap_current(&previous.video_id, swapped.clone()) {
             return swapped;
         }
-        // This is the same play under a new id: the history entry the load
-        // already recorded stands, so mark it before the metadata goes out.
         self.history_recorded.replace(Some(swapped.video_id.0.clone()));
         if self.local_logged.borrow().as_deref() == Some(previous.video_id.as_str()) {
             self.local_logged.replace(Some(swapped.video_id.0.clone()));
         }
         self.sync_queue_model();
-        // Rows on the page the listener came from still hold the video's id.
         self.state.set_source_video_id(previous.video_id.0.clone());
         self.swapping.set(true);
         self.apply_track_metadata(Some(&swapped));
@@ -1104,7 +998,6 @@ impl Player {
         swapped
     }
 
-    /// Fill placeholder metadata from the resolver, like _fetch_and_play did.    /// Fill placeholder metadata from the resolver, like _fetch_and_play did.
     fn refine_metadata(
         &self,
         track: &Track,
@@ -1134,7 +1027,6 @@ impl Player {
         self.emit_play(PlayEvent::Refined(changed));
     }
 
-    /// Mirror the current index into the store and flip the `playing` flag on the affected rows.
     fn mark_current(&self, index: Option<usize>) {
         let value = index.map(|i| i as i32).unwrap_or(-1);
         if self.state.current_index() != value {
@@ -1155,7 +1047,6 @@ impl Player {
         }
     }
 
-    /// Keep the playing row's pause indicator in step with the transport state.
     fn sync_paused_flag(&self) {
         let paused = self.state.status() != PlaybackStatus::Playing;
         let model = self.state.queue_model();
@@ -1168,12 +1059,6 @@ impl Player {
         }
     }
 
-    /// Rebuild the ListStore after a structural change.
-    /// Mirror the queue into the list model the panels bind to.
-    ///
-    /// Only the rows that differ are replaced. This used to swap all of them,
-    /// and with a queue of 951 that rebuilt every row widget in both queue
-    /// views on each sync, which is also when blank tiles showed up in the list.
     fn sync_queue_model(&self) {
         let paused = self.state.status() != PlaybackStatus::Playing;
         let (tracks, current) = {
@@ -1191,7 +1076,6 @@ impl Player {
         if removed > 0 || !middle.is_empty() {
             model.splice(prefix as u32, removed as u32, &middle);
         }
-        // The rows that stayed: new positions after the middle moved, fresh metadata, the play marker.
         for (i, entry) in old[..prefix].iter().enumerate() {
             entry.update(i as u32, &tracks[i], Some(i) == current, paused);
         }
@@ -1210,10 +1094,8 @@ impl Player {
     }
 }
 
-// -- playlist page support ------------------------------------------------
 
 impl Player {
-    /// The playlist or album the queue came from, what a page compares itself to.
     pub fn queue_source_id(&self) -> Option<String> {
         self.queue.borrow().source_id().map(str::to_owned)
     }
@@ -1222,13 +1104,6 @@ impl Player {
         self.queue.borrow().is_infinite()
     }
 
-    /// Port of add_history_item_async: tell the account this played, once per
-    /// track, and put it at the top of the shared cache so the history page
-    /// shows it before YouTube's own roll-up catches up.
-    ///
-    /// `history_mode` in the prefs both apps share decides when this runs:
-    /// "immediate" as the track loads, "after_30s" once it has played that
-    /// long, "never" not at all.
     fn record_play(&self, video_id: &str) {
         if video_id.is_empty() || self.history_mode.borrow().as_str() == HISTORY_NEVER {
             return;
@@ -1257,9 +1132,6 @@ impl Player {
         });
     }
 
-    /// Without an account, a listen goes to the play log on this device, which
-    /// the local shelves on Home are built from. Once per track, after 30
-    /// seconds or half the song, and never when history is switched off.
     fn log_local_play(&self, position: f64, duration: f64) {
         let threshold = if duration > 0.0 { HISTORY_THRESHOLD_SECS.min(duration / 2.0) } else { HISTORY_THRESHOLD_SECS };
         if position < threshold || self.history_mode.borrow().as_str() == HISTORY_NEVER {
@@ -1276,8 +1148,6 @@ impl Player {
         self.local.log_play(&track);
     }
 
-    /// Port of Player.extend_queue: append at the end. Under shuffle the new
-    /// tracks mix into the upcoming part, never into history or the current song.
     pub fn extend_queue(&self, tracks: Vec<Track>) {
         if tracks.is_empty() {
             return;
@@ -1286,12 +1156,6 @@ impl Player {
         self.sync_queue_model();
     }
 
-    /// Port of Player.play_then_radio: play a section, then keep going with a
-    /// radio seeded from its last track.
-    ///
-    /// The queue is stamped with an id of its own so the reply can tell it is
-    /// still the queue that asked; the real radio playlist replaces the stamp
-    /// once the tracks land, and the infinite extender takes it from there.
     pub fn play_then_radio(self: &Rc<Self>, tracks: Vec<Track>, start_index: usize, seed: &str) {
         if tracks.is_empty() || seed.is_empty() {
             self.play_tracks(tracks, start_index, false, None, false);
@@ -1300,6 +1164,32 @@ impl Player {
         let stamp = format!("home-radio:{seed}:{}", self.next_stamp());
         self.play_tracks(tracks, start_index, false, Some(stamp.clone()), false);
 
+        if seed.starts_with("sc:") {
+            let sc = self.net.soundcloud().clone();
+            let seed_id = seed.to_owned();
+            let radio_source = format!("scradio:{seed}");
+            let handle = self.net.spawn(async move {
+                match crate::net::soundcloud::parse_sc_id(&seed_id) {
+                    Some(crate::net::soundcloud::ScId::Track(id)) => sc.related(id).await.unwrap_or_default(),
+                    _ => Vec::new(),
+                }
+            });
+            let weak = Rc::downgrade(self);
+            glib::spawn_future_local(async move {
+                let fresh = handle.await.unwrap_or_default();
+                let Some(player) = weak.upgrade() else { return };
+                if player.queue.borrow().source_id() != Some(stamp.as_str()) {
+                    return;
+                }
+                let existing: std::collections::HashSet<String> = player.queue.borrow().tracks().iter().map(|t| t.video_id.0.clone()).collect();
+                let fresh: Vec<Track> = fresh.into_iter().filter(|t| !t.video_id.0.is_empty() && !existing.contains(&t.video_id.0)).collect();
+                if !fresh.is_empty() {
+                    player.extend_queue(fresh);
+                }
+                player.queue.borrow_mut().adopt_source(radio_source, true);
+            });
+            return;
+        }
         let api = self.net.client().api();
         let seed = seed.to_owned();
         let handle = self.net.spawn(async move { crate::net::playlists::radio_tracks(&api, Some(&seed), None).await });
@@ -1314,7 +1204,6 @@ impl Player {
                 Err(_) => return,
             };
             let Some(player) = weak.upgrade() else { return };
-            // The listener has moved on; their queue is not ours to extend.
             if player.queue.borrow().source_id() != Some(stamp.as_str()) {
                 return;
             }
@@ -1329,18 +1218,12 @@ impl Player {
         });
     }
 
-    /// A number that is not the last one, so two sections played in a row
-    /// cannot share a stamp.
     fn next_stamp(&self) -> u64 {
         let next = self.stamp.get().wrapping_add(1);
         self.stamp.set(next);
         next
     }
 
-    /// Port of Player.start_radio: fetch a mix for a song or playlist on the
-    /// runtime and play it as an infinite queue sourced from the radio id.
-    /// A song from a link: the queue YouTube Music would play for it, which is
-    /// the linked playlist from that song on, or the song's own radio.
     pub fn play_link(self: &Rc<Self>, video_id: String, playlist_id: Option<String>) {
         let api = self.net.client().api();
         let (vid, list) = (video_id.clone(), playlist_id.clone());
@@ -1355,7 +1238,6 @@ impl Player {
                         tracing::warn!(video_id, "link: no tracks returned");
                         return;
                     };
-                    // A linked playlist ends where it ends. A lone song keeps going as its radio.
                     let infinite = playlist_id.is_none();
                     player.play_tracks(tracks, index, false, watch.playlist_id.or(playlist_id), infinite);
                 }
@@ -1366,6 +1248,55 @@ impl Player {
     }
 
     pub fn start_radio(self: &Rc<Self>, video_id: Option<String>, playlist_id: Option<String>) {
+        if playlist_id.as_deref().is_some_and(crate::net::soundcloud::is_soundcloud_id) {
+            let sc = self.net.soundcloud().clone();
+            let list = playlist_id.clone().unwrap_or_default();
+            let handle = self.net.spawn(async move {
+                use crate::net::soundcloud::ScId;
+                let fetched = match crate::net::soundcloud::parse_sc_id(&list) {
+                    Some(ScId::Playlist(id)) => sc.playlist(id).await.map(|(_, tracks)| tracks).unwrap_or_default(),
+                    Some(ScId::User(id)) => sc.user_tracks(id).await.map(|(_, tracks)| tracks).unwrap_or_default(),
+                    _ => Vec::new(),
+                };
+                let seed = fetched.last().map(|t| t.video_id.0.clone()).unwrap_or_default();
+                (fetched, seed)
+            });
+            let weak = Rc::downgrade(self);
+            glib::spawn_future_local(async move {
+                let (tracks, seed) = handle.await.unwrap_or_default();
+                if tracks.is_empty() {
+                    tracing::warn!("radio: no tracks returned");
+                    return;
+                }
+                if let Some(player) = weak.upgrade() {
+                    player.play_tracks(tracks, 0, false, Some(format!("scradio:{seed}")), true);
+                }
+            });
+            return;
+        }
+        if video_id.as_deref().is_some_and(|v| v.starts_with("sc:")) {
+            let sc = self.net.soundcloud().clone();
+            let seed = video_id.clone().unwrap_or_default();
+            let fetch_seed = seed.clone();
+            let handle = self.net.spawn(async move {
+                match crate::net::soundcloud::parse_sc_id(&fetch_seed) {
+                    Some(crate::net::soundcloud::ScId::Track(id)) => sc.related(id).await.unwrap_or_default(),
+                    _ => Vec::new(),
+                }
+            });
+            let weak = Rc::downgrade(self);
+            glib::spawn_future_local(async move {
+                let tracks = handle.await.unwrap_or_default();
+                if tracks.is_empty() {
+                    tracing::warn!("radio: no tracks returned");
+                    return;
+                }
+                if let Some(player) = weak.upgrade() {
+                    player.play_tracks(tracks, 0, false, Some(format!("scradio:{seed}")), true);
+                }
+            });
+            return;
+        }
         let api = self.net.client().api();
         let handle = self.net.spawn(async move {
             crate::net::playlists::radio_tracks(&api, video_id.as_deref(), playlist_id.as_deref())
@@ -1391,11 +1322,8 @@ impl Player {
     }
 }
 
-// -- infinite radio -------------------------------------------------------
 
 impl Player {
-    /// Port of _maybe_extend_infinite: fetch more radio tracks when fewer
-    /// than fifteen remain or the play-head is past halfway.
     pub fn maybe_extend_infinite(&self) {
         let (infinite, has_source, current, len) = {
             let q = self.queue.borrow();
@@ -1414,8 +1342,6 @@ impl Player {
         }
     }
 
-    /// Port of _start_infinite_fetch: seed the watch playlist from the queue's
-    /// tail, retry once from the playing track when the batch was all duplicates.
     fn start_infinite_fetch(&self) {
         self.infinite_fetching.set(true);
         let (last_vid, source, existing) = {
@@ -1426,13 +1352,12 @@ impl Player {
                 q.tracks().iter().map(|t| t.video_id.0.clone()).collect::<std::collections::HashSet<_>>(),
             )
         };
-        // Queue-identity stamps with a colon are not playlist ids.
         let playlist_id = source.filter(|s| !s.contains(':'));
         let current_vid = Some(self.state.video_id()).filter(|v| !v.is_empty());
-        let api = self.net.client().api();
+        let net = self.net.clone();
         let handle = self.net.spawn(async move {
             let mut fresh = fetch_new_radio_tracks(
-                &api,
+                &net,
                 last_vid.as_deref(),
                 playlist_id.as_deref(),
                 &existing,
@@ -1440,7 +1365,7 @@ impl Player {
             .await;
             if fresh.is_empty() {
                 if let Some(cv) = current_vid.filter(|c| Some(c) != last_vid.as_ref()) {
-                    fresh = fetch_new_radio_tracks(&api, Some(&cv), None, &existing).await;
+                    fresh = fetch_new_radio_tracks(&net, Some(&cv), None, &existing).await;
                 }
             }
             fresh
@@ -1456,8 +1381,6 @@ impl Player {
         });
     }
 
-    /// Port of _force_radio_extend: the queue ran dry on a radio. Seed from
-    /// the playing track and accept repeats over silence.
     fn force_radio_extend(&self) {
         if self.infinite_fetching.get() {
             return;
@@ -1479,13 +1402,19 @@ impl Player {
             self.apply(Step::Stop);
             return;
         };
-        let api = self.net.client().api();
+        let net = self.net.clone();
         let seed_c = seed.clone();
         let handle = self.net.spawn(async move {
-            let all: Vec<Track> = crate::net::playlists::radio_tracks(&api, Some(&seed_c), None)
-                .await
-                .map(|w| w.tracks.into_iter().map(|t| t.track).collect())
-                .unwrap_or_default();
+            let all: Vec<Track> = match crate::net::soundcloud::parse_sc_id(&seed_c) {
+                Some(crate::net::soundcloud::ScId::Track(id)) => net.soundcloud().related(id).await.unwrap_or_default(),
+                _ => {
+                    let api = net.client().api();
+                    crate::net::playlists::radio_tracks(&api, Some(&seed_c), None)
+                        .await
+                        .map(|w| w.tracks.into_iter().map(|t| t.track).collect())
+                        .unwrap_or_default()
+                }
+            };
             let mut fresh: Vec<Track> = all
                 .iter()
                 .filter(|t| !t.video_id.0.is_empty() && !existing.contains(&t.video_id.0))
@@ -1517,14 +1446,20 @@ impl Player {
     }
 }
 
-/// Radio tracks for a seed minus the ids already queued.
 async fn fetch_new_radio_tracks(
-    api: &ytmusicapi::YTMusicClient,
+    net: &NetHandle,
     video_id: Option<&str>,
     playlist_id: Option<&str>,
     existing: &std::collections::HashSet<String>,
 ) -> Vec<Track> {
-    match crate::net::playlists::radio_tracks(api, video_id, playlist_id).await {
+    if video_id.is_some_and(|v| v.starts_with("sc:")) {
+        let tracks = match video_id.and_then(crate::net::soundcloud::parse_sc_id) {
+            Some(crate::net::soundcloud::ScId::Track(id)) => net.soundcloud().related(id).await.unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        return tracks.into_iter().filter(|t| !t.video_id.0.is_empty() && !existing.contains(&t.video_id.0)).collect();
+    }
+    match crate::net::playlists::radio_tracks(&net.client().api(), video_id, playlist_id).await {
         Ok(watch) => watch
             .tracks
             .into_iter()

@@ -1,9 +1,3 @@
-//! Main window. Port of ui/window.py: header bar with view switcher, search,
-//! progress buttons, account and primary menus; a view stack of three tabs,
-//! each an AdwNavigationView; the desktop cover view in the main stack; the
-//! queue sidebar in an overlay split view; the player bar as bottom bar, or
-//! as AdwBottomSheet's bottom bar with the expanded player as its sheet on
-//! phones; window actions, keyboard handling and close-to-background.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -40,7 +34,6 @@ const NETWORK_SETTLE: Duration = Duration::from_millis(1500);
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(600);
 const SEARCH_MIN_CHARS: usize = 3;
 
-/// Which appearance switch moved, so the window repaints only what it governs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AppearancePref {
     BlurredBackground,
@@ -60,8 +53,6 @@ pub struct MainWindow {
     search_entry: gtk::SearchEntry,
     root_content_view: adw::ToolbarView,
     player_bar_revealer: gtk::Revealer,
-    /// Where the revealer lives on desktop widths. It stays in the toolbar view
-    /// for good, so the view always has a bottom bar of at least one pixel.
     player_bar_slot: gtk::Box,
     view_switcher_bar: adw::ViewSwitcherBar,
     sheet_bottom_bar: gtk::Box,
@@ -81,16 +72,12 @@ pub struct MainWindow {
     sidebar_explicitly_opened: Cell<bool>,
     prev_transition: Cell<(gtk::StackTransitionType, u32)>,
     search_timer: RefCell<Option<glib::SourceId>>,
-    /// The channel behind the account's handle, resolved once per session.
     own_channel: RefCell<Option<String>>,
     upload_progress: Rc<ProgressButton>,
     download_progress: Rc<ProgressButton>,
-    /// Rows in the download popover, one per queued track.
     download_queue: Rc<DownloadQueue>,
-    /// Rows in the upload popover, one per file on its way out.
     upload_queue: Rc<UploadQueue>,
     lib_refresh: LibraryRefresh,
-    /// Blurred cover background, dynamic accent and the colors derived from them.
     appearance: Rc<crate::ui::appearance::Appearance>,
 }
 
@@ -106,17 +93,12 @@ impl MainWindow {
         let window = adw::ApplicationWindow::builder()
             .application(app)
             .title(APP_NAME)
-            // Wide enough that the cover view keeps its cover pane with the queue
-            // open too. That pane collapses at 735 px, and the queue sidebar takes
-            // its header's natural width: about 275 px once it reads "57 tracks".
             .default_width(1040)
             .default_height(700)
             .build();
         let toast_overlay = adw::ToastOverlay::new();
         install_actions(&window, app, ctx);
 
-        // -- header bar --------------------------------------------------
-        // Homogeneous sizing measures the hidden tabs on every resize.
         let view_stack = adw::ViewStack::builder().hhomogeneous(false).vhomogeneous(false).build();
         let switcher = adw::ViewSwitcher::builder()
             .stack(&view_stack)
@@ -147,7 +129,6 @@ impl MainWindow {
         header_bar.pack_end(&upload_progress.button);
         header_bar.pack_end(&download_progress.button);
 
-        // -- pages in per-tab navigation views ---------------------------
         let home = HomePage::new(ui.clone());
         let library = LibraryPage::new(ui.clone());
         let explore = ExplorePage::new(ui.clone());
@@ -177,7 +158,6 @@ impl MainWindow {
         let lib_refresh = build_library_refresh();
         header_bar.pack_end(&lib_refresh.root);
 
-        // -- search bar --------------------------------------------------
         let search_entry = gtk::SearchEntry::builder()
             .placeholder_text("Search...")
             .hexpand(true)
@@ -194,7 +174,6 @@ impl MainWindow {
             .sync_create()
             .build();
 
-        // -- content: browser plus the desktop cover view ----------------
         let content_bin = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Automatic)
             .vscrollbar_policy(gtk::PolicyType::Never)
@@ -218,7 +197,6 @@ impl MainWindow {
             .visible(false)
             .build();
 
-        // -- split view with the queue sidebar ---------------------------
         let split_view = adw::OverlaySplitView::builder()
             .min_sidebar_width(250.0)
             .max_sidebar_width(450.0)
@@ -232,7 +210,6 @@ impl MainWindow {
         split_view.set_sidebar(Some(queue_panel.widget()));
         split_view.set_content(Some(&root_content_view));
 
-        // -- bottom sheet hosting the expanded player on phones ----------
         let bottom_sheet = adw::BottomSheet::builder()
             .show_drag_handle(true)
             .open(false)
@@ -250,7 +227,6 @@ impl MainWindow {
         expanded_player.widget().add_css_class("player-drawer");
         expanded_player.widget().set_vexpand(true);
 
-        // -- player bar --------------------------------------------------
         let is_compact = Rc::new(Cell::new(false));
         let placeholder = PlayerBarCallbacks {
             on_artist_click: {
@@ -266,8 +242,6 @@ impl MainWindow {
                         title: name,
                         thumb: None,
                     }),
-                    // Port of _resolve_album_from_player: a track queued without
-                    // its album still has one in the watch panel.
                     None => {
                         let video_id = ui.player.state().video_id();
                         let api = ui.net.client().api();
@@ -299,11 +273,6 @@ impl MainWindow {
             .overflow(gtk::Overflow::Visible)
             .child(player_bar.widget())
             .build();
-        // The revealer sits in a slot that never shrinks below one pixel. With a
-        // bottom bar of zero height AdwToolbarView puts `undershoot-bottom` on
-        // itself, and a class change on the ancestor of the whole browser restyles
-        // every widget in it. Measured with sysprof: 57% of the frame time while
-        // the cover view toggled, and frames of 116 to 230 ms instead of 33.
         let player_bar_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).height_request(1).build();
         player_bar_slot.append(&player_bar_revealer);
         root_content_view.add_bottom_bar(&player_bar_slot);
@@ -405,7 +374,6 @@ impl MainWindow {
         self.library.clone()
     }
 
-    /// First launch: the setup wizard. After an update: the release notes, once.
     pub fn welcome_or_release_notes(self: &Rc<Self>, ctx: &Rc<App>) {
         if crate::ui::onboarding::pending(ctx) {
             tracing::info!("fresh install, opening the setup wizard");
@@ -423,27 +391,27 @@ impl MainWindow {
         self.toast_overlay.add_toast(adw::Toast::new(message));
     }
 
-    /// Both live visualizers: the desktop cover view's and the expanded player's.
     pub fn visualizers(&self) -> [Rc<crate::ui::widgets::visualizer::Visualizer>; 2] {
         [self.cover_view.visualizer().clone(), self.expanded_player.visualizer().clone()]
     }
 
-    /// Both live lyrics views, the expanded player's and the desktop cover view's.
     pub fn lyrics_views(&self) -> Vec<Rc<crate::ui::widgets::lyrics_view::LyricsView>> {
         crate::ui::widgets::lyrics_view::live_views()
     }
 
-    /// The settings switch moved the queue sidebar. The controls follow through the position notify.
     pub fn set_sidebar_on_right(&self, on_right: bool) {
         self.split_view.set_sidebar_position(if on_right { gtk::PackType::End } else { gtk::PackType::Start });
     }
 
-    /// An appearance switch moved in Preferences.
     pub fn appearance_pref_changed(self: &Rc<Self>, pref: AppearancePref) {
         self.appearance.pref_changed(pref);
     }
 
-    /// Port of on_offline_toggled: drop the cached pref and redraw every page for the new state.
+    pub fn refresh_providers(self: &Rc<Self>) {
+        self.home.sync_provider();
+        self.explore.sync_provider();
+    }
+
     pub fn force_offline_changed(self: &Rc<Self>) {
         self.ui.online.invalidate();
         self.ui.online.probe_now(None);
@@ -462,12 +430,10 @@ impl MainWindow {
         self.sidebar_explicitly_opened.set(show);
     }
 
-    /// Same path the bar's chevron, tap and drag-up take.
     pub fn expand_player(&self) {
         self.on_expand_requested();
     }
 
-    /// Demo hook: show a page of the expanded player.
     pub fn show_sheet_page(&self, name: &str) {
         self.expanded_player.show_page(name);
     }
@@ -476,7 +442,6 @@ impl MainWindow {
         self.view_stack.set_visible_child_name(name);
     }
 
-    /// Demo hooks: open a genre page and the full genre list from Explore.
     pub fn open_category_for_demo(&self) -> bool {
         self.explore.open_first_category_for_demo()
     }
@@ -485,7 +450,6 @@ impl MainWindow {
         self.explore.open_all_moods_for_demo()
     }
 
-    /// Demo hook: what the visible history page's first row menu offers.
     pub fn history_menu_for_demo(&self) -> Vec<String> {
         match self.visible_pushed_page() {
             Some(PushedPage::History(page)) => page.menu_extras_for_demo(),
@@ -493,7 +457,6 @@ impl MainWindow {
         }
     }
 
-    /// Demo hook: play the first playable row of the Home feed.
     pub fn activate_first_home_row(&self) -> bool {
         self.home.activate_first_playable()
     }
@@ -502,8 +465,6 @@ impl MainWindow {
         self.explore.pick_chart_country_for_demo(code)
     }
 
-    /// Demo hook: scroll the visible page down, so a capture can reach a
-    /// section below the fold. Returns false when nothing there scrolls.
     pub fn scroll_visible_page(&self, pixels: f64) -> bool {
         let Some(page) = self.active_nav().and_then(|nav| nav.visible_page()) else { return false };
         let Some(scroller) = first_scroller(page.upcast_ref::<gtk::Widget>()) else { return false };
@@ -522,7 +483,6 @@ impl MainWindow {
         self.explore.activate_first_playable()
     }
 
-    /// Port of show_login: the modal sign-in dialog. A successful login refreshes the library.
     pub fn show_login(&self) {
         let dialog = LoginDialog::new(self.ui.clone(), &self.window);
         let library = self.library.clone();
@@ -534,17 +494,12 @@ impl MainWindow {
             library.load_library(false);
         });
         dialog.present();
-        // Keep the dialog struct alive while its window is open.
         let holder = dialog.clone();
         dialog.connect_close(move || {
             let _ = &holder;
         });
     }
 
-    /// Port of the connectivity handling in window.py. Gio.NetworkMonitor is
-    /// fast but noisy, so it only triggers a probe and the probe decides. A
-    /// poll tick backstops transitions the monitor never reports: every tick
-    /// while offline, every thirty seconds while online.
     fn install_network_state(self: &Rc<Self>) {
         let online = self.ui.online.clone();
         let net_online = Rc::new(Cell::new(online.is_online()));
@@ -595,14 +550,11 @@ impl MainWindow {
         });
     }
 
-    /// Port of _apply_network_state: one toast and one round of page reloads per real transition.
     fn apply_network_state(self: &Rc<Self>, online: bool) {
         if online {
             tracing::info!("back online, refreshing library");
             self.add_toast("Back online");
-            // Covers that failed while offline stay placeholders until asked again.
             crate::ui::cover::retry_failed();
-            // The list keeps its rows across a reload, so the offline grey is lifted here.
             self.library.apply_offline_state();
             self.library.load_library(false);
             self.explore.load_explore_data(true);
@@ -625,10 +577,11 @@ impl MainWindow {
         }
     }
 
-    /// Port of check_auth: offer the login dialog when there is no session, or the saved one died.
     fn check_auth_on_startup(self: &Rc<Self>, ctx: &Rc<App>) {
-        // The setup wizard has its own sign-in step.
         if crate::ui::onboarding::pending(ctx) {
+            return;
+        }
+        if !crate::net::provider::ytm_enabled(&ctx.paths) {
             return;
         }
         let client = self.ui.net.client().clone();
@@ -667,15 +620,10 @@ impl MainWindow {
         });
     }
 
-    /// Header pie for uploads. `None` hides the button.
     pub fn set_upload_progress(&self, fraction: Option<f64>) {
         self.upload_progress.set_fraction(fraction);
     }
 
-    /// Header pie for downloads. `None` hides the button.
-    /// Queue tracks for offline playback. Port of window.py's download_tracks:
-    /// the popover lists them, the pie follows the queue, and a playlist title
-    /// also registers an .m3u8 mirror.
     pub fn download_tracks(&self, tracks: Vec<Track>, album_title: &str, album_id: &str) {
         let queued = self.download_queue.start(tracks, album_title, album_id);
         if queued == 0 {
@@ -685,7 +633,6 @@ impl MainWindow {
         self.download_progress.set_fraction(Some(0.0));
     }
 
-    /// Follow the queue: the pie shows how far it is, a toast says when it is done.
     fn wire_downloads(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
         self.ui.on_download(move |event| {
@@ -708,38 +655,30 @@ impl MainWindow {
         });
     }
 
-    /// Port of _open_upload_picker: choose files and send them to the
-    /// uploaded library.
     pub fn open_upload_picker(&self) {
         self.upload_queue.pick_files(&self.window);
     }
 
-    /// Demo hook: press the back button.
     pub fn go_back(self: &Rc<Self>) {
         self.on_back_clicked();
     }
 
-    /// Demo hook: switch the library to its uploads tab.
     pub fn show_uploads_tab(&self) {
         self.library.show_uploads_for_demo();
     }
 
-    /// Demo hook: log what each library card menu offers.
     pub fn card_menus(&self) {
         self.library.card_menus_for_demo();
     }
 
-    /// Demo hook: open the new playlist dialog on the library page.
     pub fn new_playlist_dialog(&self) {
         self.library.new_playlist_for_demo();
     }
 
-    /// Demo hook: swipe the cover carousel slowly, `covers` along.
     pub fn slow_swipe(&self, covers: i32) {
         self.expanded_player.slow_swipe_for_demo(covers);
     }
 
-    /// Demo hook: open the Stream Info dialog of whichever player view shows.
     pub fn show_stream_info(&self) {
         match self.is_compact.get() {
             true => self.expanded_player.show_stream_info(),
@@ -747,7 +686,6 @@ impl MainWindow {
         }
     }
 
-    /// Demo hook: open the download popover.
     pub fn show_download_popover(&self) {
         self.download_progress.popup();
     }
@@ -764,7 +702,6 @@ impl MainWindow {
         self.download_progress.items_box()
     }
 
-    // -- player bar and views ---------------------------------------------
 
     fn wire_player_bar(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
@@ -804,7 +741,6 @@ impl MainWindow {
         self.bottom_sheet.connect_open_notify(move |sheet| {
             if let Some(w) = weak.upgrade() {
                 if sheet.is_open() {
-                    // Every open starts on the player, set before the sheet shows.
                     w.expanded_player.show_player_page();
                 } else {
                     w.player_bar.set_expanded(false);
@@ -820,7 +756,6 @@ impl MainWindow {
         });
     }
 
-    /// Toggle the queue sidebar on desktop widths. Does nothing without a queue.
     pub fn toggle_queue(&self) {
         if self.is_compact.get() {
             return;
@@ -833,7 +768,6 @@ impl MainWindow {
         self.sidebar_explicitly_opened.set(show);
     }
 
-    /// Chevron, tap or drag-up on the bar: cover view on desktop, sheet on phones.
     fn on_expand_requested(&self) {
         if !self.is_compact.get() {
             if self.main_stack.visible_child_name().as_deref() == Some("cover") {
@@ -910,7 +844,6 @@ impl MainWindow {
         }
     }
 
-    // -- navigation -------------------------------------------------------
 
     fn active_nav(&self) -> Option<adw::NavigationView> {
         self.view_stack
@@ -948,7 +881,6 @@ impl MainWindow {
         }
     }
 
-    /// Port of open_playlist: the page loads once the navigation view shows it.
     fn open_playlist(self: &Rc<Self>, playlist_id: &str, initial: Option<InitialData>) {
         let page = PlaylistPage::new(self.ui.clone());
         let nav_page = adw::NavigationPage::builder()
@@ -972,12 +904,43 @@ impl MainWindow {
         self.push_page(nav_page);
     }
 
-    /// Demo hook: open a playlist or album page without card data, like a deep link.
     pub fn open_playlist_for_demo(self: &Rc<Self>, id: &str) {
         self.open_playlist(id, None);
     }
 
-    /// Demo hook: set the cover of the visible playlist page.
+    fn open_soundcloud_collection(self: &Rc<Self>, id: &str, title: &str) {
+        let page = PlaylistPage::new(self.ui.clone());
+        let nav_page = adw::NavigationPage::builder().child(page.widget()).title(format!("SoundCloud_{id}")).build();
+        page.prepare_virtual(id);
+        self.push_page(nav_page);
+        let sc = self.ui.net.soundcloud().clone();
+        let id = id.to_owned();
+        let known_title = title.to_owned();
+        let handle = self.ui.net.spawn(async move {
+            use crate::net::soundcloud::ScId;
+            match crate::net::soundcloud::parse_sc_id(&id) {
+                Some(ScId::Playlist(n)) => sc.playlist(n).await,
+                Some(ScId::User(n)) => sc.user_tracks(n).await,
+                _ => Err(crate::net::ytmusic::NetError::Message("Not a SoundCloud set or artist".into())),
+            }
+        });
+        glib::spawn_future_local(async move {
+            let outcome = handle.await;
+            match outcome {
+                Ok(Ok((fetched_title, tracks))) => {
+                    let title = if known_title.is_empty() { fetched_title } else { known_title };
+                    let meta = if tracks.len() == 1 { "1 track".to_owned() } else { format!("{} tracks", tracks.len()) };
+                    page.show_virtual(&title, tracks, &meta);
+                }
+                Ok(Err(err)) => {
+                    tracing::warn!(%err, "soundcloud collection failed");
+                    page.show_virtual(&known_title, Vec::new(), "nothing here");
+                }
+                Err(_) => {}
+            }
+        });
+    }
+
     pub fn set_cover_on_visible_playlist(&self, image: std::path::PathBuf) -> bool {
         match self.visible_pushed_page() {
             Some(PushedPage::Playlist(p)) => {
@@ -988,7 +951,6 @@ impl MainWindow {
         }
     }
 
-    /// Demo hook: search and sort the visible playlist page.
     pub fn sift_visible_playlist(&self, filter: Option<&str>, sort: Option<u32>) -> bool {
         match self.visible_pushed_page() {
             Some(PushedPage::Playlist(p)) => {
@@ -999,7 +961,6 @@ impl MainWindow {
         }
     }
 
-    /// Demo hook: press Play on the visible playlist page.
     pub fn press_play_on_visible_playlist(&self) -> bool {
         match self.visible_pushed_page() {
             Some(PushedPage::Playlist(p)) => {
@@ -1010,7 +971,6 @@ impl MainWindow {
         }
     }
 
-    /// Demo hook: press Start Radio on the visible artist page.
     pub fn press_radio_on_visible_artist(&self) -> bool {
         match self.visible_pushed_page() {
             Some(PushedPage::Artist(p)) => {
@@ -1021,18 +981,14 @@ impl MainWindow {
         }
     }
 
-    /// Demo hook: open an artist page.
     pub fn open_artist_for_demo(self: &Rc<Self>, channel_id: &str) {
         self.open_artist(channel_id, None);
     }
 
-    /// Demo hook: open a discography grid for a browse id.
     pub fn open_discography_for_demo(self: &Rc<Self>, browse_id: &str) {
         self.open_discography("", "Songs", Some(browse_id), None, Vec::new());
     }
 
-    /// Port of open_artist: push the artist page and load it. Uploaded artists
-    /// belong to the uploads page, which is not ported yet.
     pub fn open_artist(self: &Rc<Self>, channel_id: &str, initial_name: Option<&str>) {
         if channel_id.starts_with("FEmusic_library_privately_owned") {
             self.add_toast("Uploaded artists are not available yet");
@@ -1059,7 +1015,6 @@ impl MainWindow {
         page.load_artist(channel_id, initial_name);
     }
 
-    /// Port of _resolve_artist_from_player: the playing track's channel, from its song details.
     fn resolve_artist_from_player(self: &Rc<Self>) {
         let vid = self.ui.player.state().video_id();
         if vid.is_empty() {
@@ -1079,7 +1034,6 @@ impl MainWindow {
         });
     }
 
-    /// Port of _open_downloads_from_menu: a playlist page over the download library.
     pub fn open_downloads(self: &Rc<Self>) {
         let page = PlaylistPage::new(self.ui.clone());
         page.prepare_virtual("DOWNLOADS");
@@ -1109,10 +1063,6 @@ impl MainWindow {
         self.push_page(nav_page);
     }
 
-    /// Port of _open_all_songs: every uploaded track on one page.
-    ///
-    /// The page opens at once and fills when the fetch lands, the way the
-    /// Python page pushed first and loaded after.
     pub fn open_uploads(self: &Rc<Self>) {
         let page = PlaylistPage::new(self.ui.clone());
         page.prepare_virtual("UPLOADS");
@@ -1146,8 +1096,6 @@ impl MainWindow {
         self.push_page(nav_page);
     }
 
-    /// Port of _on_artist_activated for uploads: one page with that artist's
-    /// uploaded songs.
     pub fn open_upload_artist(self: &Rc<Self>, browse_id: &str, name: &str) {
         let page = PlaylistPage::new(self.ui.clone());
         page.prepare_virtual("UPLOADS");
@@ -1183,7 +1131,6 @@ impl MainWindow {
         self.push_page(nav_page);
     }
 
-    /// Port of open_discography.
     fn open_discography(
         self: &Rc<Self>,
         channel_id: &str,
@@ -1209,8 +1156,6 @@ impl MainWindow {
         page.load_discography(channel_id, title, browse_id, params, initial);
     }
 
-    /// Port of _open_own_channel: the account's @handle names a channel, and
-    /// that channel is an artist page like any other.
     pub fn open_own_channel(self: &Rc<Self>) {
         if let Some(channel) = self.own_channel.borrow().clone() {
             self.open_artist(&channel, None);
@@ -1235,9 +1180,10 @@ impl MainWindow {
         });
     }
 
-    /// Open a YouTube or YouTube Music link: play a song, or show its page.
-    /// Returns false when the text is no YouTube link at all.
     pub fn open_link(self: &Rc<Self>, text: &str) -> bool {
+        if text.contains("soundcloud.com") {
+            return self.open_soundcloud_link(text);
+        }
         if !crate::net::links::is_youtube_url(text) {
             return false;
         }
@@ -1266,10 +1212,30 @@ impl MainWindow {
         true
     }
 
-    /// Port of _open_history_from_menu: the page builds its rows once it is
-    /// on screen, so the push animation is not stalled by a few hundred of them.
+    fn open_soundcloud_link(self: &Rc<Self>, text: &str) -> bool {
+        let sc = self.ui.net.soundcloud().clone();
+        let url = text.trim().to_owned();
+        let handle = self.ui.net.spawn(async move { sc.resolve(&url).await });
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let outcome = handle.await;
+            let Some(w) = weak.upgrade() else { return };
+            use crate::net::soundcloud::Resolved;
+            match outcome {
+                Ok(Ok(Resolved::Track(track))) => w.ui.player.play_tracks(vec![track], 0, false, None, false),
+                Ok(Ok(Resolved::Playlist(id, title))) => w.navigate(NavRequest::Playlist { id, title, thumb: None }),
+                Ok(Ok(Resolved::Artist(id, name))) => w.navigate(NavRequest::Artist { id: Some(id), name }),
+                Ok(Err(err)) => {
+                    tracing::warn!(%err, "soundcloud link did not resolve");
+                    w.add_toast("Could not open the link");
+                }
+                Err(_) => {}
+            }
+        });
+        true
+    }
+
     pub fn open_history(self: &Rc<Self>) {
-        // Signed out, the page lists the plays kept on this device, which needs no network.
         let signed_in = matches!(self.ui.net.client().auth_state(), AuthState::Authenticated(_));
         if signed_in && !self.ui.online.is_online() {
             self.add_toast("History requires an internet connection");
@@ -1293,7 +1259,6 @@ impl MainWindow {
         self.push_page(nav_page);
     }
 
-    /// Port of open_category: the carousels behind one mood or genre pill.
     fn open_category(self: &Rc<Self>, params: &str, title: &str) {
         let page = CategoryPage::new(self.ui.clone());
         let weak = Rc::downgrade(self);
@@ -1307,14 +1272,11 @@ impl MainWindow {
             .child(page.widget())
             .title(title)
             .build();
-        // The page struct lives on the navigation page: without this it is
-        // dropped the moment this returns and its fetch renders nothing.
         unsafe { nav_page.set_data("pushed", PushedPage::Category(page.clone())) };
         self.push_page(nav_page);
         page.load_category(params, title);
     }
 
-    /// Port of open_all_moods: the full pill list of one category row.
     fn open_all_moods(self: &Rc<Self>, title: &str, items: Vec<crate::net::explore::Category>) {
         let page = AllMoodsPage::new(self.ui.clone(), title, items);
         let display = crate::ui::pages::all_moods::display_title(title);
@@ -1327,22 +1289,15 @@ impl MainWindow {
         self.title_widget.set_title(&display);
     }
 
-    /// The page struct behind the visible navigation page, if it is one of ours.
     fn visible_pushed_page(&self) -> Option<PushedPage> {
         let nav_page = self.active_nav()?.visible_page()?;
         unsafe { nav_page.data::<PushedPage>("pushed") }.map(|p| unsafe { p.as_ref() }.clone())
     }
 
-    /// Port of _get_active_filterable_child: the visible playlist or discography page.
     fn active_filterable(&self) -> Option<PushedPage> {
         self.visible_pushed_page().filter(PushedPage::is_filterable)
     }
 
-    /// What the search bar types into instead of searching YouTube.
-    ///
-    /// Python finds it by asking the visible page for a `filter_content`, so
-    /// the library root answers too: typing on the Library tab filters its
-    /// own cards. Here the library is not a pushed page, so it is named.
     fn active_filter(&self) -> Option<SearchFilter> {
         if self.view_stack.visible_child_name().as_deref() == Some("library") {
             let at_root = self
@@ -1358,7 +1313,6 @@ impl MainWindow {
         Some(Rc::new(move |text: &str| page.filter_content(text)))
     }
 
-    /// Port of _get_refresh_target and _playlist_page_refresh.
     fn refresh_target(&self) -> Option<RefreshTarget> {
         let on_library = self.view_stack.visible_child_name().as_deref() == Some("library");
         let nav = self.active_nav()?;
@@ -1399,7 +1353,6 @@ impl MainWindow {
                 RefreshTarget::Library => w.library.refresh(done),
                 RefreshTarget::Playlist(page) => {
                     page.refresh_in_place();
-                    // The page hides its inline spinner once the fetch completes; poll for that.
                     glib::timeout_add_local(Duration::from_millis(250), move || {
                         if page.content_spinner_visible() {
                             return glib::ControlFlow::Continue;
@@ -1429,7 +1382,6 @@ impl MainWindow {
         self.update_refresh_button();
     }
 
-    /// Push a page onto the visible tab, skipping a duplicate of the visible page.
     fn push_page(&self, page: adw::NavigationPage) {
         self.dismiss_cover_if_open();
         if self.search_bar.is_search_mode() {
@@ -1451,6 +1403,10 @@ impl MainWindow {
     fn navigate(self: &Rc<Self>, request: NavRequest) {
         match request {
             NavRequest::Playlist { id, title, thumb } | NavRequest::Album { id, title, thumb } => {
+                if crate::net::soundcloud::is_soundcloud_id(&id) {
+                    self.open_soundcloud_collection(&id, &title);
+                    return;
+                }
                 self.open_playlist(
                     &id,
                     Some(InitialData {
@@ -1474,6 +1430,7 @@ impl MainWindow {
                 initial,
             ),
             NavRequest::Artist { id, name } => match id {
+                Some(id) if crate::net::soundcloud::is_soundcloud_id(&id) => self.open_soundcloud_collection(&id, &name),
                 Some(id) => self.open_artist(&id, Some(&name)),
                 None => self.resolve_artist_from_player(),
             },
@@ -1502,7 +1459,6 @@ impl MainWindow {
         self.ui
             .nav
             .set_library_refresh(move || {
-                // Local changes show at once. Signed in, the account's lists reload too.
                 library.refresh_local_items();
                 library.load_library(false);
             });
@@ -1518,7 +1474,6 @@ impl MainWindow {
             }
         });
 
-        // Each tab's navigation view drives the back button.
         let mut child = self.view_stack.first_child();
         while let Some(widget) = child {
             if let Some(nav) = widget.downcast_ref::<adw::NavigationView>() {
@@ -1545,7 +1500,6 @@ impl MainWindow {
                 }
             });
 
-        // Clicking the active tab again returns to its root page.
         for widget in [
             self.switcher.clone().upcast::<gtk::Widget>(),
             self.view_switcher_bar.clone().upcast(),
@@ -1569,7 +1523,6 @@ impl MainWindow {
             widget.add_controller(click);
         }
 
-        // Sidebar visibility mirrors into the bar and the window control placement.
         {
             let player_bar = self.player_bar.clone();
             let cover_view = self.cover_view.clone();
@@ -1609,7 +1562,6 @@ impl MainWindow {
         self.split_view.set_show_sidebar(show);
     }
 
-    // -- search -----------------------------------------------------------
 
     fn wire_search(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
@@ -1643,14 +1595,12 @@ impl MainWindow {
                 id.remove();
             }
             let text = entry.text().to_string();
-            // A pasted YouTube link opens what it points at instead of searching for it.
             if crate::net::links::is_youtube_url(&text) && w.open_link(&text) {
                 let entry = entry.clone();
                 glib::idle_add_local_once(move || entry.set_text(""));
                 w.search_bar.set_search_mode(false);
                 return;
             }
-            // The library, a playlist or a discography filters its own rows instead.
             if let Some(filter) = w.active_filter() {
                 filter(&text);
                 return;
@@ -1690,7 +1640,6 @@ impl MainWindow {
         self.explore.show_results(text);
     }
 
-    // -- breakpoints and compact mode -------------------------------------
 
     fn wire_breakpoints(self: &Rc<Self>) {
         let collapse = adw::Breakpoint::new(adw::BreakpointCondition::new_length(
@@ -1729,7 +1678,6 @@ impl MainWindow {
         }
         self.is_compact.set(compact);
         self.ui.set_compact(compact);
-        // No `compact` class on the window, a class this high restyles every widget. Pages scope it themselves.
         if compact {
             if self.main_stack.visible_child_name().as_deref() == Some("cover") {
                 let prev = self.main_stack.transition_type();
@@ -1743,7 +1691,6 @@ impl MainWindow {
             self.player_bar.set_compact(true);
             self.attach_bottom_bar_to_sheet();
             self.split_view.set_show_sidebar(false);
-            // Set once and kept: taking the sheet out restyles the whole drawer on the next flip.
             if self.bottom_sheet.sheet().is_none() {
                 self.bottom_sheet
                     .set_sheet(Some(self.expanded_player.widget()));
@@ -1768,12 +1715,10 @@ impl MainWindow {
         self.sync_player_bar_visibility();
     }
 
-    /// Hand the player bar and switcher to the sheet so a pull-up opens the drawer.
     fn attach_bottom_bar_to_sheet(&self) {
         if self.bottom_sheet.bottom_bar().is_some() {
             return;
         }
-        // The player bar comes out of its slot, the switcher out of the toolbar view.
         self.player_bar_slot.remove(&self.player_bar_revealer);
         self.root_content_view.remove(&self.view_switcher_bar);
         self.sheet_bottom_bar.append(&self.player_bar_revealer);
@@ -1791,7 +1736,6 @@ impl MainWindow {
             return;
         }
         self.bottom_sheet.set_bottom_bar(gtk::Widget::NONE);
-        // The sheet stays parented for the next flip, so the desktop layout must not open it.
         self.bottom_sheet.set_can_open(false);
         self.player_bar.set_sheet_bar(false);
         self.sheet_bottom_bar.remove(&self.player_bar_revealer);
@@ -1800,7 +1744,6 @@ impl MainWindow {
         self.root_content_view.add_bottom_bar(&self.view_switcher_bar);
     }
 
-    // -- state, keys ------------------------------------------------------
 
     fn wire_state(self: &Rc<Self>, state: &PlayerState) {
         let weak = Rc::downgrade(self);
@@ -1842,8 +1785,6 @@ impl MainWindow {
         });
     }
 
-    /// Escape closes search or goes back, space toggles playback, media keys skip,
-    /// and a printable key opens search with that character.
     fn install_key_controller(self: &Rc<Self>) {
         let ctrl = gtk::EventControllerKey::new();
         ctrl.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -1913,7 +1854,6 @@ fn queue_header_of(panel: &Rc<QueuePanel>) -> adw::HeaderBar {
     panel.header_bar.clone()
 }
 
-/// One AdwNavigationView per tab, its root page tagged "root".
 fn create_tab_nav(content: &gtk::Widget, title: &str) -> adw::NavigationView {
     let page = adw::NavigationPage::builder()
         .child(content)
@@ -1926,9 +1866,7 @@ fn create_tab_nav(content: &gtk::Widget, title: &str) -> adw::NavigationView {
     nav
 }
 
-// -- header pieces -------------------------------------------------------
 
-/// Flat header button drawing a pie of a fraction, with a popover for the item list.
 pub struct ProgressButton {
     button: gtk::Button,
     area: gtk::DrawingArea,
@@ -2018,12 +1956,10 @@ impl ProgressButton {
         })
     }
 
-    /// Open the popover, what a click on the pie does.
     pub fn popup(&self) {
         self.button.emit_clicked();
     }
 
-    /// Container for per-item rows inside the popover, filled by the download manager later.
     pub fn items_box(&self) -> &gtk::Box {
         &self.items_box
     }
@@ -2040,8 +1976,6 @@ impl ProgressButton {
     }
 }
 
-/// Refresh button plus spinner, shown only on the Library tab.
-/// The header-bar refresh button and its spinner, shown for the library root and user playlists.
 pub struct LibraryRefresh {
     root: gtk::Box,
     button: gtk::Button,
@@ -2074,7 +2008,6 @@ fn build_library_refresh() -> LibraryRefresh {
     }
 }
 
-/// The first scrolled window under `widget` that has somewhere to scroll.
 fn first_scroller(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
     if let Some(scroller) = widget.downcast_ref::<gtk::ScrolledWindow>() {
         let adj = scroller.vadjustment();
@@ -2092,19 +2025,15 @@ fn first_scroller(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
     None
 }
 
-/// The bigger of the two avatars, which is the size its photo is fetched for.
 const AVATAR_LARGE: u32 = 48;
 
-/// What the search bar types into when a page filters itself.
 type SearchFilter = Rc<dyn Fn(&str)>;
 
-/// A page pushed onto a tab's navigation view, kept beside its widget.
 #[derive(Clone)]
 pub enum PushedPage {
     Playlist(Rc<PlaylistPage>),
     Discography(Rc<DiscographyPage>),
     Artist(Rc<ArtistPage>),
-    /// Held only so the page outlives the call that pushed it.
     #[allow(dead_code)]
     Category(Rc<CategoryPage>),
     #[allow(dead_code)]
@@ -2122,7 +2051,6 @@ impl PushedPage {
         }
     }
 
-    /// Whether the search bar filters this page instead of running a search.
     fn is_filterable(&self) -> bool {
         !matches!(self, PushedPage::Artist(_) | PushedPage::Category(_) | PushedPage::History(_))
     }
@@ -2134,7 +2062,6 @@ enum RefreshTarget {
     History(Rc<HistoryPage>),
 }
 
-/// Hamburger with the theme swatches row on top, then the app entries.
 fn build_primary_menu(window: &adw::ApplicationWindow) -> gtk::MenuButton {
     let menu = gio::Menu::new();
     let theme_section = gio::Menu::new();
@@ -2164,7 +2091,6 @@ fn build_primary_menu(window: &adw::ApplicationWindow) -> gtk::MenuButton {
     btn
 }
 
-/// Three radio swatches (System, Light, Dark) driving the win.color-scheme action.
 fn build_theme_swatches(window: &adw::ApplicationWindow) -> gtk::Box {
     let row = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
@@ -2238,7 +2164,6 @@ fn build_theme_swatches(window: &adw::ApplicationWindow) -> gtk::Box {
     row
 }
 
-/// Widgets in the account popover header that follow the signed-in profile.
 struct AvatarProfile {
     small: adw::Avatar,
     large: adw::Avatar,
@@ -2314,7 +2239,6 @@ impl AvatarProfile {
     }
 }
 
-/// Account button: avatar, profile header, account entries and Sign In / Log Out.
 fn build_avatar_menu() -> (gtk::MenuButton, Rc<AvatarProfile>) {
     let small = adw::Avatar::new(28, None, false);
     let menu_btn = gtk::MenuButton::builder()
@@ -2429,7 +2353,6 @@ fn sidebar_position(ctx: &Rc<App>) -> gtk::PackType {
     }
 }
 
-/// Route window controls to whichever pane owns the outer trailing edge.
 fn apply_window_controls_position(
     split_view: &adw::OverlaySplitView,
     content_hdr: &adw::HeaderBar,
@@ -2444,7 +2367,6 @@ fn apply_window_controls_position(
     sidebar_hdr.set_show_end_title_buttons(sidebar_owns_trailing);
 }
 
-// -- actions -------------------------------------------------------------
 
 fn install_actions(
     window: &adw::ApplicationWindow,
@@ -2488,13 +2410,10 @@ fn install_actions(
                     .copyright("© 2026 Matko802")
                     .license_type(gtk::License::Gpl30)
                     .build();
-                // "GitHub repo" replaces the stock Website row and goes to our repo.
                 dialog.add_link(
                     "GitHub repo",
                     "https://github.com/Matko802/musishark",
                 );
-                // Green version + original-creator row (styled in style.css
-                // as the last link row); opens the creator's GitHub repos.
                 dialog.add_link(
                     &format!(
                         "{} · original creator m-obeid",
@@ -2603,7 +2522,6 @@ fn install_actions(
         );
     }
     {
-        // Carries the artist's browse id and name, which the library card has.
         let ctx = ctx.clone();
         let action = gio::SimpleAction::new("open-upload-artist", Some(&<(String, String)>::static_variant_type()));
         action.connect_activate(move |_, parameter| {
@@ -2638,7 +2556,6 @@ fn install_actions(
         );
     }
 
-    // Stateful color scheme: "default", "light" or "dark", persisted in prefs.json.
     let current = ctx
         .paths
         .read_prefs()
@@ -2687,7 +2604,6 @@ fn apply_color_scheme(value: &str) {
     adw::StyleManager::default().set_color_scheme(scheme);
 }
 
-/// Shortcut list as an AdwDialog, matching the sections of the Python dialog.
 fn build_shortcuts_dialog() -> adw::Dialog {
     let page = adw::PreferencesPage::new();
     for (title, entries) in [
@@ -2727,7 +2643,6 @@ fn build_shortcuts_dialog() -> adw::Dialog {
         .build()
 }
 
-/// Hide instead of quitting while something is queued, unless background play is off.
 fn install_close_handler(window: &adw::ApplicationWindow, ctx: &Rc<App>) {
     let state = ctx.player.state().clone();
     let paths = ctx.paths.clone();
