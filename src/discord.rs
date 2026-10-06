@@ -139,6 +139,9 @@ fn open_ipc(path: &std::path::Path) -> std::io::Result<IpcStream> {
 fn wait_for_reply(_stream: &IpcStream) -> std::io::Result<()> {
     Ok(())
 }
+
+/// Every path a Discord client exposes, Flatpak and Snap variants included.
+fn candidate_ipc_paths() -> Vec<PathBuf> {
     let mut bases: Vec<PathBuf> = Vec::new();
     if let Some(xdg) = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from) {
         bases.push(xdg.clone());
