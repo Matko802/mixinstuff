@@ -148,7 +148,7 @@ impl Player {
     }
 
     fn backfill_album(&self, track: &Track) {
-        if track.album.is_some() || track.video_id.0.is_empty() || track.is_upload() || track.video_id.0.starts_with("demo:") || track.video_id.is_soundcloud() {
+        if track.album.is_some() || track.video_id.0.is_empty() || track.is_upload() || track.video_id.0.starts_with("demo:") || track.video_id.is_external() {
             return;
         }
         let api = self.net.client().api();
@@ -243,22 +243,28 @@ impl Player {
 
     pub fn set_like_status(&self, video_id: VideoId, status: LikeStatus) {
         let client = self.net.client().clone();
-        if video_id.is_soundcloud() {
+        if video_id.is_external() {
             let known = self.queue.borrow().tracks().iter().find(|t| t.video_id == video_id).cloned();
             let track = self.local.track_or_stub(&video_id, known);
             self.local.set_liked(&track, status == LikeStatus::Like);
             self.apply_like_locally(&video_id, status);
             self.state.emit_queue_changed();
-            let sc = self.net.soundcloud().clone();
+            let net = self.net.clone();
             let id = video_id.0.clone();
+            let like = status == LikeStatus::Like;
             self.net.spawn(async move {
-                let Some(crate::net::soundcloud::ScId::Track(n)) = crate::net::soundcloud::parse_sc_id(&id) else { return };
-                let synced = match status {
-                    LikeStatus::Like => sc.like(n).await,
-                    _ => sc.unlike(n).await,
-                };
-                if let Err(err) = synced {
-                    tracing::debug!(%err, "soundcloud like not synced");
+                if let Some(crate::net::soundcloud::ScId::Track(n)) = crate::net::soundcloud::parse_sc_id(&id) {
+                    let synced = match like {
+                        true => net.soundcloud().like(n).await,
+                        false => net.soundcloud().unlike(n).await,
+                    };
+                    if let Err(err) = synced {
+                        tracing::debug!(%err, "soundcloud like not synced");
+                    }
+                } else if let Some(crate::net::watchshark::WsId::Track(n)) = crate::net::watchshark::parse_ws_id(&id) {
+                    if let Err(err) = net.watchshark().set_like(n, like).await {
+                        tracing::debug!(%err, "watchshark like not synced");
+                    }
                 }
             });
             return;
@@ -606,11 +612,11 @@ impl Player {
             }
             return;
         }
-        let auth = if track.video_id.is_soundcloud() { None } else { self.net.client().media_auth() };
+        let auth = if track.video_id.is_external() { None } else { self.net.client().media_auth() };
         let resolver = self.net.resolver().clone();
         let video_id = track.video_id.clone();
         let resolve_auth = auth.clone();
-        let swap = !arm_only && !track.video_id.is_soundcloud() && self.wants_audio_version(&track);
+        let swap = !arm_only && !track.video_id.is_external() && self.wants_audio_version(&track);
         let api = self.net.client().api();
         let handle = self.net.spawn(async move {
             if !swap {
@@ -1164,16 +1170,11 @@ impl Player {
         let stamp = format!("home-radio:{seed}:{}", self.next_stamp());
         self.play_tracks(tracks, start_index, false, Some(stamp.clone()), false);
 
-        if seed.starts_with("sc:") {
-            let sc = self.net.soundcloud().clone();
+        if crate::net::soundcloud::is_soundcloud_id(seed) || crate::net::watchshark::is_watchshark_id(seed) {
+            let net = self.net.clone();
             let seed_id = seed.to_owned();
-            let radio_source = format!("scradio:{seed}");
-            let handle = self.net.spawn(async move {
-                match crate::net::soundcloud::parse_sc_id(&seed_id) {
-                    Some(crate::net::soundcloud::ScId::Track(id)) => sc.related(id).await.unwrap_or_default(),
-                    _ => Vec::new(),
-                }
-            });
+            let radio_source = format!("extradio:{seed}");
+            let handle = self.net.spawn(async move { provider_radio_tracks(&net, &seed_id).await.unwrap_or_default() });
             let weak = Rc::downgrade(self);
             glib::spawn_future_local(async move {
                 let fresh = handle.await.unwrap_or_default();
@@ -1274,16 +1275,37 @@ impl Player {
             });
             return;
         }
-        if video_id.as_deref().is_some_and(|v| v.starts_with("sc:")) {
-            let sc = self.net.soundcloud().clone();
-            let seed = video_id.clone().unwrap_or_default();
-            let fetch_seed = seed.clone();
+        if playlist_id.as_deref().is_some_and(crate::net::watchshark::is_watchshark_id) {
+            let ws = self.net.watchshark().clone();
+            let list = playlist_id.clone().unwrap_or_default();
             let handle = self.net.spawn(async move {
-                match crate::net::soundcloud::parse_sc_id(&fetch_seed) {
-                    Some(crate::net::soundcloud::ScId::Track(id)) => sc.related(id).await.unwrap_or_default(),
+                use crate::net::watchshark::WsId;
+                let fetched = match crate::net::watchshark::parse_ws_id(&list) {
+                    Some(WsId::User(name)) => ws.channel_tracks(&name).await.map(|(_, tracks)| tracks).unwrap_or_default(),
                     _ => Vec::new(),
+                };
+                let seed = fetched.last().map(|t| t.video_id.0.clone()).unwrap_or_default();
+                (fetched, seed)
+            });
+            let weak = Rc::downgrade(self);
+            glib::spawn_future_local(async move {
+                let (tracks, seed) = handle.await.unwrap_or_default();
+                if tracks.is_empty() {
+                    tracing::warn!("radio: no tracks returned");
+                    return;
+                }
+                if let Some(player) = weak.upgrade() {
+                    player.play_tracks(tracks, 0, false, Some(format!("wsradio:{seed}")), true);
                 }
             });
+            return;
+        }
+        if video_id.as_deref().is_some_and(|v| crate::net::soundcloud::is_soundcloud_id(v) || crate::net::watchshark::is_watchshark_id(v)) {
+            let net = self.net.clone();
+            let seed = video_id.clone().unwrap_or_default();
+            let fetch_seed = seed.clone();
+            let tag = if seed.starts_with("ws:") { "wsradio" } else { "scradio" };
+            let handle = self.net.spawn(async move { provider_radio_tracks(&net, &fetch_seed).await.unwrap_or_default() });
             let weak = Rc::downgrade(self);
             glib::spawn_future_local(async move {
                 let tracks = handle.await.unwrap_or_default();
@@ -1292,7 +1314,7 @@ impl Player {
                     return;
                 }
                 if let Some(player) = weak.upgrade() {
-                    player.play_tracks(tracks, 0, false, Some(format!("scradio:{seed}")), true);
+                    player.play_tracks(tracks, 0, false, Some(format!("{tag}:{seed}")), true);
                 }
             });
             return;
@@ -1405,9 +1427,9 @@ impl Player {
         let net = self.net.clone();
         let seed_c = seed.clone();
         let handle = self.net.spawn(async move {
-            let all: Vec<Track> = match crate::net::soundcloud::parse_sc_id(&seed_c) {
-                Some(crate::net::soundcloud::ScId::Track(id)) => net.soundcloud().related(id).await.unwrap_or_default(),
-                _ => {
+            let all: Vec<Track> = match provider_radio_tracks(&net, &seed_c).await {
+                Some(tracks) => tracks,
+                None => {
                     let api = net.client().api();
                     crate::net::playlists::radio_tracks(&api, Some(&seed_c), None)
                         .await
@@ -1446,17 +1468,26 @@ impl Player {
     }
 }
 
+async fn provider_radio_tracks(net: &NetHandle, seed: &str) -> Option<Vec<Track>> {
+    if let Some(crate::net::soundcloud::ScId::Track(id)) = crate::net::soundcloud::parse_sc_id(seed) {
+        return Some(net.soundcloud().related(id).await.unwrap_or_default());
+    }
+    if let Some(crate::net::watchshark::WsId::Track(id)) = crate::net::watchshark::parse_ws_id(seed) {
+        let Ok(track) = net.watchshark().video(id).await else { return Some(Vec::new()) };
+        return Some(net.watchshark().related(&track).await.unwrap_or_default());
+    }
+    None
+}
+
 async fn fetch_new_radio_tracks(
     net: &NetHandle,
     video_id: Option<&str>,
     playlist_id: Option<&str>,
     existing: &std::collections::HashSet<String>,
 ) -> Vec<Track> {
-    if video_id.is_some_and(|v| v.starts_with("sc:")) {
-        let tracks = match video_id.and_then(crate::net::soundcloud::parse_sc_id) {
-            Some(crate::net::soundcloud::ScId::Track(id)) => net.soundcloud().related(id).await.unwrap_or_default(),
-            _ => Vec::new(),
-        };
+    if video_id.is_some_and(|v| crate::net::soundcloud::is_soundcloud_id(v) || crate::net::watchshark::is_watchshark_id(v)) {
+        let id = video_id.unwrap_or_default();
+        let tracks = provider_radio_tracks(net, id).await.unwrap_or_default();
         return tracks.into_iter().filter(|t| !t.video_id.0.is_empty() && !existing.contains(&t.video_id.0)).collect();
     }
     match crate::net::playlists::radio_tracks(&net.client().api(), video_id, playlist_id).await {

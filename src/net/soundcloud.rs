@@ -215,18 +215,31 @@ impl SoundCloud {
     }
 
     pub async fn charts(&self) -> Result<Vec<HomeSection>, NetError> {
-        const GENRES: [(&str, &str); 4] = [("Top tracks", "all-music"), ("Hip-hop", "hiphop"), ("Electronic", "electronic"), ("Pop", "pop")];
         let mut sections = Vec::new();
-        for (title, genre) in GENRES {
-            let response = self.get("charts", &[("kind", "top".into()), ("genre", format!("soundcloud:genres:{genre}")), ("limit", "20".into())]).await;
-            let Ok(response) = response else { continue };
+        if let Ok(response) = self.get("charts", &[("kind", "trending".into()), ("genre", "soundcloud:genres:all-music".into()), ("limit", "20".into())]).await {
             let items: Vec<MediaItem> = response
                 .get("collection")
                 .and_then(|c| c.as_array())
                 .map(|c| c.iter().filter_map(|e| e.get("track")).filter_map(track_item).collect())
                 .unwrap_or_default();
             if !items.is_empty() {
-                sections.push(HomeSection { title: title.to_owned(), items, strapline_thumb: None, strapline: Some("SoundCloud charts".into()) });
+                sections.push(HomeSection { title: "Trending".to_owned(), items, strapline_thumb: None, strapline: Some("SoundCloud charts".into()) });
+            }
+        }
+        for genre in ["Hip-hop", "Electronic", "Pop"] {
+            let Ok(response) = self
+                .get("search", &[("q", genre.to_owned()), ("facet", "model".into()), ("limit", "20".into()), ("linked_partitioning", "1".into())])
+                .await
+            else {
+                continue;
+            };
+            let items: Vec<MediaItem> = response
+                .get("collection")
+                .and_then(|c| c.as_array())
+                .map(|c| c.iter().filter_map(|e| track_item(e)).collect())
+                .unwrap_or_default();
+            if !items.is_empty() {
+                sections.push(HomeSection { title: genre.to_owned(), items, strapline_thumb: None, strapline: Some("SoundCloud".into()) });
             }
         }
         if sections.is_empty() {
@@ -528,5 +541,13 @@ mod tests {
         assert_eq!(crate::model::compact_count(999), "999");
         assert_eq!(crate::model::compact_count(1500), "1.5K");
         assert_eq!(crate::model::compact_count(19645686), "19.6M");
+    }
+
+    #[test]
+    fn trending_entries_unwrap_their_track() {
+        let response = serde_json::json!({"kind": "trending", "collection": [{"track": track_json(), "score": 99}]});
+        let items: Vec<MediaItem> = response.get("collection").and_then(|c| c.as_array()).map(|c| c.iter().filter_map(|e| e.get("track")).filter_map(track_item).collect()).unwrap_or_default();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "sc:191477804");
     }
 }

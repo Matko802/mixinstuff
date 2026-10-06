@@ -2,26 +2,30 @@ use crate::paths::Paths;
 
 pub const YOUTUBE: &str = "youtube";
 pub const SOUNDCLOUD: &str = "soundcloud";
+pub const WATCHSHARK: &str = "watchshark";
 
 const YTM_ENABLED_PREF: &str = "provider_ytmusic_enabled";
 const SC_ENABLED_PREF: &str = "provider_soundcloud_enabled";
+const WS_ENABLED_PREF: &str = "provider_watchshark_enabled";
 const ACTIVE_PREF: &str = "music_provider_active";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Provider {
     YouTube,
     SoundCloud,
+    WatchShark,
 }
 
 impl Provider {
-    pub fn all() -> [Provider; 2] {
-        [Provider::YouTube, Provider::SoundCloud]
+    pub fn all() -> [Provider; 3] {
+        [Provider::YouTube, Provider::SoundCloud, Provider::WatchShark]
     }
 
     pub fn id(self) -> &'static str {
         match self {
             Provider::YouTube => YOUTUBE,
             Provider::SoundCloud => SOUNDCLOUD,
+            Provider::WatchShark => WATCHSHARK,
         }
     }
 
@@ -29,6 +33,7 @@ impl Provider {
         match self {
             Provider::YouTube => "YouTube Music",
             Provider::SoundCloud => "SoundCloud",
+            Provider::WatchShark => "WatchShark",
         }
     }
 
@@ -36,12 +41,14 @@ impl Provider {
         match self {
             Provider::YouTube => "youtube-music-symbolic",
             Provider::SoundCloud => "soundcloud-symbolic",
+            Provider::WatchShark => "watchshark-symbolic",
         }
     }
 
     pub fn parse(id: &str) -> Self {
         match id {
             SOUNDCLOUD => Provider::SoundCloud,
+            WATCHSHARK => Provider::WatchShark,
             _ => Provider::YouTube,
         }
     }
@@ -67,19 +74,31 @@ pub fn set_sc_enabled(paths: &Paths, enabled: bool) {
     });
 }
 
+pub fn ws_enabled(paths: &Paths) -> bool {
+    paths.read_prefs().get(WS_ENABLED_PREF).and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
+pub fn set_ws_enabled(paths: &Paths, enabled: bool) {
+    paths.update_prefs(|p| {
+        p.insert(WS_ENABLED_PREF.to_owned(), enabled.into());
+    });
+}
+
 pub fn enabled_providers(paths: &Paths) -> Vec<Provider> {
     Provider::all().into_iter().filter(|p| match p {
         Provider::YouTube => ytm_enabled(paths),
         Provider::SoundCloud => sc_enabled(paths),
+        Provider::WatchShark => ws_enabled(paths),
     }).collect()
 }
 
 pub fn active(paths: &Paths) -> Provider {
     let want = Provider::parse(paths.read_prefs().get(ACTIVE_PREF).and_then(|v| v.as_str()).unwrap_or(YOUTUBE));
-    if enabled_providers(paths).contains(&want) {
+    let enabled = enabled_providers(paths);
+    if enabled.contains(&want) {
         return want;
     }
-    if ytm_enabled(paths) { Provider::YouTube } else { Provider::SoundCloud }
+    enabled.into_iter().next().unwrap_or(Provider::YouTube)
 }
 
 pub fn set_active(paths: &Paths, provider: Provider) {

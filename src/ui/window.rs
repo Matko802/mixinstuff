@@ -412,6 +412,11 @@ impl MainWindow {
         self.explore.sync_provider();
     }
 
+    pub fn reload_provider_content(self: &Rc<Self>) {
+        self.home.load_home_data(true);
+        self.explore.reload_content();
+    }
+
     pub fn force_offline_changed(self: &Rc<Self>) {
         self.ui.online.invalidate();
         self.ui.online.probe_now(None);
@@ -908,21 +913,29 @@ impl MainWindow {
         self.open_playlist(id, None);
     }
 
-    fn open_soundcloud_collection(self: &Rc<Self>, id: &str, title: &str) {
+    fn open_external_collection(self: &Rc<Self>, id: &str, title: &str) {
         let page = PlaylistPage::new(self.ui.clone());
-        let nav_page = adw::NavigationPage::builder().child(page.widget()).title(format!("SoundCloud_{id}")).build();
+        let nav_page = adw::NavigationPage::builder().child(page.widget()).title(format!("External_{id}")).build();
         page.prepare_virtual(id);
         self.push_page(nav_page);
-        let sc = self.ui.net.soundcloud().clone();
+        let net = self.ui.net.clone();
         let id = id.to_owned();
         let known_title = title.to_owned();
         let handle = self.ui.net.spawn(async move {
             use crate::net::soundcloud::ScId;
-            match crate::net::soundcloud::parse_sc_id(&id) {
-                Some(ScId::Playlist(n)) => sc.playlist(n).await,
-                Some(ScId::User(n)) => sc.user_tracks(n).await,
-                _ => Err(crate::net::ytmusic::NetError::Message("Not a SoundCloud set or artist".into())),
+            use crate::net::watchshark::WsId;
+            if let Some(sc_id) = crate::net::soundcloud::parse_sc_id(&id) {
+                let sc = net.soundcloud().clone();
+                return match sc_id {
+                    ScId::Playlist(n) => sc.playlist(n).await,
+                    ScId::User(n) => sc.user_tracks(n).await,
+                    _ => Err(crate::net::ytmusic::NetError::Message("Not a SoundCloud set or artist".into())),
+                };
             }
+            if let Some(WsId::User(name)) = crate::net::watchshark::parse_ws_id(&id) {
+                return net.watchshark().channel_tracks(&name).await;
+            }
+            Err(crate::net::ytmusic::NetError::Message("Not an external set or artist".into()))
         });
         glib::spawn_future_local(async move {
             let outcome = handle.await;
@@ -1184,6 +1197,9 @@ impl MainWindow {
         if text.contains("soundcloud.com") {
             return self.open_soundcloud_link(text);
         }
+        if text.contains("watchshark") {
+            return self.open_watchshark_link(text);
+        }
         if !crate::net::links::is_youtube_url(text) {
             return false;
         }
@@ -1233,6 +1249,34 @@ impl MainWindow {
             }
         });
         true
+    }
+
+    fn open_watchshark_link(self: &Rc<Self>, text: &str) -> bool {
+        let text = text.trim().to_owned();
+        let video_id = ["?id=", "&id=", "/watch/"].iter().filter_map(|m| text.split_once(m).map(|(_, after)| after)).next().map(|s| s.split(['&', '?', '/']).next().unwrap_or_default().to_owned()).filter(|s| !s.is_empty());
+        if let Some(id) = video_id.and_then(|s| s.parse::<i64>().ok()) {
+            let ws = self.ui.net.watchshark().clone();
+            let handle = self.ui.net.spawn(async move { ws.video(id).await });
+            let weak = Rc::downgrade(self);
+            glib::spawn_future_local(async move {
+                let Some(w) = weak.upgrade() else { return };
+                match handle.await {
+                    Ok(Ok(track)) => w.ui.player.play_tracks(vec![track], 0, false, None, false),
+                    Ok(Err(err)) => {
+                        tracing::warn!(%err, "watchshark link did not resolve");
+                        w.add_toast("Could not open the link");
+                    }
+                    Err(_) => {}
+                }
+            });
+            return true;
+        }
+        let user = ["?user=", "&user="].iter().filter_map(|m| text.split_once(m).map(|(_, after)| after)).next().map(|s| s.split(['&', '?', '/']).next().unwrap_or_default().to_owned()).filter(|s| !s.is_empty());
+        if let Some(user) = user {
+            self.navigate(NavRequest::Artist { id: Some(crate::net::watchshark::user_item_id(&user)), name: user });
+            return true;
+        }
+        false
     }
 
     pub fn open_history(self: &Rc<Self>) {
@@ -1403,8 +1447,8 @@ impl MainWindow {
     fn navigate(self: &Rc<Self>, request: NavRequest) {
         match request {
             NavRequest::Playlist { id, title, thumb } | NavRequest::Album { id, title, thumb } => {
-                if crate::net::soundcloud::is_soundcloud_id(&id) {
-                    self.open_soundcloud_collection(&id, &title);
+                if crate::net::soundcloud::is_soundcloud_id(&id) || crate::net::watchshark::is_watchshark_id(&id) {
+                    self.open_external_collection(&id, &title);
                     return;
                 }
                 self.open_playlist(
@@ -1430,7 +1474,7 @@ impl MainWindow {
                 initial,
             ),
             NavRequest::Artist { id, name } => match id {
-                Some(id) if crate::net::soundcloud::is_soundcloud_id(&id) => self.open_soundcloud_collection(&id, &name),
+                Some(id) if crate::net::soundcloud::is_soundcloud_id(&id) || crate::net::watchshark::is_watchshark_id(&id) => self.open_external_collection(&id, &name),
                 Some(id) => self.open_artist(&id, Some(&name)),
                 None => self.resolve_artist_from_player(),
             },

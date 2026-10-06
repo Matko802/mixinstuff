@@ -108,14 +108,21 @@ pub struct PlayerEndpointResolver {
     fallback: Arc<dyn StreamResolver>,
     ytdlp: Arc<super::stream::YtDlpResolver>,
     soundcloud: Arc<super::soundcloud::SoundCloud>,
+    watchshark: Arc<super::watchshark::WatchShark>,
     cache: StreamCache,
     visitor: Mutex<Option<(String, Instant)>>,
 }
 
 impl PlayerEndpointResolver {
-    pub fn new(paths: &Paths, fallback: Arc<dyn StreamResolver>, ytdlp: Arc<super::stream::YtDlpResolver>, soundcloud: Arc<super::soundcloud::SoundCloud>) -> Self {
+    pub fn new(
+        paths: &Paths,
+        fallback: Arc<dyn StreamResolver>,
+        ytdlp: Arc<super::stream::YtDlpResolver>,
+        soundcloud: Arc<super::soundcloud::SoundCloud>,
+        watchshark: Arc<super::watchshark::WatchShark>,
+    ) -> Self {
         let http = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).gzip(true).build().unwrap_or_default();
-        Self { http, fallback, ytdlp, soundcloud, cache: StreamCache::new(paths.stream_cache_dir.clone()), visitor: Mutex::new(None) }
+        Self { http, fallback, ytdlp, soundcloud, watchshark, cache: StreamCache::new(paths.stream_cache_dir.clone()), visitor: Mutex::new(None) }
     }
 
     pub async fn warm(&self) {
@@ -217,6 +224,18 @@ impl PlayerEndpointResolver {
         self.cache.put(video_id, &info.uri).await;
         Ok(info)
     }
+    async fn resolve_watchshark(&self, video_id: &VideoId) -> Result<StreamInfo, ResolveError> {
+        if let Some(uri) = self.cache.get(video_id).await {
+            return Ok(StreamInfo { uri, from_cache: true, ..StreamInfo::default() });
+        }
+        let Some(crate::net::watchshark::WsId::Track(id)) = crate::net::watchshark::parse_ws_id(video_id.as_str()) else {
+            return Err(ResolveError::Unavailable("not a WatchShark track".into()));
+        };
+        let (uri, ext) = self.watchshark.stream_url(id).await.map_err(|e| ResolveError::Unavailable(e.to_string()))?;
+        let info = StreamInfo { uri: uri.clone(), ext, protocol: Some("https".to_owned()), ..StreamInfo::default() };
+        self.cache.put(video_id, &uri).await;
+        Ok(info)
+    }
 }
 
 impl StreamResolver for PlayerEndpointResolver {
@@ -224,6 +243,9 @@ impl StreamResolver for PlayerEndpointResolver {
         Box::pin(async move {
             if video_id.is_soundcloud() {
                 return self.resolve_soundcloud(&video_id).await;
+            }
+            if crate::net::watchshark::is_watchshark_id(video_id.as_str()) {
+                return self.resolve_watchshark(&video_id).await;
             }
             if let Some(uri) = self.cache.get(&video_id).await {
                 if uri.contains("yt_live_broadcast") || crate::audio::is_live_uri(&uri) {
@@ -305,7 +327,8 @@ mod tests {
         let tokens = Arc::new(crate::net::potoken::PoTokens::new(&paths));
         let ytdlp = Arc::new(crate::net::stream::YtDlpResolver::new(&paths, tokens));
         let sc = crate::net::soundcloud::SoundCloud::new(&paths);
-        let resolver = PlayerEndpointResolver::new(&paths, Arc::new(Never), ytdlp, sc);
+        let ws = crate::net::watchshark::WatchShark::new(&paths);
+        let resolver = PlayerEndpointResolver::new(&paths, Arc::new(Never), ytdlp, sc, ws);
         let http = resolver.http.clone();
         let visitor = resolver.visitor_data().await.unwrap();
         let response: Value = http.post(PLAYER_URL).header("User-Agent", CLIENT_USER_AGENT).header("X-YouTube-Client-Name", CLIENT_ID).header("X-YouTube-Client-Version", CLIENT_VERSION).header("X-Goog-Visitor-Id", &visitor).json(&player_body("h4hy2Gn-FVE", &visitor)).send().await.unwrap().json().await.unwrap();
@@ -359,7 +382,8 @@ mod tests {
         let tokens = Arc::new(crate::net::potoken::PoTokens::new(&paths));
         let ytdlp = Arc::new(crate::net::stream::YtDlpResolver::new(&paths, tokens));
         let sc = crate::net::soundcloud::SoundCloud::new(&paths);
-        let resolver = PlayerEndpointResolver::new(&paths, Arc::new(Never), ytdlp, sc);
+        let ws = crate::net::watchshark::WatchShark::new(&paths);
+        let resolver = PlayerEndpointResolver::new(&paths, Arc::new(Never), ytdlp, sc, ws);
         for id in ["J7p4bzqLvCw", "CuklIb9d3fI"] {
             let started = Instant::now();
             let info = resolver.resolve(VideoId(id.to_owned()), None).await.unwrap();

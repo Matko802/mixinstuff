@@ -166,6 +166,17 @@ impl ExplorePage {
         self.load_explore_data(true);
     }
 
+    pub fn reload_content(self: &Rc<Self>) {
+        let query = self.current_query.borrow().clone();
+        match query {
+            Some(q) => {
+                self.current_query.replace(None);
+                self.show_results(&q);
+            }
+            None => self.load_explore_data(true),
+        }
+    }
+
     pub fn set_compact(&self, compact: bool) {
         if compact {
             self.stack.add_css_class("compact");
@@ -235,6 +246,35 @@ impl ExplorePage {
                     Ok(_) => page.update_explore_ui(None),
                     Err(err) => {
                         tracing::warn!(%err, "soundcloud charts failed");
+                        page.update_explore_ui(None);
+                    }
+                }
+            });
+            return;
+        }
+        if want == Provider::WatchShark {
+            self.clear_explore();
+            self.explore_box.append(&loading_box("Loading…"));
+            let ws = self.ctx.net.watchshark().clone();
+            let handle = self.ctx.net.spawn(async move { ws.home_sections().await });
+            self.explore_inflight.replace(Some(handle.abort_handle()));
+            let weak = Rc::downgrade(self);
+            glib::spawn_future_local(async move {
+                let outcome = handle.await;
+                let Some(page) = weak.upgrade() else { return };
+                if page.provider_bar.active() != want {
+                    return;
+                }
+                let Ok(result) = outcome else { return };
+                page.explore_inflight.borrow_mut().take();
+                match result {
+                    Ok(sections) if !sections.is_empty() => {
+                        page.landing.replace(want.id().to_owned());
+                        page.render_chart_sections(sections);
+                    }
+                    Ok(_) => page.update_explore_ui(None),
+                    Err(err) => {
+                        tracing::warn!(%err, "watchshark home failed");
                         page.update_explore_ui(None);
                     }
                 }
@@ -563,6 +603,31 @@ impl ExplorePage {
                     Ok(Ok(results)) => page.render_results(&query, results),
                     Ok(Err(err)) => {
                         tracing::warn!(%err, %query, "soundcloud search failed");
+                        toast(&page.stack, &format!("Search failed: {err}"));
+                        page.render_results(&query, SearchResults::default());
+                    }
+                    Err(_) => {}
+                }
+            });
+            return;
+        }
+        if want == Provider::WatchShark {
+            let ws = self.ctx.net.watchshark().clone();
+            let lookup = query.clone();
+            let handle = self.ctx.net.spawn(async move { ws.search(&lookup).await });
+            self.inflight.replace(Some(handle.abort_handle()));
+            let weak = Rc::downgrade(self);
+            glib::spawn_future_local(async move {
+                let outcome = handle.await;
+                let Some(page) = weak.upgrade() else { return };
+                if page.current_query.borrow().as_deref() != Some(query.as_str()) || page.provider_bar.active() != want {
+                    return;
+                }
+                page.inflight.borrow_mut().take();
+                match outcome {
+                    Ok(Ok(results)) => page.render_results(&query, results),
+                    Ok(Err(err)) => {
+                        tracing::warn!(%err, %query, "watchshark search failed");
                         toast(&page.stack, &format!("Search failed: {err}"));
                         page.render_results(&query, SearchResults::default());
                     }
