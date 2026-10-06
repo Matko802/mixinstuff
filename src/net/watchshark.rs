@@ -67,28 +67,27 @@ pub fn user_item_id(username: &str) -> String {
 }
 
 #[derive(Serialize, Deserialize)]
-struct CredsFile {
+struct SessionFile {
     server: String,
-    login: String,
-    password: String,
+    token: String,
 }
 
-fn creds_path(paths: &Paths) -> std::path::PathBuf {
+fn session_path(paths: &Paths) -> std::path::PathBuf {
     paths.data_dir.join("watchshark.json")
 }
 
-fn read_creds(paths: &Paths) -> Option<CredsFile> {
-    std::fs::read_to_string(creds_path(paths)).ok().and_then(|t| serde_json::from_str(&t).ok()).filter(|c: &CredsFile| !c.login.is_empty())
+fn read_session(paths: &Paths) -> Option<SessionFile> {
+    std::fs::read_to_string(session_path(paths)).ok().and_then(|t| serde_json::from_str(&t).ok()).filter(|s: &SessionFile| !s.token.is_empty())
 }
 
-fn write_creds(paths: &Paths, creds: Option<&CredsFile>) {
-    let path = creds_path(paths);
-    match creds {
-        Some(creds) => {
+fn write_session(paths: &Paths, session: Option<&SessionFile>) {
+    let path = session_path(paths);
+    match session {
+        Some(session) => {
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
-            if let Ok(data) = serde_json::to_vec(creds) {
+            if let Ok(data) = serde_json::to_vec(session) {
                 let _ = std::fs::write(&path, data);
                 #[cfg(unix)]
                 {
@@ -119,7 +118,9 @@ impl WatchShark {
             .pool_max_idle_per_host(4)
             .build()
             .unwrap_or_default();
-        Arc::new(Self { http, paths: paths.clone(), server: RwLock::new(server_pref(paths)), username: RwLock::new(None), session: RwLock::new(None) })
+        let server = server_pref(paths);
+        let session = read_session(paths).filter(|s| s.server == server).map(|s| s.token);
+        Arc::new(Self { http, paths: paths.clone(), server: RwLock::new(server), username: RwLock::new(None), session: RwLock::new(session) })
     }
 
     pub async fn server(&self) -> String {
@@ -143,7 +144,7 @@ impl WatchShark {
     }
 
     pub fn has_account(&self) -> bool {
-        read_creds(&self.paths).is_some()
+        self.session.try_read().map(|s| s.is_some()).unwrap_or(false)
     }
 
     pub async fn username(&self) -> Option<String> {
@@ -162,47 +163,27 @@ impl WatchShark {
     }
 
     async fn authed(&self) -> Result<String, NetError> {
-        if let Some(token) = self.session.read().await.clone() {
-            return Ok(token);
-        }
-        let Some(creds) = read_creds(&self.paths) else { return Err(NetError::Unauthenticated) };
-        if creds.server != self.base().await {
-            return Err(NetError::Unauthenticated);
-        }
-        let (name, token) = self.login_inner(&creds.login, &creds.password).await?;
-        *self.username.write().await = Some(name);
-        *self.session.write().await = Some(token.clone());
-        Ok(token)
+        self.session.read().await.clone().ok_or(NetError::Unauthenticated)
     }
 
-    async fn login_inner(&self, login: &str, password: &str) -> Result<(String, String), NetError> {
+    pub async fn adopt_session(&self, token: String) -> Result<String, NetError> {
+        let token = token.trim().to_owned();
+        if token.is_empty() {
+            return Err(NetError::Message("Empty WatchShark session".into()));
+        }
         let base = self.base().await;
-        let response = self
+        let data: serde_json::Value = self
             .http
-            .post(format!("{base}/api/auth/login"))
-            .json(&serde_json::json!({"login": login, "password": password}))
+            .get(format!("{base}/api/me"))
+            .header(reqwest::header::COOKIE, format!("ws_token={token}"))
             .send()
             .await
-            .map_err(NetError::Transport)?;
-        let token = response
-            .headers()
-            .get_all(reqwest::header::SET_COOKIE)
-            .iter()
-            .filter_map(|v| v.to_str().ok())
-            .find_map(|c| c.split(';').next().and_then(|pair| pair.trim().strip_prefix("ws_token=")).map(str::to_owned))
-            .filter(|t| !t.is_empty())
-            .ok_or_else(|| NetError::Message("WatchShark login answered without a session".into()))?;
-        let data = check(response).await?;
-        let name = data.pointer("/user/username").and_then(|u| u.as_str()).filter(|u| !u.is_empty()).map(str::to_owned).ok_or_else(|| NetError::Message("WatchShark rejected the login".into()))?;
-        Ok((name, token))
-    }
-
-    pub async fn login(&self, server: &str, login: &str, password: &str) -> Result<String, NetError> {
-        let clean = normalize_server(server).ok_or_else(|| NetError::Message("Enter a server URL like https://watchshark.duckdns.org".into()))?;
-        *self.server.write().await = clean.clone();
-        let _ = set_server_pref(&self.paths, &clean);
-        let (name, token) = self.login_inner(login, password).await?;
-        write_creds(&self.paths, Some(&CredsFile { server: clean, login: login.trim().to_owned(), password: password.to_owned() }));
+            .map_err(NetError::Transport)?
+            .json()
+            .await
+            .map_err(|_| NetError::Message("Unreadable WatchShark response".into()))?;
+        let name = data.get("user").and_then(|u| u.get("username")).and_then(|u| u.as_str()).filter(|u| !u.is_empty()).map(str::to_owned).ok_or_else(|| NetError::Message("WatchShark rejected the session".into()))?;
+        write_session(&self.paths, Some(&SessionFile { server: base, token: token.clone() }));
         *self.username.write().await = Some(name.clone());
         *self.session.write().await = Some(token);
         Ok(name)
@@ -213,7 +194,7 @@ impl WatchShark {
             let base = self.base().await;
             let _ = self.http.post(format!("{base}/api/auth/logout")).header(reqwest::header::COOKIE, format!("ws_token={token}")).send().await;
         }
-        write_creds(&self.paths, None);
+        write_session(&self.paths, None);
         *self.session.write().await = None;
         *self.username.write().await = None;
     }

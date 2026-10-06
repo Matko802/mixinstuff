@@ -173,16 +173,6 @@ impl ProviderRows {
         }
     }
 
-    fn open_uri(&self, uri: &str) {
-        let Some(win) = self.win.upgrade() else { return };
-        let uri = uri.to_owned();
-        gtk::UriLauncher::new(&uri).launch(Some(win.window()), gtk::gio::Cancellable::NONE, move |result| {
-            if let Err(err) = result {
-                tracing::warn!(%uri, %err, "could not open the browser");
-            }
-        });
-    }
-
     fn sc_account_clicked(self: &Rc<Self>) {
         let sc = self.ctx.net.soundcloud().clone();
         if sc.has_token() {
@@ -195,67 +185,12 @@ impl ProviderRows {
             return;
         }
         let Some(win) = self.win.upgrade() else { return };
-        let dialog = adw::AlertDialog::builder()
-            .heading("Connect SoundCloud")
-            .body("Sign in on soundcloud.com, open the browser devtools (F12) on the Network tab, reload, open any api-v2 request and copy the token from its Authorization header (the part after OAuth). Likes sync only; everything else works without it.")
-            .default_response("connect")
-            .close_response("cancel")
-            .build();
-        let entry = adw::PasswordEntryRow::builder().title("OAuth Token").build();
-        let listbox = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list", "songs-list"]).build();
-        listbox.append(&entry);
-        let link = gtk::Button::builder().label("Open SoundCloud").halign(gtk::Align::Center).build();
-        link.add_css_class("flat");
-        {
-            let this = Rc::downgrade(self);
-            link.connect_clicked(move |_| {
-                if let Some(this) = this.upgrade() {
-                    this.open_uri("https://soundcloud.com/");
-                }
-            });
-        }
-        let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).margin_top(6).build();
-        content.append(&listbox);
-        content.append(&link);
-        dialog.set_extra_child(Some(&content));
-        dialog.add_response("cancel", "Cancel");
-        dialog.add_response("connect", "Connect");
-        dialog.set_response_appearance("connect", adw::ResponseAppearance::Suggested);
-
-        let this = self.clone();
-        dialog.connect_response(None, move |_, response| {
-            if response != "connect" {
-                return;
+        let this = Rc::downgrade(self);
+        win.open_provider_login(Provider::SoundCloud, move || {
+            if let Some(this) = this.upgrade() {
+                this.refresh();
             }
-            let token = entry.text().trim().to_owned();
-            if token.is_empty() {
-                return;
-            }
-            let this = this.clone();
-            glib::spawn_future_local(async move {
-                let sc = this.ctx.net.soundcloud().clone();
-                sc.set_token(Some(token)).await;
-                match this.ctx.net.spawn(async move { sc.me().await }).await {
-                    Ok(Ok(name)) => {
-                        this.refresh();
-                        this.toast(&format!("Connected to SoundCloud as {name}"));
-                    }
-                    Ok(Err(err)) => {
-                        let sc = this.ctx.net.soundcloud().clone();
-                        sc.set_token(None).await;
-                        this.refresh();
-                        this.toast(&format!("SoundCloud: {err}"));
-                    }
-                    Err(err) => {
-                        let sc = this.ctx.net.soundcloud().clone();
-                        sc.set_token(None).await;
-                        this.refresh();
-                        this.toast(&format!("SoundCloud: {err}"));
-                    }
-                }
-            });
         });
-        dialog.present(Some(win.window()));
     }
 
     fn ws_server_clicked(self: &Rc<Self>) {
@@ -303,8 +238,7 @@ impl ProviderRows {
     }
 
     fn ws_account_clicked(self: &Rc<Self>) {
-        let ws = self.ctx.net.watchshark().clone();
-        if ws.has_account() {
+        if self.ctx.net.watchshark().has_account() {
             let this = self.clone();
             glib::spawn_future_local(async move {
                 this.ctx.net.watchshark().logout().await;
@@ -314,48 +248,11 @@ impl ProviderRows {
             return;
         }
         let Some(win) = self.win.upgrade() else { return };
-        let dialog = adw::AlertDialog::builder()
-            .heading("Connect WatchShark")
-            .body("Sign in with your WatchShark account. Needed for likes; browsing works without it.")
-            .default_response("connect")
-            .close_response("cancel")
-            .build();
-        let login_entry = adw::EntryRow::builder().title("Username or Email").build();
-        let password_entry = adw::PasswordEntryRow::builder().title("Password").build();
-        let listbox = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list", "songs-list"]).build();
-        listbox.append(&login_entry);
-        listbox.append(&password_entry);
-        let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).margin_top(6).build();
-        content.append(&listbox);
-        dialog.set_extra_child(Some(&content));
-        dialog.add_response("cancel", "Cancel");
-        dialog.add_response("connect", "Connect");
-        dialog.set_response_appearance("connect", adw::ResponseAppearance::Suggested);
-
-        let this = self.clone();
-        dialog.connect_response(None, move |_, response| {
-            if response != "connect" {
-                return;
+        let this = Rc::downgrade(self);
+        win.open_provider_login(Provider::WatchShark, move || {
+            if let Some(this) = this.upgrade() {
+                this.refresh();
             }
-            let login = login_entry.text().trim().to_owned();
-            let password = password_entry.text().to_owned();
-            if login.is_empty() || password.is_empty() {
-                return;
-            }
-            let this = this.clone();
-            glib::spawn_future_local(async move {
-                let ws = this.ctx.net.watchshark().clone();
-                let server = ws.server().await;
-                match this.ctx.net.spawn(async move { ws.login(&server, &login, &password).await }).await {
-                    Ok(Ok(name)) => {
-                        this.refresh();
-                        this.toast(&format!("Connected to WatchShark as {name}"));
-                    }
-                    Ok(Err(err)) => this.toast(&format!("WatchShark: {err}")),
-                    Err(err) => this.toast(&format!("WatchShark: {err}")),
-                }
-            });
         });
-        dialog.present(Some(win.window()));
     }
 }

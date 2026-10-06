@@ -488,6 +488,20 @@ impl MainWindow {
         self.explore.activate_first_playable()
     }
 
+    pub fn open_provider_login(self: &Rc<Self>, provider: crate::net::provider::Provider, on_success: impl Fn() + 'static) {
+        use crate::net::provider::Provider;
+        let dialog = match provider {
+            Provider::YouTube => LoginDialog::new(self.ui.clone(), &self.window),
+            Provider::SoundCloud => LoginDialog::new_soundcloud(self.ui.clone(), &self.window),
+            Provider::WatchShark => {
+                let server = self.ui.net.watchshark().try_read_server();
+                LoginDialog::new_watchshark(self.ui.clone(), &self.window, &server)
+            }
+        };
+        dialog.set_on_success(on_success);
+        dialog.present();
+    }
+
     pub fn show_login(&self) {
         let dialog = LoginDialog::new(self.ui.clone(), &self.window);
         let library = self.library.clone();

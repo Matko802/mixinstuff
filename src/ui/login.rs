@@ -12,30 +12,72 @@ use crate::ui::context::UiContext;
 const LOGIN_URL: &str = "https://accounts.google.com/ServiceLogin?ltmpl=music&service=youtube&uilel=3&passive=true&continue=https%3A%2F%2Fmusic.youtube.com%2Flibrary";
 const BROWSER_UA: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:147.0) Gecko/20100101 Firefox/147.0";
 
+#[derive(Clone)]
+enum LoginMode {
+    YouTube,
+    SoundCloud,
+    WatchShark { server: String },
+}
+
+impl LoginMode {
+    fn title(&self) -> &'static str {
+        match self {
+            LoginMode::YouTube => "Sign in to YouTube Music",
+            LoginMode::SoundCloud => "Sign in to SoundCloud",
+            LoginMode::WatchShark { .. } => "Sign in to WatchShark",
+        }
+    }
+
+    fn start_url(&self) -> String {
+        match self {
+            LoginMode::YouTube => LOGIN_URL.to_owned(),
+            LoginMode::SoundCloud => "https://soundcloud.com/".to_owned(),
+            LoginMode::WatchShark { server } => format!("{server}/"),
+        }
+    }
+}
+
 pub struct LoginDialog {
     window: adw::Window,
     webview: webkit6::WebView,
     web_status: gtk::Label,
     captured: RefCell<BTreeMap<String, String>>,
     finished: Cell<bool>,
+    tried_token: RefCell<Option<String>>,
+    mode: LoginMode,
     ctx: Rc<UiContext>,
     on_success: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 impl LoginDialog {
     pub fn new(ctx: Rc<UiContext>, parent: &impl IsA<gtk::Window>) -> Rc<Self> {
+        Self::open(ctx, parent, LoginMode::YouTube)
+    }
+
+    pub fn new_soundcloud(ctx: Rc<UiContext>, parent: &impl IsA<gtk::Window>) -> Rc<Self> {
+        Self::open(ctx, parent, LoginMode::SoundCloud)
+    }
+
+    pub fn new_watchshark(ctx: Rc<UiContext>, parent: &impl IsA<gtk::Window>, server: &str) -> Rc<Self> {
+        Self::open(ctx, parent, LoginMode::WatchShark { server: server.to_owned() })
+    }
+
+    fn open(ctx: Rc<UiContext>, parent: &impl IsA<gtk::Window>, mode: LoginMode) -> Rc<Self> {
         let window = adw::Window::builder()
             .modal(true)
             .transient_for(parent)
             .default_width(520)
             .default_height(640)
-            .title("Sign in to YouTube Music")
+            .title(mode.title())
             .build();
         let toolbar = adw::ToolbarView::new();
         window.set_content(Some(&toolbar));
         let header = adw::HeaderBar::builder().show_title(true).build();
-        let skip = gtk::Button::builder().label("Skip").build();
-        header.pack_end(&skip);
+        let dismiss = gtk::Button::builder().label(match mode {
+            LoginMode::YouTube => "Skip",
+            _ => "Close",
+        }).build();
+        header.pack_end(&dismiss);
         toolbar.add_top_bar(&header);
 
         let webview = webkit6::WebView::new();
@@ -59,18 +101,20 @@ impl LoginDialog {
             web_status,
             captured: RefCell::new(BTreeMap::new()),
             finished: Cell::new(false),
+            tried_token: RefCell::new(None),
+            mode,
             ctx,
             on_success: RefCell::new(None),
         });
         {
             let win = dialog.window.clone();
-            skip.connect_clicked(move |_| win.close());
+            dismiss.connect_clicked(move |_| win.close());
         }
         {
             let weak = Rc::downgrade(&dialog);
             dialog.window.connect_close_request(move |_| {
                 if let Some(d) = weak.upgrade() {
-                    if !d.ctx.net.client().is_authenticated() {
+                    if matches!(d.mode, LoginMode::YouTube) && !d.ctx.net.client().is_authenticated() {
                         set_login_skipped(&d.ctx.paths, true);
                     }
                 }
@@ -85,7 +129,8 @@ impl LoginDialog {
                 }
             });
         }
-        dialog.webview.load_uri(LOGIN_URL);
+        let url = dialog.mode.start_url();
+        dialog.webview.load_uri(&url);
         dialog
     }
 
@@ -110,6 +155,17 @@ impl LoginDialog {
     }
 
     fn on_resource_load_started(self: &Rc<Self>, request: &webkit6::URIRequest) {
+        if self.finished.get() {
+            return;
+        }
+        match self.mode.clone() {
+            LoginMode::YouTube => self.on_youtube_request(request),
+            LoginMode::SoundCloud => self.on_soundcloud_request(request),
+            LoginMode::WatchShark { server } => self.on_watchshark_request(&server),
+        }
+    }
+
+    fn on_youtube_request(self: &Rc<Self>, request: &webkit6::URIRequest) {
         if self.finished.get() {
             return;
         }
@@ -170,6 +226,105 @@ impl LoginDialog {
             d.captured.replace(captured);
             d.finished.set(true);
             d.finish_login();
+        });
+    }
+
+    fn on_soundcloud_request(self: &Rc<Self>, request: &webkit6::URIRequest) {
+        let uri = request.uri().map(|u| u.to_string()).unwrap_or_default();
+        if !uri.contains("api-v2.soundcloud.com") {
+            return;
+        }
+        let token = request
+            .http_headers()
+            .and_then(|h| h.one("Authorization").map(|a| a.to_string()))
+            .and_then(|a| a.strip_prefix("OAuth ").map(str::to_owned))
+            .filter(|t| !t.is_empty());
+        let Some(token) = token else { return };
+        if self.tried_token.borrow().as_deref() == Some(token.as_str()) {
+            return;
+        }
+        self.tried_token.replace(Some(token.clone()));
+        self.finished.set(true);
+        self.set_status("blue", "Signing in...");
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Some(d) = weak.upgrade() else { return };
+            let sc = d.ctx.net.soundcloud().clone();
+            sc.set_token(Some(token)).await;
+            let outcome = d.ctx.net.spawn(async move { sc.me().await }).await;
+            match outcome {
+                Ok(Ok(name)) => {
+                    tracing::info!(name = %name, "soundcloud login successful");
+                    d.set_status("green", "Signed in.");
+                    d.clear_webkit_cookies();
+                    if let Some(f) = d.on_success.borrow().as_ref() {
+                        f();
+                    }
+                    d.window.close();
+                }
+                Ok(Err(err)) => {
+                    tracing::warn!(%err, "soundcloud login failed");
+                    let sc = d.ctx.net.soundcloud().clone();
+                    sc.set_token(None).await;
+                    d.finished.set(false);
+                    d.tried_token.replace(None);
+                    d.set_status("red", &format!("SoundCloud refused the session: {err}"));
+                }
+                Err(_) => {
+                    let sc = d.ctx.net.soundcloud().clone();
+                    sc.set_token(None).await;
+                    d.finished.set(false);
+                    d.tried_token.replace(None);
+                    d.set_status("red", "SoundCloud refused the session. Try again.");
+                }
+            }
+        });
+    }
+
+    fn on_watchshark_request(self: &Rc<Self>, server: &str) {
+        let Some(manager) = self.webview.network_session().and_then(|s| s.cookie_manager()) else {
+            return;
+        };
+        let server = server.to_owned();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let cookies = manager.cookies_future(&server).await;
+            let Some(d) = weak.upgrade() else { return };
+            let mut cookies = match cookies {
+                Ok(cookies) => cookies,
+                Err(err) => {
+                    d.set_status("red", &format!("Could not read cookies: {err}"));
+                    return;
+                }
+            };
+            let token = cookies.iter_mut().find_map(|c| {
+                let (name, value) = (c.name()?, c.value()?);
+                (name.as_str() == "ws_token").then(|| value.to_string())
+            }).filter(|t| !t.is_empty());
+            let Some(token) = token else { return };
+            if d.tried_token.borrow().as_deref() == Some(token.as_str()) {
+                return;
+            }
+            d.tried_token.replace(Some(token.clone()));
+            d.finished.set(true);
+            d.set_status("blue", "Signing in...");
+            let ws = d.ctx.net.watchshark().clone();
+            match ws.adopt_session(token).await {
+                Ok(name) => {
+                    tracing::info!(name = %name, "watchshark login successful");
+                    d.set_status("green", "Signed in.");
+                    if let Some(f) = d.on_success.borrow().as_ref() {
+                        f();
+                    }
+                    d.window.close();
+                }
+                Err(err) => {
+                    tracing::warn!(%err, "watchshark login failed");
+                    d.finished.set(false);
+                    d.tried_token.replace(None);
+                    d.set_status("red", "WatchShark refused the session. Try again.");
+                }
+            }
         });
     }
 
