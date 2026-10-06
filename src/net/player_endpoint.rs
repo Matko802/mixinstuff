@@ -1,3 +1,15 @@
+//! Native stream resolution through InnerTube's `player` endpoint.
+//!
+//! yt-dlp took about six seconds per cold play: a Python start, seven player
+//! clients in turn, player.js and a node runtime for the signature. The
+//! VISIONOS client answers one request in about 0.2 s with direct URLs that
+//! need no signature, no PO token and no cookies, and serve open-ended ranges,
+//! so GStreamer can seek them. Measured 2026-09-18: ANDROID_VR URLs stop after
+//! the first 100 KB without a token that botguard could not satisfy, VISIONOS
+//! URLs serve the whole file.
+//!
+//! Anything this client will not serve (uploads, age-gated or private videos)
+//! falls through to the wrapped resolver, which is yt-dlp with the session.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -17,9 +29,12 @@ const CLIENT_USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)
 const LANDING_URL: &str = "https://music.youtube.com/";
 const LANDING_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
+/// A visitor id keeps working for days. Refetched well before that.
 const VISITOR_TTL: Duration = Duration::from_secs(6 * 3600);
+/// Past the token-less preview every client gets, so a URL that would die mid-song fails here.
 const PROBE_OFFSET: u64 = 200_000;
 
+/// An audio format as the player response lists it.
 #[derive(Clone, Debug, PartialEq)]
 struct Format {
     itag: u32,
@@ -35,6 +50,7 @@ impl Format {
     }
 }
 
+/// Audio formats that carry a plain URL. A `signatureCipher` entry needs player.js and is left out.
 fn audio_formats(response: &Value) -> Vec<Format> {
     let Some(list) = response.pointer("/streamingData/adaptiveFormats").and_then(Value::as_array) else { return Vec::new() };
     list.iter()
@@ -43,6 +59,7 @@ fn audio_formats(response: &Value) -> Vec<Format> {
             if !mime.starts_with("audio/") {
                 return None;
             }
+            // A dubbed or DRC track is not the master.
             if f.get("isDrc").and_then(Value::as_bool).unwrap_or(false) || f.pointer("/audioTrack/audioIsDefault").and_then(Value::as_bool) == Some(false) {
                 return None;
             }
@@ -57,10 +74,13 @@ fn audio_formats(response: &Value) -> Vec<Format> {
         .collect()
 }
 
+/// Same policy as the yt-dlp format string: opus first, then the highest bitrate.
 fn pick_format(formats: &[Format]) -> Option<&Format> {
     formats.iter().max_by_key(|f| (f.is_opus(), f.bitrate))
 }
 
+/// The audio-only media playlist of an HLS master: the `EXT-X-MEDIA` line with
+/// a URI, the AAC-LC rendition (itag 234) over the low-bitrate HE-AAC one (233).
 fn audio_rendition(master: &str) -> Option<String> {
     let uris: Vec<&str> = master
         .lines()
@@ -70,6 +90,7 @@ fn audio_rendition(master: &str) -> Option<String> {
     uris.iter().find(|u| u.contains("/itag/234/")).or_else(|| uris.first()).map(|u| u.to_string())
 }
 
+/// Why the player refused, in the words it used. None when it is playable.
 fn refusal(response: &Value) -> Option<String> {
     let status = response.pointer("/playabilityStatus/status").and_then(Value::as_str).unwrap_or("missing");
     if status == "OK" {
@@ -106,27 +127,24 @@ fn visitor_from_landing(html: &str) -> Option<String> {
 pub struct PlayerEndpointResolver {
     http: reqwest::Client,
     fallback: Arc<dyn StreamResolver>,
-    watchshark: Arc<super::watchshark::WatchShark>,
     cache: StreamCache,
     visitor: Mutex<Option<(String, Instant)>>,
 }
 
 impl PlayerEndpointResolver {
-    pub fn new(
-        paths: &Paths,
-        fallback: Arc<dyn StreamResolver>,
-        watchshark: Arc<super::watchshark::WatchShark>,
-    ) -> Self {
+    pub fn new(paths: &Paths, fallback: Arc<dyn StreamResolver>) -> Self {
         let http = reqwest::Client::builder().timeout(REQUEST_TIMEOUT).gzip(true).build().unwrap_or_default();
-        Self { http, fallback, watchshark, cache: StreamCache::new(paths.stream_cache_dir.clone()), visitor: Mutex::new(None) }
+        Self { http, fallback, cache: StreamCache::new(paths.stream_cache_dir.clone()), visitor: Mutex::new(None) }
     }
 
+    /// Fetch the visitor id ahead of the first play.
     pub async fn warm(&self) {
         if let Err(err) = self.visitor_data().await {
             tracing::debug!(%err, "visitor data not warmed");
         }
     }
 
+    /// Without a visitor id the endpoint answers "Sign in to confirm you're not a bot".
     async fn visitor_data(&self) -> Result<String, String> {
         if let Some((visitor, at)) = self.visitor.lock().unwrap().clone() {
             if at.elapsed() < VISITOR_TTL {
@@ -156,16 +174,22 @@ impl PlayerEndpointResolver {
             .await
             .map_err(|e| e.to_string())?;
         if let Some(reason) = refusal(&response) {
+            // A stale visitor id reads as a bot. The next resolve fetches a new one.
             if reason.contains("bot") {
                 *self.visitor.lock().unwrap() = None;
             }
             return Err(reason);
         }
+        // A response for another video means the id was redirected, which the queue did not ask for.
         if response.pointer("/videoDetails/videoId").and_then(Value::as_str).is_some_and(|id| id != video_id.as_str()) {
             return Err("answered for a different video".to_owned());
         }
+        // A live stream has no file to probe. Its adaptive entries are segment
+        // endpoints, so the HLS manifest is what plays, through hlsdemux.
         if response.pointer("/videoDetails/isLive").and_then(Value::as_bool).unwrap_or(false) {
             let manifest = response.pointer("/streamingData/hlsManifestUrl").and_then(Value::as_str).ok_or("live stream without an HLS manifest")?;
+            // The master lists video variants with the audio as separate renditions.
+            // Playing the audio rendition alone keeps the video stream out of the pipeline.
             let uri = match self.http.get(manifest).send().await.and_then(|r| r.error_for_status()) {
                 Ok(resp) => resp.text().await.ok().and_then(|master| audio_rendition(&master)).unwrap_or_else(|| manifest.to_owned()),
                 Err(err) => {
@@ -203,32 +227,20 @@ impl PlayerEndpointResolver {
         })
     }
 
+    /// Two bytes from the middle of the file. A URL that only serves its preview answers 403 here.
     async fn probe(&self, format: &Format) -> Result<(), String> {
         let offset = if format.content_length > PROBE_OFFSET + 2 { PROBE_OFFSET } else { 0 };
         let status = self.http.get(&format.url).header("Range", format!("bytes={offset}-{}", offset + 1)).send().await.map_err(|e| e.to_string())?.status();
         if status.is_success() { Ok(()) } else { Err(format!("stream probe answered {status}")) }
-    }
-    async fn resolve_watchshark(&self, video_id: &VideoId) -> Result<StreamInfo, ResolveError> {
-        if let Some(uri) = self.cache.get(video_id).await {
-            return Ok(StreamInfo { uri, from_cache: true, ..StreamInfo::default() });
-        }
-        let Some(crate::net::watchshark::WsId::Track(id)) = crate::net::watchshark::parse_ws_id(video_id.as_str()) else {
-            return Err(ResolveError::Unavailable("not a WatchShark track".into()));
-        };
-        let (uri, ext) = self.watchshark.stream_url(id).await.map_err(|e| ResolveError::Unavailable(e.to_string()))?;
-        let info = StreamInfo { uri: uri.clone(), ext, protocol: Some("https".to_owned()), ..StreamInfo::default() };
-        self.cache.put(video_id, &uri).await;
-        Ok(info)
     }
 }
 
 impl StreamResolver for PlayerEndpointResolver {
     fn resolve(&self, video_id: VideoId, auth: Option<HttpAuth>) -> BoxFuture<'_, Result<StreamInfo, ResolveError>> {
         Box::pin(async move {
-            if crate::net::watchshark::is_watchshark_id(video_id.as_str()) {
-                return self.resolve_watchshark(&video_id).await;
-            }
             if let Some(uri) = self.cache.get(&video_id).await {
+                // A live broadcast's segment endpoint plays one fragment and stops. Older
+                // builds cached those. A cached playlist is fine but is not kept either.
                 if uri.contains("yt_live_broadcast") || crate::audio::is_live_uri(&uri) {
                     self.cache.invalidate(&video_id).await;
                 } else {
@@ -239,6 +251,7 @@ impl StreamResolver for PlayerEndpointResolver {
             match self.resolve_native(&video_id).await {
                 Ok(info) => {
                     tracing::debug!(%video_id, itag = ?info.format_id, took_ms = started.elapsed().as_millis() as u64, "resolved through the player endpoint");
+                    // A live playlist is resolved fresh each time: it expires, and the queue must know it is live.
                     if info.protocol.as_deref() != Some("m3u8") {
                         self.cache.put(&video_id, &info.uri).await;
                     }
@@ -291,6 +304,7 @@ mod tests {
         assert!(pick_format(&[]).is_none());
     }
 
+    /// Hits the network. `cargo test -- --ignored live_stream_response --nocapture`
     #[tokio::test]
     #[ignore]
     async fn live_stream_response() {
@@ -304,9 +318,7 @@ mod tests {
             }
         }
         let dir = tempfile::tempdir().unwrap();
-        let paths = Paths::for_tests(dir.path());
-        let ws = crate::net::watchshark::WatchShark::new(&paths);
-        let resolver = PlayerEndpointResolver::new(&paths, Arc::new(Never), ws);
+        let resolver = PlayerEndpointResolver::new(&Paths::for_tests(dir.path()), Arc::new(Never));
         let http = resolver.http.clone();
         let visitor = resolver.visitor_data().await.unwrap();
         let response: Value = http.post(PLAYER_URL).header("User-Agent", CLIENT_USER_AGENT).header("X-YouTube-Client-Name", CLIENT_ID).header("X-YouTube-Client-Version", CLIENT_VERSION).header("X-Goog-Visitor-Id", &visitor).json(&player_body("h4hy2Gn-FVE", &visitor)).send().await.unwrap().json().await.unwrap();
@@ -343,6 +355,7 @@ mod tests {
         assert_eq!(visitor_from_landing("<html></html>"), None);
     }
 
+    /// One cold resolve against the live service, timed.
     #[tokio::test]
     #[ignore]
     async fn live_resolves_quickly_and_seekably() {
@@ -356,9 +369,7 @@ mod tests {
             }
         }
         let dir = tempfile::tempdir().unwrap();
-        let paths = Paths::for_tests(dir.path());
-        let ws = crate::net::watchshark::WatchShark::new(&paths);
-        let resolver = PlayerEndpointResolver::new(&paths, Arc::new(Never), ws);
+        let resolver = PlayerEndpointResolver::new(&Paths::for_tests(dir.path()), Arc::new(Never));
         for id in ["J7p4bzqLvCw", "CuklIb9d3fI"] {
             let started = Instant::now();
             let info = resolver.resolve(VideoId(id.to_owned()), None).await.unwrap();

@@ -1,11 +1,15 @@
+//! Plain data types shared by every layer. No GTK, no GStreamer, no reqwest.
+//! Everything here is Send + Sync so it can cross threads by value.
 
 use std::sync::LazyLock;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+/// The "161 songs" or "50K views" a playlist description leads or trails with.
 static PLAYLIST_UNIT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\b\d[\d.,]*\s*[KMB]?\s*(songs?|episodes?|videos?|tracks?|views?|plays?|subscribers?|monthly listeners?|listeners?)\b").unwrap());
 
+/// YouTube video id. Newtype so it never gets mixed up with browse or playlist ids.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct VideoId(pub String);
@@ -13,10 +17,6 @@ pub struct VideoId(pub String);
 impl VideoId {
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-
-    pub fn is_watchshark(&self) -> bool {
-        self.0.starts_with("ws:")
     }
 }
 
@@ -67,10 +67,12 @@ impl LikeStatus {
     }
 }
 
+/// One queue entry. Replaces the loosely keyed dict the Python player carried.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Track {
     pub video_id: VideoId,
     pub title: String,
+    /// Display string, already joined. Kept alongside `artists` like the Python dict did.
     pub artist: String,
     #[serde(default)]
     pub artists: Vec<Person>,
@@ -82,18 +84,24 @@ pub struct Track {
     pub duration_seconds: Option<u32>,
     #[serde(default)]
     pub like_status: LikeStatus,
+    /// MUSIC_VIDEO_TYPE_ATV, OMV, UGC ... drives the audio-version swap.
     #[serde(default)]
     pub video_type: Option<String>,
+    /// Set for upload-locker tracks. Those bypass the stream cache.
     #[serde(default)]
     pub entity_id: Option<String>,
     #[serde(default)]
     pub is_explicit: bool,
+    /// A live stream: no duration, no seeking, a LIVE badge.
     #[serde(default)]
     pub is_live: bool,
+    /// Playlist item id, needed to remove or move the row in its playlist.
     #[serde(default)]
     pub set_video_id: Option<String>,
+    /// False when YouTube greys the row out (deleted or region-locked).
     #[serde(default = "default_true")]
     pub is_available: bool,
+    /// Position on an album page, from the row's index column.
     #[serde(default)]
     pub track_number: Option<u32>,
 }
@@ -125,6 +133,7 @@ impl Default for Track {
 }
 
 impl Track {
+    /// A podcast episode: plays like a video, but has no song version.
     pub fn is_episode(&self) -> bool {
         self.video_type.as_deref().is_some_and(|t| t.contains("PODCAST") || t.contains("EPISODE"))
     }
@@ -134,6 +143,7 @@ impl Track {
     }
 }
 
+/// Logical playback state shown to the UI. Registered as a GLib enum so it can be a GObject property.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, glib::Enum)]
 #[enum_type(name = "MxPlaybackStatus")]
 pub enum PlaybackStatus {
@@ -153,6 +163,7 @@ pub enum RepeatMode {
     All,
 }
 
+/// Result of resolving a video id to something playbin can open.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct StreamInfo {
     pub uri: String,
@@ -170,12 +181,15 @@ pub struct StreamInfo {
     pub uploader: Option<String>,
     #[serde(default)]
     pub thumbnail: Option<String>,
+    /// True for file:// URIs (downloads, tmpfs staging).
     #[serde(default)]
     pub is_local: bool,
+    /// True when the URI came from the disk cache rather than a fresh resolution.
     #[serde(default)]
     pub from_cache: bool,
 }
 
+/// What a browse surface item is. Drives icons, subtitles and activation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ItemKind {
@@ -203,9 +217,11 @@ impl ItemKind {
     }
 }
 
+/// One card or row on Home, Explore, Library or search results.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct MediaItem {
     pub kind: ItemKind,
+    /// videoId, browseId or playlistId depending on `kind`.
     pub id: String,
     pub title: String,
     #[serde(default)]
@@ -216,10 +232,12 @@ pub struct MediaItem {
     pub thumb: Option<String>,
     #[serde(default)]
     pub year: Option<String>,
+    /// Album, Single, EP.
     #[serde(default)]
     pub item_type: Option<String>,
     #[serde(default)]
     pub explicit: bool,
+    /// A live stream, from the Live badge beside the subtitle.
     #[serde(default)]
     pub is_live: bool,
     #[serde(default)]
@@ -232,8 +250,11 @@ pub struct MediaItem {
     pub subscribers: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    /// Album cards: the OLAK playlist behind the browse id, from the card menu.
     #[serde(default)]
     pub playlist_id: Option<String>,
+    /// What the like button starts on. Rows that come from a playlist or the
+    /// history know it; cards off a carousel do not, and say so with None.
     #[serde(default)]
     pub like_status: Option<LikeStatus>,
 }
@@ -243,6 +264,7 @@ impl MediaItem {
         self.artists.iter().map(|a| a.name.as_str()).filter(|n| !n.is_empty()).collect::<Vec<_>>().join(", ")
     }
 
+    /// The small icon beside the subtitle. A live stream shows an antenna, whatever its kind.
     pub fn kind_icon(&self) -> &'static str {
         if self.is_live {
             return "triangular-antenna-symbolic";
@@ -270,6 +292,7 @@ impl MediaItem {
         }
     }
 
+    /// "3:45", or "1:59:59" past an hour, as a long mix reads. Nothing for a live stream.
     pub fn duration_text(&self) -> Option<String> {
         if self.is_live {
             return None;
@@ -277,6 +300,7 @@ impl MediaItem {
         self.duration_seconds.map(|s| if s >= 3600 { format!("{}:{:02}:{:02}", s / 3600, (s % 3600) / 60, s % 60) } else { format!("{}:{:02}", s / 60, s % 60) })
     }
 
+    /// Port of home.py _detail_for: the secondary line under a title.
     pub fn detail(&self) -> String {
         let join = |parts: Vec<String>| parts.into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ");
         match self.kind {
@@ -284,10 +308,12 @@ impl MediaItem {
             ItemKind::Video => join(vec![self.artists_text(), self.views.clone().unwrap_or_default(), self.duration_text().unwrap_or_default()]),
             ItemKind::Album => join(vec![self.artists_text(), self.year.clone().unwrap_or_default()]),
             ItemKind::Artist => match self.subscribers.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                // "12M" alone is a count; "12M monthly listeners" says so itself.
                 Some(subs) if subs.chars().any(char::is_alphabetic) => subs.to_owned(),
                 Some(subs) => format!("{subs} subscribers"),
                 None => String::new(),
             },
+            // An album named after its only song says nothing twice.
             ItemKind::Song => {
                 let album = self.album.as_ref().map(|a| a.name.as_str()).filter(|name| *name != self.title).unwrap_or_default();
                 join(vec![self.artists_text(), album.to_owned(), self.duration_text().unwrap_or_default()])
@@ -295,6 +321,8 @@ impl MediaItem {
         }
     }
 
+    /// Port of _playlist_detail: the count or view total out of the
+    /// description, whatever the rest of it says.
     fn playlist_detail(&self) -> String {
         if let Some(description) = self.description.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
             if let Some(unit) = PLAYLIST_UNIT_RE.find(description) {
@@ -310,6 +338,7 @@ impl MediaItem {
         }
     }
 
+    /// A queue entry back as a row or tile: a song, or a video when YouTube says so.
     pub fn from_track(track: &Track) -> Self {
         MediaItem {
             kind: if track.video_type.as_deref().is_some_and(|t| t != "MUSIC_VIDEO_TYPE_ATV") { ItemKind::Video } else { ItemKind::Song },
@@ -326,6 +355,7 @@ impl MediaItem {
         }
     }
 
+    /// Queue entry for songs and videos, None for collections.
     pub fn to_track(&self) -> Option<Track> {
         if !self.kind.is_playable() || self.id.is_empty() {
             return None;
@@ -351,18 +381,11 @@ impl MediaItem {
     }
 }
 
+/// What YouTube Music calls a podcast episode's video type.
 pub const EPISODE_VIDEO_TYPE: &str = "MUSIC_VIDEO_TYPE_PODCAST_EPISODE";
 
-pub fn compact_count(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{:.1}K", n as f64 / 1_000.0)
-    } else {
-        format!("{n}")
-    }
-}
-
+/// Snapshot of the signed-in session that the media layers attach to HTTP requests.
+/// Produced by the network client, consumed by yt-dlp and souphttpsrc.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HttpAuth {
     pub cookie: String,

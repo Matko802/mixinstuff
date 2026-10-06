@@ -1,3 +1,6 @@
+//! The preferences dialog. Port of show_preferences and its group builders in
+//! ui/window.py. Every switch writes the prefs.json both apps share and
+//! applies the change live where Python did.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -19,6 +22,7 @@ const HISTORY_MODES: [(&str, &str); 3] = [("immediate", "Immediately"), ("after_
 const FORMAT_LABELS: [&str; 5] = ["Opus (smallest)", "MP3 (universal)", "M4A (Apple)", "FLAC (lossless)", "OGG (Vorbis)"];
 const STRUCTURE_LABELS: [&str; 3] = ["Artist / Album / Song", "Artist / Song", "No folders"];
 const DISPLAY_LABELS: [&str; 3] = ["App Name (Musishark)", "Artist", "Song Title"];
+/// How long the Last.fm approval dialog waits for the browser.
 const LASTFM_APPROVAL_WINDOW: Duration = Duration::from_secs(300);
 const LASTFM_POLL: Duration = Duration::from_secs(2);
 
@@ -41,9 +45,6 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesDialog {
     let lyrics = crate::ui::preferences_lyrics::build_page(win, ctx);
     dialog.add(&lyrics);
 
-    let providers = crate::ui::preferences_providers::build_page(win, ctx);
-    dialog.add(&providers);
-
     let services = adw::PreferencesPage::builder().name("services").title("Services").icon_name("network-workgroup-symbolic").build();
     services.add(&discord_group(ctx));
     services.add(&scrobbler_group(win, ctx, &dialog));
@@ -51,20 +52,25 @@ pub fn present(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesDialog {
 
     let advanced = adw::PreferencesPage::builder().name("advanced").title("Advanced").icon_name("applications-engineering-symbolic").build();
     advanced.add(&troubleshooting_group(win, ctx));
+    // Last on the last page, away from everything a listener changes often.
     advanced.add(&reset_group(win, ctx));
     dialog.add(&advanced);
 
-    fit_phone_width(&dialog, &[&general, &appearance, &lyrics, &providers, &services, &advanced]);
+    fit_phone_width(&dialog, &[&general, &appearance, &lyrics, &services, &advanced]);
     dialog.present(Some(win.window()));
     dialog
 }
 
+/// On a phone a drop-down row beside a wrapped description cut its value to
+/// a letter or two ("Im…"). Narrow, the description goes so the value fits,
+/// and the download folder moves up into its group's description.
 fn fit_phone_width(dialog: &adw::PreferencesDialog, pages: &[&adw::PreferencesPage]) {
     let condition = adw::BreakpointCondition::parse("max-width: 500sp").expect("valid breakpoint");
     let breakpoint = adw::Breakpoint::new(condition);
     let mut stack: Vec<gtk::Widget> = pages.iter().map(|p| (*p).clone().upcast()).collect();
     while let Some(widget) = stack.pop() {
         if let Some(row) = widget.downcast_ref::<adw::ComboRow>() {
+            // A row that already shows its value as the subtitle is left as it is.
             if !row.uses_subtitle() && !row.subtitle().is_some_and(|s| s.is_empty()) {
                 breakpoint.add_setter(row, "subtitle", Some(&"".to_value()));
             }
@@ -85,8 +91,10 @@ fn fit_phone_width(dialog: &adw::PreferencesDialog, pages: &[&adw::PreferencesPa
     dialog.add_css_class("mx-preferences");
 }
 
+/// Group data key: the description a group takes on a phone.
 const NARROW_DESCRIPTION: &str = "mx-narrow-description";
 
+// -- small builders ---------------------------------------------------------
 
 pub(crate) fn save(ctx: &App, key: &str, value: impl Into<Value>) {
     let value = value.into();
@@ -107,12 +115,16 @@ pub(crate) fn switch_row(title: &str, subtitle: &str, active: bool) -> adw::Swit
     adw::SwitchRow::builder().title(title).subtitle(subtitle).active(active).build()
 }
 
+/// A combo row over fixed labels with `selected` already in place, so
+/// connecting afterwards never fires for the initial value.
 pub(super) fn combo_row(title: &str, subtitle: &str, labels: &[&str], selected: usize) -> adw::ComboRow {
     let row = adw::ComboRow::builder().title(title).subtitle(subtitle).model(&gtk::StringList::new(labels)).build();
     row.set_selected(selected as u32);
     row
 }
 
+/// A numeric setting: title and subtitle on top, the slider across the full
+/// row beneath, so a narrow window leaves the text room to breathe.
 pub(super) fn scale_row(title: &str, subtitle: &str, (min, max, step): (f64, f64, f64), value: f64, digits: i32) -> (adw::PreferencesRow, gtk::Scale) {
     let row = adw::PreferencesRow::builder().title(title).activatable(false).build();
     let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).margin_top(8).margin_bottom(4).margin_start(12).margin_end(12).build();
@@ -132,6 +144,7 @@ pub(super) fn scale_row(title: &str, subtitle: &str, (min, max, step): (f64, f64
     (row, scale)
 }
 
+// -- account ------------------------------------------------------------------
 
 fn account_group(win: &Rc<MainWindow>, ctx: &Rc<App>, dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder().title("Account").build();
@@ -152,6 +165,7 @@ fn account_group(win: &Rc<MainWindow>, ctx: &Rc<App>, dialog: &adw::PreferencesD
             }
             let Some(win) = win.upgrade() else { return };
             if authed {
+                // The auth watcher clears the library and offers the login dialog again.
                 let _ = gtk::prelude::WidgetExt::activate_action(win.window(), "win.logout", None);
             } else {
                 win.show_login();
@@ -190,6 +204,7 @@ fn account_group(win: &Rc<MainWindow>, ctx: &Rc<App>, dialog: &adw::PreferencesD
     group
 }
 
+/// The signed-in account's row, so a channel switch can redraw it.
 #[derive(Clone)]
 struct AccountRow {
     row: adw::ActionRow,
@@ -215,8 +230,11 @@ impl AccountRow {
     }
 }
 
+/// Page id and check mark per channel row.
 type ChannelChecks = Rc<std::cell::RefCell<Vec<(Option<String>, gtk::Image)>>>;
 
+/// The channels of the signed-in account, for listeners whose library sits on
+/// a brand account rather than the Google account itself.
 fn channel_row(win: &Rc<MainWindow>, ctx: &Rc<App>, account_row: AccountRow) -> adw::ExpanderRow {
     let expander = adw::ExpanderRow::builder().title("Channel").subtitle("Loading channels…").build();
     let client = ctx.net.client().clone();
@@ -242,6 +260,7 @@ fn channel_row(win: &Rc<MainWindow>, ctx: &Rc<App>, account_row: AccountRow) -> 
         let current = ctx.net.client().channel();
         let chosen = accounts.iter().find(|a| a.page_id == current).or_else(|| accounts.iter().find(|a| a.selected));
         expander.set_subtitle(&glib::markup_escape_text(chosen.map(|a| a.name.as_str()).unwrap_or("Google account")));
+        // The check marks, so a switch can move them.
         let checks: ChannelChecks = Rc::new(std::cell::RefCell::new(Vec::new()));
         for account in accounts {
             let subtitle = account.handle.clone().or(account.byline.clone()).unwrap_or_default();
@@ -270,6 +289,7 @@ fn channel_row(win: &Rc<MainWindow>, ctx: &Rc<App>, account_row: AccountRow) -> 
                     for (id, check) in checks.borrow().iter() {
                         check.set_opacity(if *id == chosen { 1.0 } else { 0.0 });
                     }
+                    // The row above shows who the app acts as now.
                     account_row.show(&ctx_c, info);
                 });
             });
@@ -309,6 +329,7 @@ fn switch_channel(ctx: &Rc<App>, win: std::rc::Weak<MainWindow>, expander: glib:
     });
 }
 
+// -- playback ------------------------------------------------------------------
 
 fn playback_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder().title("Playback").build();
@@ -329,6 +350,7 @@ fn playback_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup 
         history_row.connect_selected_notify(move |row| {
             if let Some((key, _)) = HISTORY_MODES.get(row.selected() as usize) {
                 save(&ctx, "history_mode", *key);
+                // The next track respects the new mode without a restart.
                 ctx.player.set_history_mode(key);
             }
         });
@@ -350,6 +372,7 @@ fn playback_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup 
     group
 }
 
+// -- updates -------------------------------------------------------------------
 
 fn updates_group(ctx: &Rc<App>) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder().title("Updates").build();
@@ -370,10 +393,12 @@ fn updates_group(ctx: &Rc<App>) -> adw::PreferencesGroup {
     group
 }
 
+// -- advanced ------------------------------------------------------------------
 
 fn troubleshooting_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder().title("Troubleshooting").build();
 
+    // Some GPU and driver pairs crash inside the default renderer. Read at the next launch.
     let current = pref_str(ctx, "gsk_renderer", "default");
     let labels: Vec<&str> = RENDERERS.iter().map(|(_, label)| *label).collect();
     let selected = RENDERERS.iter().position(|(key, _)| *key == current).unwrap_or(0);
@@ -414,6 +439,7 @@ fn reset_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
         .description("Sign out, clear settings and caches, and run the setup again. Downloads and playlists kept on this device stay.")
         .build();
     let reset_row = adw::ButtonRow::builder().title("Reset Musishark").end_icon_name("go-next-symbolic").build();
+    // The builder would replace the button class the row styles itself with.
     reset_row.add_css_class("destructive-action");
     {
         let (win, ctx) = (Rc::downgrade(win), ctx.clone());
@@ -427,6 +453,7 @@ fn reset_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
     group
 }
 
+/// Ask, then wipe the profile and relaunch into the setup wizard.
 fn confirm_reset(anchor: &gtk::Widget, win: &Rc<MainWindow>, ctx: &Rc<App>) {
     let dialog = adw::AlertDialog::builder()
         .heading("Reset Musishark?")
@@ -457,6 +484,7 @@ fn reset_and_restart(win: &Rc<MainWindow>, ctx: &Rc<App>) {
         let _ = std::fs::remove_dir_all(paths.data_dir.join("playlist_cache"));
         let _ = std::fs::remove_dir_all(&paths.cache_dir);
         tracing::info!("profile reset, relaunching");
+        // The new process starts as a fresh install and opens the wizard.
         match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).spawn()) {
             Ok(_) => {
                 if let Some(app) = win.window().application() {
@@ -471,6 +499,7 @@ fn reset_and_restart(win: &Rc<MainWindow>, ctx: &Rc<App>) {
     });
 }
 
+// -- appearance -------------------------------------------------------------------
 
 fn appearance_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder().title("Theme").build();
@@ -542,6 +571,7 @@ fn layout_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
     group
 }
 
+// -- visualizer ---------------------------------------------------------------------
 
 fn visualizer_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder().title("Visualizer").description("Bar visualizer beneath the cover art in the expanded player").build();
@@ -604,6 +634,7 @@ fn visualizer_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGrou
     group
 }
 
+// -- Discord ------------------------------------------------------------------------
 
 fn discord_group(ctx: &Rc<App>) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder().title("Discord Rich Presence").build();
@@ -656,6 +687,7 @@ fn discord_group(ctx: &Rc<App>) -> adw::PreferencesGroup {
             crate::presence::update_discord(&ctx);
         });
     }
+    // The worker connects in the background, so keep the label honest while the dialog is open.
     {
         let ctx = Rc::downgrade(ctx);
         let label = status_label.downgrade();
@@ -675,6 +707,7 @@ fn discord_group(ctx: &Rc<App>) -> adw::PreferencesGroup {
     group
 }
 
+// -- scrobbling -----------------------------------------------------------------------
 
 struct ScrobblerRows {
     ctx: Rc<App>,
@@ -767,6 +800,7 @@ impl ScrobblerRows {
         });
     }
 
+    /// Show the waiting dialog, open the browser, and poll until Last.fm confirms.
     async fn await_lastfm_approval(self: &Rc<Self>, token: String, url: String) {
         let Some(win) = self.win.upgrade() else { return };
         let dialog = adw::AlertDialog::builder()
@@ -793,6 +827,7 @@ impl ScrobblerRows {
             }
             let scrobbler = self.ctx.scrobbler.clone();
             let token = token.clone();
+            // An error here means the user has not pressed Allow yet.
             let Ok(Ok(name)) = self.ctx.net.spawn(async move { scrobbler.lastfm_finish_auth(&token).await }).await else { continue };
             done.set(true);
             dialog.close();
@@ -902,7 +937,9 @@ fn scrobbler_group(win: &Rc<MainWindow>, ctx: &Rc<App>, dialog: &adw::Preference
     group
 }
 
+// -- downloads ------------------------------------------------------------------------
 
+/// Move existing downloads into the layout just chosen, and say how it went.
 fn reorganize(win: &Rc<MainWindow>, ctx: &Rc<App>, saved: &str) {
     if ctx.downloads.progress().is_some() {
         win.add_toast(&format!("{saved} saved. Existing files will be reorganized after downloads finish."));
@@ -941,6 +978,7 @@ fn downloads_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGroup
         });
     }
     group.add(&format_row);
+    // Narrow, the format row shows its value in the subtitle, so the folder is named here.
     unsafe { group.set_data(NARROW_DESCRIPTION, glib::markup_escape_text(&subtitle).to_string()) };
 
     let current = naming::folder_structure(&ctx.paths);

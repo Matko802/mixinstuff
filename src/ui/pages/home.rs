@@ -1,24 +1,26 @@
+//! Port of ui/pages/home.py: the quick-picks dial, boxed song lists for
+//! song-heavy shelves, card strips for everything else, and the shelf
+//! ordering that puts the named rows first.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
 use gtk::{glib, prelude::*};
 
 use crate::model::{ItemKind, MediaItem};
-use crate::net::provider::{self, Provider};
 use crate::net::{home, local_feed};
 use crate::ui::context::UiContext;
 use crate::ui::cover::CoverImage;
 use crate::ui::pages::{activate_item_with_radio, attach_item_menu, clear_children, loading_box};
-use crate::ui::provider_bar::ProviderBar;
 use crate::ui::widgets::media_card::{CardOptions, MediaCard, STRIP_SPACING, STRIP_SPACING_COMPACT};
 use crate::ui::widgets::playing::PlayingTracker;
 use crate::ui::widgets::scroll_box::HorizontalScrollBox;
 use crate::ui::widgets::song_list::{kind_subtitle, song_row};
 
+/// How many shelves of the feed to page in, what get_home_full asked for.
 const FEED_SECTIONS: usize = 25;
+/// The seed picture beside a "Based on ..." heading.
 const STRAPLINE_COVER: i32 = 30;
 
 const SPEED_TILE_COVER: i32 = 56;
@@ -35,6 +37,7 @@ const LONG_LISTENS_ROWS: i32 = 4;
 const SPEED_DIAL_SPACING: i32 = 8;
 const LABEL_NATURAL_MAX_CHARS: i32 = 12;
 
+/// A grid of tiles that scrolls sideways, `rows` high.
 struct Dial {
     tiles: Vec<SpeedTile>,
     wrap: adw::WrapBox,
@@ -51,7 +54,6 @@ struct SpeedTile {
 }
 
 pub struct HomePage {
-    root: gtk::Box,
     stack: gtk::Stack,
     feed_box: gtk::Box,
     status: adw::StatusPage,
@@ -60,13 +62,14 @@ pub struct HomePage {
     retry_count: Cell<u32>,
     ctx: Rc<UiContext>,
     playing: Rc<PlayingTracker>,
-    provider_bar: Rc<ProviderBar>,
-    landing: RefCell<String>,
-    section_cache: RefCell<HashMap<String, Vec<home::HomeSection>>>,
+    /// Each card strip with its cards, so a layout flip resizes one strip at a time.
     strips: RefCell<Vec<(gtk::Box, Vec<Rc<MediaCard>>)>>,
     scrollers: RefCell<Vec<Rc<HorizontalScrollBox>>>,
+    /// The tile grids: Quick picks, and Long listens laid out the same way.
     dials: RefCell<Vec<Dial>>,
+    /// The widgets whose rows read the `compact` class. Card strips stay out, so a flip restyles no card.
     compact_scopes: RefCell<Vec<gtk::Widget>>,
+    /// The items of each rendered shelf, in the order they are drawn.
     shelves: RefCell<Vec<Vec<MediaItem>>>,
 }
 
@@ -84,21 +87,7 @@ impl HomePage {
         stack.add_named(&status, Some("status"));
         stack.set_visible_child_name("loading");
 
-        let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
-        let slot: Rc<RefCell<Option<std::rc::Weak<HomePage>>>> = Rc::new(RefCell::new(None));
-        let provider_bar = ProviderBar::new(ctx.paths.clone(), {
-            let slot = slot.clone();
-            move || {
-                if let Some(page) = slot.borrow().as_ref().and_then(|w| w.upgrade()) {
-                    page.load_home_data(false);
-                }
-            }
-        });
-        root.append(provider_bar.widget());
-        root.append(&stack);
-
         let page = Rc::new(Self {
-            root,
             stack,
             feed_box,
             status,
@@ -106,9 +95,6 @@ impl HomePage {
             loading: Cell::new(false),
             retry_count: Cell::new(0),
             playing: PlayingTracker::new(ctx.player.state()),
-            provider_bar,
-            landing: RefCell::new(provider::YOUTUBE.to_owned()),
-            section_cache: RefCell::new(HashMap::new()),
             ctx,
             strips: RefCell::new(Vec::new()),
             compact_scopes: RefCell::new(Vec::new()),
@@ -117,7 +103,6 @@ impl HomePage {
             shelves: RefCell::new(Vec::new()),
         });
         let weak = Rc::downgrade(&page);
-        slot.replace(Some(weak.clone()));
         glib::idle_add_local_once(move || {
             if let Some(p) = weak.upgrade() {
                 p.load_home_data(false);
@@ -126,25 +111,13 @@ impl HomePage {
         page
     }
 
-    pub fn widget(&self) -> &gtk::Box {
-        &self.root
-    }
-
-    pub fn sync_provider(self: &Rc<Self>) {
-        self.provider_bar.refresh();
-        self.load_home_data(false);
-    }
-
+    /// Port of load_home_data: one fetch at a time, skipped when the feed is
+    /// already there unless forced. Offline goes straight to the status page.
     pub fn load_home_data(self: &Rc<Self>, force: bool) {
         if self.loading.get() {
             return;
         }
-        if self.loading.get() {
-            return;
-        }
-        let want = self.provider_bar.active();
-        let want_id = want.id().to_owned();
-        if !force && self.loaded.get() && *self.landing.borrow() == want_id {
+        if self.loaded.get() && !force {
             return;
         }
         self.loading.set(true);
@@ -156,42 +129,15 @@ impl HomePage {
             self.apply_home(Err("offline"));
             return;
         }
-        if !force {
-            if let Some(cached) = self.section_cache.borrow().get(&want_id).cloned() {
-                self.landing.replace(want_id);
-                self.loaded.set(true);
-                self.apply_home(Ok(cached));
-                return;
-            }
-        }
-        if want == Provider::WatchShark {
-            let ws = self.ctx.net.watchshark().clone();
-            let handle = self.ctx.net.spawn(async move { ws.home_sections().await });
-            let weak = Rc::downgrade(self);
-            glib::spawn_future_local(async move {
-                let outcome = handle.await;
-                let Some(page) = weak.upgrade() else { return };
-                match outcome {
-                    Ok(Ok(sections)) if !sections.is_empty() => {
-                        page.landing.replace(want_id.clone());
-                        page.section_cache.borrow_mut().insert(want_id, sections.clone());
-                        page.apply_home(Ok(sections));
-                    }
-                    Ok(Ok(_)) => page.apply_home(Err("empty")),
-                    Ok(Err(err)) => {
-                        tracing::warn!(%err, "watchshark home failed");
-                        page.apply_home(Err("error"));
-                    }
-                    Err(_) => page.loading.set(false),
-                }
-            });
-            return;
-        }
         let api = self.ctx.net.client().api();
+        // Signed out, YouTube's feed is the same for everyone. Shelves from
+        // this device's plays and likes go in front of it.
         let signals = if self.ctx.net.client().is_authenticated() { Default::default() } else { local_feed::Signals::read(&self.ctx.local) };
         let handle = self.ctx.net.spawn(async move {
             if signals.is_empty() {
                 let mut sections = home::get_home(api.clone(), FEED_SECTIONS).await?;
+                // YouTube stopped sending Quick picks; without them the dial
+                // borrowed Listen again and showed two or three tiles.
                 if let Some(seeds) = local_feed::quick_pick_seeds(&sections).filter(|s| !s.is_empty()) {
                     if let Some(picks) = local_feed::quick_picks(api, seeds).await {
                         sections.insert(0, picks);
@@ -214,12 +160,7 @@ impl HomePage {
             let outcome = handle.await;
             let Some(page) = weak.upgrade() else { return };
             match outcome {
-                Ok(Ok(sections)) if !sections.is_empty() => {
-                    let landed = page.provider_bar.active().id().to_owned();
-                    page.landing.replace(landed.clone());
-                    page.section_cache.borrow_mut().insert(landed, sections.clone());
-                    page.apply_home(Ok(sections));
-                }
+                Ok(Ok(sections)) if !sections.is_empty() => page.apply_home(Ok(sections)),
                 Ok(Ok(_)) => page.apply_home(Err("empty")),
                 Ok(Err(err)) => {
                     tracing::warn!(%err, "home fetch failed");
@@ -228,6 +169,10 @@ impl HomePage {
                 Err(_) => page.loading.set(false),
             }
         });
+    }
+
+    pub fn refresh(self: &Rc<Self>) {
+        self.load_home_data(true);
     }
 
     fn apply_home(self: &Rc<Self>, outcome: Result<Vec<home::HomeSection>, &str>) {
@@ -276,9 +221,10 @@ impl HomePage {
         self.stack.set_visible_child_name("status");
     }
 
-    pub fn refresh(self: &Rc<Self>) {
-        self.load_home_data(true);
+    pub fn widget(&self) -> &gtk::Stack {
+        &self.stack
     }
+
     pub fn set_compact(&self, compact: bool) {
         if compact {
             self.feed_box.set_spacing(20);
@@ -289,6 +235,7 @@ impl HomePage {
             self.feed_box.set_margin_start(12);
             self.feed_box.set_margin_end(12);
         }
+        // What is on screen flips now, the rest one step per frame, so no frame restyles the whole feed.
         let height = self.stack.height() as f32;
         let on_screen = |w: &gtk::Widget| w.compute_bounds(&self.stack).is_some_and(|b| b.y() < height && b.y() + b.height() > 0.0);
         let mut later: Vec<Box<dyn Fn()>> = Vec::new();
@@ -310,6 +257,7 @@ impl HomePage {
         let later = RefCell::new(later.into_iter());
         let ctx = self.ctx.clone();
         self.stack.add_tick_callback(move |_, _| {
+            // A flip back in the meantime queued its own pass.
             if ctx.compact.get() != compact {
                 return glib::ControlFlow::Break;
             }
@@ -326,6 +274,8 @@ impl HomePage {
         self.sync_speed_dial_height(compact);
     }
 
+    /// Demo hook: play the first song of the first shelf that has one, the
+    /// same path a click on that row takes.
     pub fn activate_first_playable(&self) -> bool {
         let shelves = self.shelves.borrow();
         let Some((item, pool)) = shelves.iter().find_map(|items| {
@@ -339,6 +289,8 @@ impl HomePage {
         true
     }
 
+    /// Port of _populate_feed: the quick-picks dial first, then the four
+    /// named rows, then the rest in the order they arrived.
     fn populate(self: &Rc<Self>, sections: Vec<home::HomeSection>) {
         clear_children(&self.feed_box);
         self.playing.clear();
@@ -355,6 +307,7 @@ impl HomePage {
         }
         for section in ordered {
             self.shelves.borrow_mut().push(section.items.clone());
+            // Hour-long mixes, as tiles like the quick picks so the two rows match.
             if home::is_long_listens(&section.title) {
                 self.add_speed_dial(&section.title, section.strapline.as_deref(), section.strapline_thumb.as_deref(), &section.items, LONG_LISTENS_ROWS, LONG_LISTENS_ROWS);
                 continue;
@@ -362,6 +315,7 @@ impl HomePage {
             let songs = section.items.iter().filter(|i| i.kind == ItemKind::Song).count();
             let section_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).build();
             section_box.append(&self.section_header(&section.title, section.strapline.as_deref(), section.strapline_thumb.as_deref()));
+            // A shelf that is mostly songs reads better as a list than as cards.
             if songs >= 3.max((section.items.len() as f64 * 0.66) as usize) {
                 self.add_song_list(&section_box, &section.items);
             } else {
@@ -372,6 +326,8 @@ impl HomePage {
         self.set_compact(self.ctx.compact.get());
     }
 
+    /// The seed's picture on a "Based on ..." row, the matching icon on the
+    /// rows that have one, and nothing in front of the rest.
     fn section_header(&self, title: &str, strapline: Option<&str>, strapline_thumb: Option<&str>) -> gtk::Box {
         let header = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(10).halign(gtk::Align::Start).css_classes(["home-section-header"]).build();
         match strapline_thumb {
@@ -391,6 +347,7 @@ impl HomePage {
         }
         let title_label = gtk::Label::builder().label(title).css_classes(["title-2", "home-section-title"]).halign(gtk::Align::Start).valign(gtk::Align::Center).ellipsize(gtk::pango::EllipsizeMode::End).build();
         match strapline {
+            // The web feed's small line above the title, in capitals like there.
             Some(strapline) => {
                 let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).build();
                 column.append(&gtk::Label::builder().label(strapline.to_uppercase()).css_classes(["home-section-strapline"]).halign(gtk::Align::Start).xalign(0.0).build());
@@ -402,6 +359,7 @@ impl HomePage {
         header
     }
 
+    // -- quick picks ------------------------------------------------------
 
     fn add_speed_dial(self: &Rc<Self>, title: &str, strapline: Option<&str>, strapline_thumb: Option<&str>, items: &[MediaItem], rows: i32, rows_compact: i32) {
         let section_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).css_classes(["home-speed-dial"]).build();
@@ -511,6 +469,7 @@ impl HomePage {
         }
     }
 
+    // -- sections ---------------------------------------------------------
 
     fn add_song_list(self: &Rc<Self>, section_box: &gtk::Box, items: &[MediaItem]) {
         let list = gtk::ListBox::builder().css_classes(["boxed-list", "songs-list"]).selection_mode(gtk::SelectionMode::None).build();

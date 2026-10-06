@@ -63,7 +63,6 @@ Upstream project by [m-obeid](https://github.com/m-obeid) — please consider [s
 - **Downloads** - Download tracks for offline playback as local files
 - **Scrobbling** - Submit your plays to Last.fm and ListenBrainz, with an offline backlog
 - **MPRIS Support** - Control playback from system media controls
-- **Extra Provider** - WatchShark alongside YouTube Music, switchable in the tabs
 - **Radio & Mixes** - Start a radio station from any song or artist
 - **Background Playback** - Music keeps playing when the window is closed
 - **Playlist Editing** - Reorder, multi-select edit, change covers, visibility, and metadata
