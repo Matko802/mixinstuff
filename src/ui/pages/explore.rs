@@ -1,5 +1,6 @@
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -29,6 +30,12 @@ const VIDEO_LIMIT: usize = 5;
 const TRENDING_LIMIT: usize = 5;
 const CHART_ARTIST_LIMIT: usize = 20;
 
+#[derive(Clone)]
+enum ExploreLanding {
+    Ytm(ExploreData),
+    Charts(Vec<crate::net::home::HomeSection>),
+}
+
 pub struct ExplorePage {
     root: gtk::Box,
     stack: gtk::Stack,
@@ -45,6 +52,8 @@ pub struct ExplorePage {
     explore_rows: RefCell<Vec<Rc<SongRow>>>,
     last_results: RefCell<Vec<MediaItem>>,
     results_provider: RefCell<String>,
+    landing_cache: RefCell<HashMap<String, ExploreLanding>>,
+    search_cache: RefCell<HashMap<(String, String), SearchResults>>,
     current_query: RefCell<Option<String>>,
     inflight: RefCell<Option<tokio::task::AbortHandle>>,
     explore_inflight: RefCell<Option<tokio::task::AbortHandle>>,
@@ -94,7 +103,7 @@ impl ExplorePage {
                         page.current_query.replace(None);
                         page.show_results(&q);
                     }
-                    None => page.load_explore_data(true),
+                    None => page.load_explore_data(false),
                 }
             }
         });
@@ -116,6 +125,8 @@ impl ExplorePage {
             explore_rows: RefCell::new(Vec::new()),
             last_results: RefCell::new(Vec::new()),
             results_provider: RefCell::new(provider::YOUTUBE.to_owned()),
+            landing_cache: RefCell::new(HashMap::new()),
+            search_cache: RefCell::new(HashMap::new()),
             current_query: RefCell::new(None),
             inflight: RefCell::new(None),
             explore_inflight: RefCell::new(None),
@@ -160,10 +171,7 @@ impl ExplorePage {
             }
             return;
         }
-        if self.explore_loaded.get() && *self.landing.borrow() == want {
-            return;
-        }
-        self.load_explore_data(true);
+        self.load_explore_data(false);
     }
 
     pub fn reload_content(self: &Rc<Self>) {
@@ -207,8 +215,24 @@ impl ExplorePage {
 
 
     pub fn load_explore_data(self: &Rc<Self>, force: bool) {
-        if (self.explore_loading.get() || self.explore_loaded.get()) && !force {
+        if self.explore_loading.get() {
             return;
+        }
+        let want = self.provider_bar.active();
+        let want_id = want.id().to_owned();
+        if !force {
+            if self.explore_loaded.get() && *self.landing.borrow() == want_id {
+                return;
+            }
+            if let Some(cached) = self.landing_cache.borrow().get(&want_id).cloned() {
+                self.landing.replace(want_id);
+                self.explore_loaded.set(true);
+                match cached {
+                    ExploreLanding::Ytm(data) => self.update_explore_ui(Some(data)),
+                    ExploreLanding::Charts(sections) => self.render_chart_sections(sections),
+                }
+                return;
+            }
         }
         if let Some(handle) = self.explore_inflight.borrow_mut().take() {
             handle.abort();
@@ -241,6 +265,7 @@ impl ExplorePage {
                 match result {
                     Ok(sections) if !sections.is_empty() => {
                         page.landing.replace(want.id().to_owned());
+                        page.landing_cache.borrow_mut().insert(want.id().to_owned(), ExploreLanding::Charts(sections.clone()));
                         page.render_chart_sections(sections);
                     }
                     Ok(_) => page.update_explore_ui(None),
@@ -270,6 +295,7 @@ impl ExplorePage {
                 match result {
                     Ok(sections) if !sections.is_empty() => {
                         page.landing.replace(want.id().to_owned());
+                        page.landing_cache.borrow_mut().insert(want.id().to_owned(), ExploreLanding::Charts(sections.clone()));
                         page.render_chart_sections(sections);
                     }
                     Ok(_) => page.update_explore_ui(None),
@@ -298,6 +324,7 @@ impl ExplorePage {
             match result {
                 Ok(data) => {
                     page.landing.replace(want.id().to_owned());
+                    page.landing_cache.borrow_mut().insert(want.id().to_owned(), ExploreLanding::Ytm(data.clone()));
                     page.update_explore_ui(Some(data));
                 }
                 Err(err) => {
@@ -583,9 +610,16 @@ impl ExplorePage {
             self.render_results(&query, SearchResults { top_result: None, items });
             return;
         }
+        let want = self.provider_bar.active();
+        if !query.is_empty() {
+            let key = (want.id().to_owned(), query.clone());
+            if let Some(cached) = self.search_cache.borrow().get(&key).cloned() {
+                self.render_results(&query, cached);
+                return;
+            }
+        }
         self.stack.set_visible_child_name("loading");
 
-        let want = self.provider_bar.active();
         if want == Provider::SoundCloud {
             let sc = self.ctx.net.soundcloud().clone();
             let lookup = query.clone();
@@ -662,6 +696,13 @@ impl ExplorePage {
     fn render_results(self: &Rc<Self>, query: &str, results: SearchResults) {
         self.stack.set_visible_child_name("results");
         self.results_provider.replace(self.provider_bar.active().id().to_owned());
+        if !results.items.is_empty() || results.top_result.is_some() {
+            let mut cache = self.search_cache.borrow_mut();
+            if cache.len() >= 30 {
+                cache.clear();
+            }
+            cache.insert((self.provider_bar.active().id().to_owned(), query.to_owned()), results.clone());
+        }
         clear_children(&self.results_stack);
         clear_children(&self.toggle_container);
         self.toggle_group.replace(None);

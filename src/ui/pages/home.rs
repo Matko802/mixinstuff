@@ -1,5 +1,6 @@
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -61,6 +62,7 @@ pub struct HomePage {
     playing: Rc<PlayingTracker>,
     provider_bar: Rc<ProviderBar>,
     landing: RefCell<String>,
+    section_cache: RefCell<HashMap<String, Vec<home::HomeSection>>>,
     strips: RefCell<Vec<(gtk::Box, Vec<Rc<MediaCard>>)>>,
     scrollers: RefCell<Vec<Rc<HorizontalScrollBox>>>,
     dials: RefCell<Vec<Dial>>,
@@ -88,7 +90,7 @@ impl HomePage {
             let slot = slot.clone();
             move || {
                 if let Some(page) = slot.borrow().as_ref().and_then(|w| w.upgrade()) {
-                    page.load_home_data(true);
+                    page.load_home_data(false);
                 }
             }
         });
@@ -106,6 +108,7 @@ impl HomePage {
             playing: PlayingTracker::new(ctx.player.state()),
             provider_bar,
             landing: RefCell::new(provider::YOUTUBE.to_owned()),
+            section_cache: RefCell::new(HashMap::new()),
             ctx,
             strips: RefCell::new(Vec::new()),
             compact_scopes: RefCell::new(Vec::new()),
@@ -129,11 +132,7 @@ impl HomePage {
 
     pub fn sync_provider(self: &Rc<Self>) {
         self.provider_bar.refresh();
-        let want = self.provider_bar.active().id().to_owned();
-        if self.loaded.get() && *self.landing.borrow() == want {
-            return;
-        }
-        self.load_home_data(true);
+        self.load_home_data(false);
     }
 
     pub fn load_home_data(self: &Rc<Self>, force: bool) {
@@ -154,16 +153,26 @@ impl HomePage {
         }
         let want = self.provider_bar.active();
         let want_id = want.id().to_owned();
+        if !force {
+            if let Some(cached) = self.section_cache.borrow().get(&want_id).cloned() {
+                self.landing.replace(want_id);
+                self.loaded.set(true);
+                self.apply_home(Ok(cached));
+                return;
+            }
+        }
         if want == Provider::SoundCloud {
             let sc = self.ctx.net.soundcloud().clone();
             let handle = self.ctx.net.spawn(async move { sc.charts().await });
             let weak = Rc::downgrade(self);
+            let want_id = want_id.clone();
             glib::spawn_future_local(async move {
                 let outcome = handle.await;
                 let Some(page) = weak.upgrade() else { return };
                 match outcome {
                     Ok(Ok(sections)) if !sections.is_empty() => {
-                        page.landing.replace(want_id);
+                        page.landing.replace(want_id.clone());
+                        page.section_cache.borrow_mut().insert(want_id, sections.clone());
                         page.apply_home(Ok(sections));
                     }
                     Ok(Ok(_)) => page.apply_home(Err("empty")),
@@ -185,7 +194,8 @@ impl HomePage {
                 let Some(page) = weak.upgrade() else { return };
                 match outcome {
                     Ok(Ok(sections)) if !sections.is_empty() => {
-                        page.landing.replace(want_id);
+                        page.landing.replace(want_id.clone());
+                        page.section_cache.borrow_mut().insert(want_id, sections.clone());
                         page.apply_home(Ok(sections));
                     }
                     Ok(Ok(_)) => page.apply_home(Err("empty")),
@@ -226,7 +236,9 @@ impl HomePage {
             let Some(page) = weak.upgrade() else { return };
             match outcome {
                 Ok(Ok(sections)) if !sections.is_empty() => {
-                    page.landing.replace(page.provider_bar.active().id().to_owned());
+                    let landed = page.provider_bar.active().id().to_owned();
+                    page.landing.replace(landed.clone());
+                    page.section_cache.borrow_mut().insert(landed, sections.clone());
                     page.apply_home(Ok(sections));
                 }
                 Ok(Ok(_)) => page.apply_home(Err("empty")),
