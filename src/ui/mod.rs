@@ -65,6 +65,10 @@ const PLAYER_BAR_CSS: &str = r#"
   margin-top: 0px;
   margin-bottom: 0px;
   padding: 0px;
+  transition: min-height 120ms ease;
+}
+.player-scale:hover trough {
+  min-height: 14px;
 }
 .player-scale slider {
   min-height: 0px;
@@ -94,11 +98,19 @@ const COVER_VIEW_CSS: &str = r#"
   min-height: 6px;
   border-radius: 4px;
   background-color: alpha(var(--window-fg-color), 0.2);
+  transition: min-height 120ms ease;
+}
+.progress-scale:hover trough {
+  min-height: 18px;
 }
 .progress-scale highlight {
   min-height: 4px;
   border-radius: 2px;
   background-color: @accent_color;
+  transition: min-height 120ms ease;
+}
+.progress-scale:hover highlight {
+  min-height: 18px;
 }
 .progress-scale slider {
   border-radius: 50%;
