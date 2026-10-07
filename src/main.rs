@@ -58,7 +58,6 @@ fn main() -> glib::ExitCode {
     let paths = Paths::discover();
     bootstrap::init_logging(&paths);
     bootstrap::apply_gsk_renderer_pref(&paths);
-    crate::net::stream::log_tool_paths();
 
     if let Err(err) = gio::resources_register_include!("musishark.gresource") {
         eprintln!("resource bundle failed to load: {err}");

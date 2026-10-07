@@ -9,8 +9,9 @@ url="https://github.com/Matko802/musishark"
 license=('GPL3')
 # Note: webkitgtk-6.0 must come from the 'extra' repository. The CachyOS build
 # is known to malfunction with Musishark - see the install hook below.
-depends=('gtk4' 'libadwaita' 'webkitgtk-6.0' 'openssl' 'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugins-bad' 'sqlite' 'yt-dlp' 'yt-dlp-ejs' 'nodejs' 'ffmpeg')
+depends=('gtk4' 'libadwaita' 'webkitgtk-6.0' 'openssl' 'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugins-bad' 'sqlite' 'yt-dlp' 'yt-dlp-ejs' 'nodejs')
 makedepends=('git' 'cargo')
+optdepends=('ffmpeg: for downloading music')
 provides=("musishark")
 conflicts=("musishark")
 install="${pkgname}.install"
