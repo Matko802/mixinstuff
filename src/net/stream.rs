@@ -274,19 +274,75 @@ pub async fn write_netscape_cookies(dir: &Path, cookie_header: &str) -> std::io:
 
 /// A `Command` for a helper program (yt-dlp, node, ffmpeg).
 pub fn helper_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    Command::new(program)
+    let mut cmd = Command::new(program);
+    cmd.env("PATH", helper_path_env());
+    cmd
 }
 
-/// PATH lookup plus the install spots the Python app checked.
+fn tool_dir(tool: &str) -> Option<PathBuf> {
+    find_executable(tool).and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+}
+
+fn helper_path_env() -> std::ffi::OsString {
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    for tool in ["yt-dlp", "ffmpeg", "ffprobe", "node"] {
+        if let Some(dir) = tool_dir(tool) {
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+    }
+    std::env::join_paths(dirs).unwrap_or_default()
+}
+
+/// PATH lookup plus the well-known install spots.
+/// GUI launches often start with a sparse PATH: on NixOS the store paths are
+/// missing even when the tools are installed system-wide, and Flatpak sees
+/// only its sandbox. The fallback dirs below cover those cases.
 pub fn find_executable(name: &str) -> Option<PathBuf> {
     let name = &format!("{name}{}", std::env::consts::EXE_SUFFIX);
     let mut candidates: Vec<PathBuf> = Vec::new();
     candidates.extend(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).map(|d| d.join(name)).collect::<Vec<_>>()).unwrap_or_default());
     if let Some(home) = std::env::var_os("HOME") {
-        candidates.push(PathBuf::from(home).join(".cargo/bin").join(name));
+        let home = PathBuf::from(home);
+        candidates.push(home.join(".cargo/bin").join(name));
+        candidates.push(home.join(".nix-profile/bin").join(name));
+        candidates.push(home.join(".local/bin").join(name));
     }
+    candidates.push(PathBuf::from("/run/current-system/sw/bin").join(name));
+    candidates.push(PathBuf::from("/app/bin").join(name));
+    candidates.push(PathBuf::from("/snap/bin").join(name));
     candidates.push(PathBuf::from("/usr/lib/musishark/bin").join(name));
     candidates.push(PathBuf::from("/usr/local/bin").join(name));
     candidates.push(PathBuf::from("/usr/bin").join(name));
+    candidates.push(PathBuf::from("/bin").join(name));
     candidates.into_iter().find(|p| p.is_file())
+}
+
+pub fn log_tool_paths() {
+    for tool in ["yt-dlp", "ffmpeg", "ffprobe", "node"] {
+        match find_executable(tool) {
+            Some(path) => tracing::info!(tool, path = %path.display(), "helper found"),
+            None => tracing::warn!(tool, "helper not found on PATH or in the usual spots"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_tool_resolves_to_nothing() {
+        assert!(find_executable("musishark-definitely-not-a-tool").is_none());
+    }
+
+    #[test]
+    fn the_helper_path_keeps_everything_on_path() {
+        let path = helper_path_env();
+        let joined = path.into_string().unwrap_or_default();
+        for dir in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
+            assert!(joined.contains(dir.to_str().unwrap_or_default()));
+        }
+    }
 }
