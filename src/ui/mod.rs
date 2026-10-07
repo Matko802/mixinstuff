@@ -81,7 +81,9 @@ const PLAYER_BAR_CSS: &str = r#"
   min-width: 12px;
   margin: -5px;
   background-color: white;
-  box-shadow: 0 0 4px rgba(0,0,0,0.3);
+  border: none;
+  outline: none;
+  box-shadow: none;
 }
 .player-bar-cover {
   border-radius: 6px;
@@ -114,8 +116,10 @@ const COVER_VIEW_CSS: &str = r#"
 }
 .progress-scale slider {
   border-radius: 50%;
-  background-color: var(--window-fg-color);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  background-color: white;
+  border: none;
+  outline: none;
+  box-shadow: none;
   opacity: 0;
   transition: opacity 150ms ease;
 }

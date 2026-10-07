@@ -105,8 +105,10 @@ switch:checked > slider {
 
 
 scale > trough > slider {
-  outline: 1px solid alpha(@accent_fg_color, 0.5);
-  outline-offset: -1px;
+  background-color: white;
+  border: none;
+  outline: none;
+  box-shadow: none;
 }
 
 listview.playlist-view > row,
