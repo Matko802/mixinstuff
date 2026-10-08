@@ -51,7 +51,7 @@ const PLAYER_BAR_CSS: &str = r#"
 .player-scale {
   margin-top: -1px;
   margin-bottom: 2px;
-  min-height: 4px;
+  min-height: 14px;
   padding: 0px;
 }
 .player-scale.compact {
@@ -62,13 +62,15 @@ const PLAYER_BAR_CSS: &str = r#"
 }
 .player-scale trough {
   min-height: 4px;
-  margin-top: 0px;
-  margin-bottom: 0px;
+  margin-top: 5px;
+  margin-bottom: 5px;
   padding: 0px;
-  transition: min-height 120ms ease;
+  transition: min-height 120ms ease, margin 120ms ease;
 }
 .player-scale:hover trough {
   min-height: 14px;
+  margin-top: 0px;
+  margin-bottom: 0px;
 }
 .player-scale slider {
   min-height: 0px;
@@ -93,17 +95,22 @@ const PLAYER_BAR_CSS: &str = r#"
 /// Rules desktop_cover_view.py injected at runtime.
 const COVER_VIEW_CSS: &str = r#"
 .progress-scale {
+  min-height: 18px;
   padding-left: 0;
   padding-right: 0;
 }
 .progress-scale trough {
   min-height: 6px;
+  margin-top: 6px;
+  margin-bottom: 6px;
   border-radius: 4px;
   background-color: alpha(var(--window-fg-color), 0.2);
-  transition: min-height 120ms ease;
+  transition: min-height 120ms ease, margin 120ms ease;
 }
 .progress-scale:hover trough {
   min-height: 18px;
+  margin-top: 0px;
+  margin-bottom: 0px;
 }
 .progress-scale highlight {
   min-height: 4px;
