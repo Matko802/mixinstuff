@@ -10,8 +10,10 @@ use crate::player::Player;
 use crate::ui::context::UiContext;
 use crate::ui::widgets::sharkvis::{RawMode, SharkvisFeed};
 
-const GRAVITY: f64 = 0.0028;
 const BARS_DEFAULT: usize = 56;
+const EASE_US: f64 = 90_000.0;
+const DRAW_INTERVAL_US: i64 = 33_333;
+const EPS: f64 = 0.004;
 
 mod area {
     use super::*;
@@ -61,7 +63,9 @@ pub struct Visualizer {
     bars: Cell<usize>,
     mode: Cell<RawMode>,
     levels: RefCell<Vec<f64>>,
-    velocities: RefCell<Vec<f64>>,
+    targets: RefCell<Vec<f64>>,
+    last_tick_us: Cell<i64>,
+    last_draw_us: Cell<i64>,
     active: Cell<bool>,
     tick: RefCell<Option<gtk::TickCallbackId>>,
 }
@@ -82,7 +86,9 @@ impl Visualizer {
             bars: Cell::new(bars),
             mode: Cell::new(mode),
             levels: RefCell::new(Vec::new()),
-            velocities: RefCell::new(Vec::new()),
+            targets: RefCell::new(Vec::new()),
+            last_tick_us: Cell::new(0),
+            last_draw_us: Cell::new(0),
             active: Cell::new(false),
             tick: RefCell::new(None),
         });
@@ -118,7 +124,7 @@ impl Visualizer {
         }
         self.bars.set(n);
         self.levels.borrow_mut().clear();
-        self.velocities.borrow_mut().clear();
+        self.targets.borrow_mut().clear();
         self.feed.set_bar_count(n);
         self.area.queue_draw();
     }
@@ -129,7 +135,7 @@ impl Visualizer {
         }
         self.mode.set(mode);
         self.levels.borrow_mut().clear();
-        self.velocities.borrow_mut().clear();
+        self.targets.borrow_mut().clear();
         self.feed.set_mode(mode);
         self.area.queue_draw();
     }
@@ -150,9 +156,9 @@ impl Visualizer {
             return;
         }
         let weak = Rc::downgrade(self);
-        let id = self.area.add_tick_callback(move |_, _| match weak.upgrade() {
+        let id = self.area.add_tick_callback(move |_, clock| match weak.upgrade() {
             Some(v) => {
-                v.on_tick();
+                v.on_tick(clock);
                 glib::ControlFlow::Continue
             }
             None => glib::ControlFlow::Break,
@@ -164,53 +170,59 @@ impl Visualizer {
         if let Some(id) = self.tick.borrow_mut().take() {
             id.remove();
         }
+        self.last_tick_us.set(0);
     }
 
-    fn on_tick(self: &Rc<Self>) {
-        if !self.active.get() {
-            if self.levels.borrow().iter().all(|level| *level <= 0.0) {
-                let weak = Rc::downgrade(self);
-                glib::idle_add_local_once(move || {
-                    if let Some(v) = weak.upgrade() {
-                        v.sync_tick();
-                    }
-                });
-            }
-        } else if self.player.state().status() == PlaybackStatus::Playing {
-            let frame = match self.mode.get() {
+    fn on_tick(self: &Rc<Self>, clock: &gdk::FrameClock) {
+        let now = clock.frame_time();
+        let last = self.last_tick_us.replace(now);
+        let dt = if last <= 0 { 0.0 } else { (now - last).max(0) as f64 };
+
+        let mode = self.mode.get();
+        let want = self.active.get() && self.player.state().status() == PlaybackStatus::Playing;
+        if want {
+            let frame = match mode {
                 RawMode::Oscilloscope => self.feed.pull_raw().map(|raw| resample_pairs(&raw, self.bars.get())),
                 _ => self.feed.pull(self.bars.get()),
             };
-            if let Some(frame) = frame {
-                let mut levels = self.levels.borrow_mut();
-                let mut velocities = self.velocities.borrow_mut();
-                if levels.len() != frame.len() {
-                    *levels = vec![0.0; frame.len()];
-                    *velocities = vec![0.0; frame.len()];
-                }
-                for (i, h) in frame.iter().enumerate() {
-                    if *h > levels[i] {
-                        levels[i] = *h;
-                        velocities[i] = 0.0;
-                    }
-                }
+            let mut targets = self.targets.borrow_mut();
+            match frame {
+                Some(frame) if targets.len() == frame.len() => targets.copy_from_slice(&frame),
+                Some(frame) => *targets = frame,
+                None => targets.fill(0.0),
             }
+        } else {
+            self.targets.borrow_mut().fill(0.0);
         }
+        let direct = !matches!(mode, RawMode::Bars);
+        let ease = if dt <= 0.0 || direct { 1.0 } else { 1.0 - (-dt / EASE_US).exp() };
+        let mut moving = false;
         {
             let mut levels = self.levels.borrow_mut();
-            let mut velocities = self.velocities.borrow_mut();
-            for i in 0..levels.len() {
-                if levels[i] > 0.0 {
-                    velocities[i] += GRAVITY;
-                    levels[i] -= velocities[i];
-                    if levels[i] <= 0.0 {
-                        levels[i] = 0.0;
-                        velocities[i] = 0.0;
-                    }
-                }
+            let targets = self.targets.borrow();
+            if levels.len() != targets.len() {
+                levels.resize(targets.len(), 0.0);
+            }
+            for (level, target) in levels.iter_mut().zip(targets.iter()) {
+                let next = *level + (*target - *level) * ease;
+                *level = if (*target - next).abs() <= EPS { *target } else { next };
+                moving |= (*level - *target).abs() > EPS;
             }
         }
-        self.area.queue_draw();
+        if moving || want {
+            if now - self.last_draw_us.get() >= DRAW_INTERVAL_US {
+                self.last_draw_us.set(now);
+                self.area.queue_draw();
+            }
+        }
+        if !self.active.get() && !moving && self.levels.borrow().iter().all(|level| *level <= 0.0) {
+            let weak = Rc::downgrade(self);
+            glib::idle_add_local_once(move || {
+                if let Some(v) = weak.upgrade() {
+                    v.sync_tick();
+                }
+            });
+        }
     }
 
     fn draw(&self, area: &gtk::Widget, snapshot: &gtk::Snapshot, width: f32, height: f32) {
