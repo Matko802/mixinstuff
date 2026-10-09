@@ -3,18 +3,15 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gtk::{gdk, glib, graphene, gsk, prelude::*, subclass::prelude::*};
+use gtk::{gdk, glib, graphene, prelude::*, subclass::prelude::*};
 
 use crate::model::PlaybackStatus;
 use crate::player::Player;
 use crate::ui::context::UiContext;
-use crate::ui::widgets::sharkvis::SharkvisFeed;
+use crate::ui::widgets::sharkvis::{RawMode, SharkvisFeed};
 
 const GRAVITY: f64 = 0.0028;
 const BARS_DEFAULT: usize = 56;
-const IDLE_ALPHA: f64 = 0.08;
-const ACTIVE_ALPHA_MIN: f64 = 0.15;
-const ACTIVE_ALPHA_MAX: f64 = 0.6;
 
 mod area {
     use super::*;
@@ -62,6 +59,7 @@ pub struct Visualizer {
     player: Rc<Player>,
     feed: Arc<SharkvisFeed>,
     bars: Cell<usize>,
+    mode: Cell<RawMode>,
     levels: RefCell<Vec<f64>>,
     velocities: RefCell<Vec<f64>>,
     active: Cell<bool>,
@@ -72,6 +70,7 @@ impl Visualizer {
     pub fn new(ctx: &Rc<UiContext>, height: i32) -> Rc<Self> {
         let prefs = ctx.paths.read_prefs();
         let bars = prefs.get("visualizer_bars").and_then(|v| v.as_u64()).map(|n| n.clamp(8, 100) as usize).unwrap_or(BARS_DEFAULT);
+        let mode = prefs.get("visualizer_mode").and_then(|v| v.as_str()).and_then(RawMode::parse).unwrap_or(RawMode::Bars);
         let enabled = prefs.get("visualizer_enabled").and_then(|v| v.as_bool()).unwrap_or(true);
 
         let area: BarsArea = glib::Object::builder().property("visible", enabled).build();
@@ -79,8 +78,9 @@ impl Visualizer {
         let this = Rc::new(Self {
             area,
             player: ctx.player.clone(),
-            feed: SharkvisFeed::global(bars),
+            feed: SharkvisFeed::global(bars, mode),
             bars: Cell::new(bars),
+            mode: Cell::new(mode),
             levels: RefCell::new(Vec::new()),
             velocities: RefCell::new(Vec::new()),
             active: Cell::new(false),
@@ -120,6 +120,17 @@ impl Visualizer {
         self.levels.borrow_mut().clear();
         self.velocities.borrow_mut().clear();
         self.feed.set_bar_count(n);
+        self.area.queue_draw();
+    }
+
+    pub fn set_mode(&self, mode: RawMode) {
+        if mode == self.mode.get() {
+            return;
+        }
+        self.mode.set(mode);
+        self.levels.borrow_mut().clear();
+        self.velocities.borrow_mut().clear();
+        self.feed.set_mode(mode);
         self.area.queue_draw();
     }
 
@@ -166,7 +177,11 @@ impl Visualizer {
                 });
             }
         } else if self.player.state().status() == PlaybackStatus::Playing {
-            if let Some(frame) = self.feed.pull(self.bars.get()) {
+            let frame = match self.mode.get() {
+                RawMode::Oscilloscope => self.feed.pull_raw().map(|raw| resample_pairs(&raw, self.bars.get())),
+                _ => self.feed.pull(self.bars.get()),
+            };
+            if let Some(frame) = frame {
                 let mut levels = self.levels.borrow_mut();
                 let mut velocities = self.velocities.borrow_mut();
                 if levels.len() != frame.len() {
@@ -202,30 +217,92 @@ impl Visualizer {
         if width <= 0.0 || height <= 0.0 {
             return;
         }
+        match self.mode.get() {
+            RawMode::Bars => self.draw_bars(area, snapshot, width, height),
+            RawMode::Wave => self.draw_wave(area, snapshot, width, height),
+            RawMode::Oscilloscope => self.draw_scope(area, snapshot, width, height),
+        }
+    }
+
+    fn draw_bars(&self, area: &gtk::Widget, snapshot: &gtk::Snapshot, width: f32, height: f32) {
         let n = self.bars.get();
         let levels = self.levels.borrow();
         let (r, g, b) = bar_color(area);
         let gap = 2.0f32;
         let bar_w = ((width - gap * (n as f32 - 1.0)) / n as f32).max(1.0);
-        let min_h = 3.0f32;
+        let min_h = 2.0f32;
         for i in 0..n {
             let level = levels.get(i).copied().unwrap_or(0.0);
             let h = (level as f32 * height).max(min_h);
             let x = i as f32 * (bar_w + gap);
-            let alpha = if level > 0.0 { ACTIVE_ALPHA_MIN + (ACTIVE_ALPHA_MAX - ACTIVE_ALPHA_MIN) * level.min(1.0).sqrt() } else { IDLE_ALPHA };
             let rect = graphene::Rect::new(x, height - h, bar_w, h);
-            let color = gdk::RGBA::new(r as f32, g as f32, b as f32, alpha as f32);
-            let radius = (bar_w / 2.0).min(3.0).min(h / 2.0);
-            if radius <= 0.5 {
-                snapshot.append_color(&color, &rect);
-                continue;
-            }
-            let corner = graphene::Size::new(radius, radius);
-            snapshot.push_rounded_clip(&gsk::RoundedRect::new(rect, corner, corner, corner, corner));
-            snapshot.append_color(&color, &rect);
-            snapshot.pop();
+            snapshot.append_color(&gdk::RGBA::new(r as f32, g as f32, b as f32, 1.0), &rect);
         }
     }
+
+    fn draw_wave(&self, area: &gtk::Widget, snapshot: &gtk::Snapshot, width: f32, height: f32) {
+        let levels = self.levels.borrow();
+        let n = levels.len();
+        if n < 2 {
+            return;
+        }
+        let (r, g, b) = bar_color(area);
+        let bounds = graphene::Rect::new(0.0, 0.0, width, height);
+        let cr = snapshot.append_cairo(&bounds);
+        cr.set_source_rgb(r, g, b);
+        cr.set_line_width(2.0);
+        cr.set_line_join(cairo::LineJoin::Round);
+        cr.set_line_cap(cairo::LineCap::Round);
+        for (i, v) in levels.iter().enumerate() {
+            let x = f64::from(i as f32 / (n - 1) as f32) * f64::from(width);
+            let y = f64::from(height) - v.clamp(0.0, 1.0) * f64::from(height);
+            if i == 0 {
+                cr.move_to(x, y);
+            } else {
+                cr.line_to(x, y);
+            }
+        }
+        let _ = cr.stroke();
+    }
+
+    fn draw_scope(&self, area: &gtk::Widget, snapshot: &gtk::Snapshot, width: f32, height: f32) {
+        let levels = self.levels.borrow();
+        let n = levels.len() / 2;
+        if n < 2 {
+            return;
+        }
+        let (r, g, b) = bar_color(area);
+        let bounds = graphene::Rect::new(0.0, 0.0, width, height);
+        let cr = snapshot.append_cairo(&bounds);
+        cr.set_source_rgb(r, g, b);
+        cr.set_line_width(2.0);
+        cr.set_line_join(cairo::LineJoin::Round);
+        cr.set_line_cap(cairo::LineCap::Round);
+        for i in 0..n {
+            let x = levels[2 * i].clamp(0.0, 1.0) * f64::from(width);
+            let y = f64::from(height) - levels[2 * i + 1].clamp(0.0, 1.0) * f64::from(height);
+            if i == 0 {
+                cr.move_to(x, y);
+            } else {
+                cr.line_to(x, y);
+            }
+        }
+        let _ = cr.stroke();
+    }
+}
+
+fn resample_pairs(raw: &[f32], bars: usize) -> Vec<f64> {
+    let pairs = raw.len() / 2;
+    if pairs == 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(bars * 2);
+    for i in 0..bars {
+        let p = (i * pairs) / bars;
+        out.push(f64::from(raw[2 * p].clamp(0.0, 1.0)));
+        out.push(f64::from(raw[2 * p + 1].clamp(0.0, 1.0)));
+    }
+    out
 }
 
 #[allow(deprecated)]

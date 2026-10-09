@@ -578,15 +578,19 @@ fn visualizer_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGrou
     let prefs = ctx.paths.read_prefs();
     let enabled = prefs.get("visualizer_enabled").and_then(Value::as_bool).unwrap_or(true);
     let bars = prefs.get("visualizer_bars").and_then(Value::as_f64).unwrap_or(56.0).clamp(8.0, 100.0);
+    let mode = prefs.get("visualizer_mode").and_then(|v| v.as_str()).and_then(crate::ui::widgets::sharkvis::RawMode::parse).unwrap_or(crate::ui::widgets::sharkvis::RawMode::Bars);
 
     let enabled_row = switch_row("Enable Visualizer", "Show audio bars beneath the cover art", enabled);
+    let labels = ["Bars", "Wave", "Oscilloscope"];
+    let mode_row = combo_row("Mode", "Bars, a wave line, or an oscilloscope, like the shell visualizer", &labels, mode as usize);
     let (bars_row, bars_scale) = scale_row("Bar Count", "Number of bars in the visualizer (more = finer)", (16.0, 100.0, 4.0), bars, 0);
+    mode_row.set_sensitive(enabled);
     bars_row.set_sensitive(enabled);
 
     {
         let ctx = ctx.clone();
         let win = Rc::downgrade(win);
-        let bars_row = bars_row.clone();
+        let (mode_row, bars_row) = (mode_row.clone(), bars_row.clone());
         enabled_row.connect_active_notify(move |row| {
             let on = row.is_active();
             save(&ctx, "visualizer_enabled", on);
@@ -595,7 +599,25 @@ fn visualizer_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGrou
                     viz.widget().set_visible(on);
                 }
             }
+            mode_row.set_sensitive(on);
             bars_row.set_sensitive(on);
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        let win = Rc::downgrade(win);
+        mode_row.connect_selected_notify(move |row| {
+            let mode = match row.selected() {
+                1 => crate::ui::widgets::sharkvis::RawMode::Wave,
+                2 => crate::ui::widgets::sharkvis::RawMode::Oscilloscope,
+                _ => crate::ui::widgets::sharkvis::RawMode::Bars,
+            };
+            save(&ctx, "visualizer_mode", mode.as_str());
+            if let Some(win) = win.upgrade() {
+                for viz in win.visualizers() {
+                    viz.set_mode(mode);
+                }
+            }
         });
     }
     {
@@ -612,6 +634,7 @@ fn visualizer_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGrou
         });
     }
     group.add(&enabled_row);
+    group.add(&mode_row);
     group.add(&bars_row);
     group
 }

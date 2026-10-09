@@ -2664,6 +2664,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-channel",
+ "cairo-rs",
  "gio",
  "glib",
  "glib-build-tools",

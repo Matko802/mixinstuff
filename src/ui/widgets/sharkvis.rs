@@ -1,6 +1,6 @@
 
 use std::io::BufRead;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -9,23 +9,71 @@ const STALE_AFTER: Duration = Duration::from_secs(1);
 
 static FEED: OnceLock<Arc<SharkvisFeed>> = OnceLock::new();
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RawMode {
+    Bars,
+    Wave,
+    Oscilloscope,
+}
+
+impl RawMode {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "bars" => Some(Self::Bars),
+            "wave" => Some(Self::Wave),
+            "oscilloscope" => Some(Self::Oscilloscope),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bars => "bars",
+            Self::Wave => "wave",
+            Self::Oscilloscope => "oscilloscope",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Bars => "Bars",
+            Self::Wave => "Wave",
+            Self::Oscilloscope => "Oscilloscope",
+        }
+    }
+
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Bars => Self::Wave,
+            Self::Wave => Self::Oscilloscope,
+            Self::Oscilloscope => Self::Bars,
+        }
+    }
+}
+
 pub struct SharkvisFeed {
     bars: AtomicUsize,
+    mode: AtomicU8,
     latest: Arc<Mutex<(Vec<f32>, Instant)>>,
     worker: Mutex<Option<std::process::Child>>,
 }
 
 impl SharkvisFeed {
-    pub fn global(bars: usize) -> Arc<Self> {
-        let feed = FEED.get_or_init(|| Arc::new(Self::new(bars))).clone();
+    pub fn global(bars: usize, mode: RawMode) -> Arc<Self> {
+        let feed = FEED.get_or_init(|| Arc::new(Self::new(bars, mode))).clone();
         feed.set_bar_count(bars);
+        feed.set_mode(mode);
         feed
     }
 
-    fn new(bars: usize) -> Self {
-        let bars = bars.clamp(8, 100);
-        let feed = Self { bars: AtomicUsize::new(bars), latest: Arc::new(Mutex::new((Vec::new(), Instant::now() - STALE_AFTER * 2))), worker: Mutex::new(None) };
-        feed.spawn(bars);
+    fn new(bars: usize, mode: RawMode) -> Self {
+        let feed = Self {
+            bars: AtomicUsize::new(bars.clamp(8, 100)),
+            mode: AtomicU8::new(mode as u8),
+            latest: Arc::new(Mutex::new((Vec::new(), Instant::now() - STALE_AFTER * 2))),
+            worker: Mutex::new(None),
+        };
+        feed.spawn();
         feed
     }
 
@@ -34,7 +82,22 @@ impl SharkvisFeed {
         if self.bars.swap(n, Ordering::SeqCst) == n {
             return;
         }
-        self.spawn(n);
+        self.spawn();
+    }
+
+    pub fn set_mode(&self, mode: RawMode) {
+        if self.mode.swap(mode as u8, Ordering::SeqCst) == mode as u8 {
+            return;
+        }
+        self.spawn();
+    }
+
+    fn mode(&self) -> RawMode {
+        match self.mode.load(Ordering::SeqCst) {
+            1 => RawMode::Wave,
+            2 => RawMode::Oscilloscope,
+            _ => RawMode::Bars,
+        }
     }
 
     pub fn pull(&self, n: usize) -> Option<Vec<f64>> {
@@ -48,7 +111,17 @@ impl SharkvisFeed {
         Some(resample(&levels, n))
     }
 
-    fn spawn(&self, bars: usize) {
+    pub fn pull_raw(&self) -> Option<Vec<f32>> {
+        let (levels, at) = self.latest.lock().unwrap().clone();
+        if levels.is_empty() || at.elapsed() > STALE_AFTER {
+            return None;
+        }
+        Some(levels)
+    }
+
+    fn spawn(&self) {
+        let bars = self.bars.load(Ordering::SeqCst);
+        let mode = self.mode();
         let mut slot = self.worker.lock().unwrap();
         if let Some(mut old) = slot.take() {
             let _ = old.kill();
@@ -57,7 +130,7 @@ impl SharkvisFeed {
             });
         }
         let child = std::process::Command::new("sharkvis")
-            .args(["--raw", "--raw-mode", "bars", "--bars", &bars.to_string(), "--fps", &FPS.to_string()])
+            .args(["--raw", "--raw-mode", mode.as_str(), "--bars", &bars.to_string(), "--fps", &FPS.to_string()])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
