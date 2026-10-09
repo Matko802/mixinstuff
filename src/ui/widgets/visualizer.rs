@@ -1,23 +1,17 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use gtk::{gdk, glib, graphene, gsk, prelude::*, subclass::prelude::*};
 
+use crate::model::PlaybackStatus;
 use crate::player::Player;
 use crate::ui::context::UiContext;
+use crate::ui::widgets::sharkvis::SharkvisFeed;
 
-const THRESHOLD_DB: f32 = -80.0;
 const GRAVITY: f64 = 0.0028;
-const MONSTERCAT_DEFAULT: f64 = 1.8;
 const BARS_DEFAULT: usize = 56;
-const UPPER_FRACTION: f64 = 0.6;
-const HIGH_FREQ_BOOST: f64 = 1.8;
-const CONTRAST_GAMMA: f64 = 2.5;
-const AUTO_GAIN_DECAY: f64 = 0.997;
-const AUTO_GAIN_TARGET: f64 = 0.92;
-const AUTO_GAIN_MAX: f64 = 3.5;
-const AUTO_GAIN_FLOOR: f64 = 0.05;
 const IDLE_ALPHA: f64 = 0.08;
 const ACTIVE_ALPHA_MIN: f64 = 0.15;
 const ACTIVE_ALPHA_MAX: f64 = 0.6;
@@ -66,14 +60,10 @@ glib::wrapper! {
 pub struct Visualizer {
     area: BarsArea,
     player: Rc<Player>,
+    feed: Arc<SharkvisFeed>,
     bars: Cell<usize>,
-    smoothing: Cell<f64>,
     levels: RefCell<Vec<f64>>,
     velocities: RefCell<Vec<f64>>,
-    bins: RefCell<Vec<(usize, usize)>>,
-    weights: RefCell<Vec<f64>>,
-    raw_bands: Cell<usize>,
-    recent_max: Cell<f64>,
     active: Cell<bool>,
     tick: RefCell<Option<gtk::TickCallbackId>>,
 }
@@ -82,7 +72,6 @@ impl Visualizer {
     pub fn new(ctx: &Rc<UiContext>, height: i32) -> Rc<Self> {
         let prefs = ctx.paths.read_prefs();
         let bars = prefs.get("visualizer_bars").and_then(|v| v.as_u64()).map(|n| n.clamp(8, 100) as usize).unwrap_or(BARS_DEFAULT);
-        let smoothing = prefs.get("visualizer_smoothing").and_then(|v| v.as_f64()).unwrap_or(MONSTERCAT_DEFAULT).max(1.05);
         let enabled = prefs.get("visualizer_enabled").and_then(|v| v.as_bool()).unwrap_or(true);
 
         let area: BarsArea = glib::Object::builder().property("visible", enabled).build();
@@ -90,14 +79,10 @@ impl Visualizer {
         let this = Rc::new(Self {
             area,
             player: ctx.player.clone(),
+            feed: SharkvisFeed::global(bars),
             bars: Cell::new(bars),
-            smoothing: Cell::new(smoothing),
             levels: RefCell::new(Vec::new()),
             velocities: RefCell::new(Vec::new()),
-            bins: RefCell::new(Vec::new()),
-            weights: RefCell::new(Vec::new()),
-            raw_bands: Cell::new(0),
-            recent_max: Cell::new(0.0),
             active: Cell::new(false),
             tick: RefCell::new(None),
         });
@@ -134,11 +119,8 @@ impl Visualizer {
         self.bars.set(n);
         self.levels.borrow_mut().clear();
         self.velocities.borrow_mut().clear();
+        self.feed.set_bar_count(n);
         self.area.queue_draw();
-    }
-
-    pub fn set_smoothing(&self, intensity: f64) {
-        self.smoothing.set(intensity.max(1.05));
     }
 
     pub fn set_active(self: &Rc<Self>, active: bool) {
@@ -173,108 +155,6 @@ impl Visualizer {
         }
     }
 
-    fn recompute_bins(&self, raw_n: usize) {
-        let n_display = self.bars.get();
-        let lo_min = 1usize;
-        let hi_max = (lo_min + n_display).max((raw_n as f64 * UPPER_FRACTION) as usize);
-        let ratio = hi_max as f64 / lo_min as f64;
-        let mut bins = Vec::with_capacity(n_display);
-        let mut weights = Vec::with_capacity(n_display);
-        let mut prev = lo_min;
-        for i in 0..n_display {
-            let mut hi = (lo_min as f64 * ratio.powf((i + 1) as f64 / n_display as f64)) as usize;
-            hi = hi.max(prev + 1).min(hi_max);
-            bins.push((prev, hi));
-            weights.push(1.0 + HIGH_FREQ_BOOST * (i as f64 / (n_display.max(2) - 1) as f64));
-            prev = hi;
-        }
-        self.bins.replace(bins);
-        self.weights.replace(weights);
-        self.raw_bands.set(raw_n);
-    }
-
-    fn reduce(&self, raw: &[f32]) -> Vec<f64> {
-        if raw.len() != self.raw_bands.get() || self.bins.borrow().len() != self.bars.get() {
-            self.recompute_bins(raw.len());
-        }
-        let bins = self.bins.borrow();
-        let weights = self.weights.borrow();
-        bins.iter()
-            .enumerate()
-            .map(|(idx, &(lo, hi))| {
-                if hi <= lo || lo >= raw.len() {
-                    return 0.0;
-                }
-                let chunk = &raw[lo..hi.min(raw.len())];
-                let peak = chunk.iter().copied().fold(f32::MIN, f32::max);
-                if peak <= THRESHOLD_DB {
-                    return 0.0;
-                }
-                let norm = ((peak - THRESHOLD_DB) / -THRESHOLD_DB) as f64;
-                (norm.powf(CONTRAST_GAMMA) * weights[idx]).max(0.0)
-            })
-            .collect()
-    }
-
-    fn smooth(&self, bars: &[f64]) -> Vec<f64> {
-        let n = bars.len();
-        let intensity = self.smoothing.get();
-        let mut out = bars.to_vec();
-        for i in 0..n {
-            let peak = bars[i];
-            if peak < 0.01 {
-                continue;
-            }
-            let mut damped = peak;
-            for k in 1..n {
-                damped /= intensity;
-                if damped < 0.01 {
-                    break;
-                }
-                if i >= k && damped > out[i - k] {
-                    out[i - k] = damped;
-                }
-                if i + k < n && damped > out[i + k] {
-                    out[i + k] = damped;
-                }
-            }
-        }
-        out
-    }
-
-    fn ingest(&self, magnitudes: &[f32]) {
-        if magnitudes.is_empty() {
-            return;
-        }
-        let mut bars = self.reduce(magnitudes);
-        let frame_peak = bars.iter().copied().fold(0.0, f64::max);
-        let recent = frame_peak.max(self.recent_max.get() * AUTO_GAIN_DECAY);
-        self.recent_max.set(recent);
-        if recent > AUTO_GAIN_FLOOR {
-            let gain = (AUTO_GAIN_TARGET / recent).min(AUTO_GAIN_MAX);
-            for b in &mut bars {
-                *b = (*b * gain).min(1.0);
-            }
-        } else {
-            for b in &mut bars {
-                *b = b.min(1.0);
-            }
-        }
-        let bars = self.smooth(&bars);
-        let mut levels = self.levels.borrow_mut();
-        let mut velocities = self.velocities.borrow_mut();
-        if levels.len() != bars.len() {
-            *levels = vec![0.0; bars.len()];
-            *velocities = vec![0.0; bars.len()];
-        }
-        for (i, h) in bars.iter().enumerate() {
-            if *h > levels[i] {
-                levels[i] = *h;
-                velocities[i] = 0.0;
-            }
-        }
-    }
-
     fn on_tick(self: &Rc<Self>) {
         if !self.active.get() {
             if self.levels.borrow().iter().all(|level| *level <= 0.0) {
@@ -285,8 +165,21 @@ impl Visualizer {
                     }
                 });
             }
-        } else if let Some(bands) = self.player.pull_visualizer_bands() {
-            self.ingest(&bands);
+        } else if self.player.state().status() == PlaybackStatus::Playing {
+            if let Some(frame) = self.feed.pull(self.bars.get()) {
+                let mut levels = self.levels.borrow_mut();
+                let mut velocities = self.velocities.borrow_mut();
+                if levels.len() != frame.len() {
+                    *levels = vec![0.0; frame.len()];
+                    *velocities = vec![0.0; frame.len()];
+                }
+                for (i, h) in frame.iter().enumerate() {
+                    if *h > levels[i] {
+                        levels[i] = *h;
+                        velocities[i] = 0.0;
+                    }
+                }
+            }
         }
         {
             let mut levels = self.levels.borrow_mut();

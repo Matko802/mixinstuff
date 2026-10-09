@@ -86,16 +86,6 @@ pub struct Player {
     armed_next: RefCell<Option<Armed>>,
     inflight: RefCell<Option<AbortHandle>>,
     retries: Cell<u8>,
-    /// Spectrum frames keyed by stream time, what _viz_queue held: released
-    /// once the sink has reached them, so the bars follow the audible sound.
-    viz_queue: RefCell<std::collections::VecDeque<(i64, Vec<f32>)>>,
-    /// Load generation the queued frames belong to. A gapless switch restarts
-    /// stream time, so frames from the old stream would sit in the queue's
-    /// front with times the new play-head never reaches, and the drain would
-    /// hand back nothing until the length cap evicted them.
-    viz_generation: Cell<u64>,
-    /// The last position tick and its arrival time, interpolated between ticks.
-    position_mark: Cell<Option<(std::time::Instant, f64)>>,
     /// A radio extension is in flight, like _is_fetching_infinite.
     infinite_fetching: Cell<bool>,
     /// Counter behind the queue stamps play_then_radio hands out.
@@ -132,9 +122,6 @@ impl Player {
             armed_next: RefCell::new(None),
             inflight: RefCell::new(None),
             retries: Cell::new(0),
-            viz_queue: RefCell::new(std::collections::VecDeque::new()),
-            viz_generation: Cell::new(0),
-            position_mark: Cell::new(None),
             infinite_fetching: Cell::new(false),
             stamp: Cell::new(0),
             history_mode: RefCell::new(paths.read_prefs().get("history_mode").and_then(|v| v.as_str()).unwrap_or(HISTORY_IMMEDIATE).to_owned()),
@@ -253,43 +240,6 @@ impl Player {
     /// and the system controls. The queue decides; nobody re-derives it.
     pub fn bounds(&self) -> Bounds {
         self.queue.borrow().bounds(self.state.position())
-    }
-
-    /// Port of pull_visualizer_bands: the spectrum frame the sink is playing
-    /// right now, or None while paused or stopped so the bars fall. The most
-    /// recent entry whose stream time the play-head has reached wins;
-    /// entries more than a second behind are dropped.
-    pub fn pull_visualizer_bands(&self) -> Option<Vec<f32>> {
-        if self.state.status() != PlaybackStatus::Playing {
-            return None;
-        }
-        let mut queue = self.viz_queue.borrow_mut();
-        if queue.is_empty() {
-            return None;
-        }
-
-        let Some((at, position)) = self.position_mark.get() else {
-            return queue.back().map(|(_, b)| b.clone());
-        };
-        let pos_ns = ((position + at.elapsed().as_secs_f64()) * 1e9) as i64;
-        let mut latest = None;
-        for (st, bands) in queue.iter() {
-            if *st < 0 || *st <= pos_ns {
-                latest = Some(bands.clone());
-            } else {
-                break;
-            }
-        }
-        let stale = pos_ns - 1_000_000_000;
-        while queue.front().is_some_and(|(st, _)| *st >= 0 && *st < stale) {
-            queue.pop_front();
-        }
-        latest
-    }
-
-    fn clear_visualizer_queue(&self) {
-        self.viz_queue.borrow_mut().clear();
-        self.position_mark.set(None);
     }
 
     pub fn local(&self) -> &Arc<LocalLibrary> {
@@ -554,8 +504,6 @@ impl Player {
     }
 
     pub fn seek(&self, seconds: f64) {
-        // Queued spectrum frames belong to the old position on either side of the seek.
-        self.clear_visualizer_queue();
         self.audio.send(AudioCommand::Seek { seconds });
         let target = seconds.max(0.0);
         self.state.set_position(target);
@@ -619,8 +567,6 @@ impl Player {
 
     /// Start playing the queue's current index under a new generation.
     fn load_current(&self) {
-        // A new stream restarts stream time; queued frames would mislead the drain.
-        self.clear_visualizer_queue();
         let (index, track) = {
             let q = self.queue.borrow();
             match q.current().zip(q.current_track().cloned()) {
@@ -858,7 +804,6 @@ impl Player {
                         self.retries.set(0);
                         let track = self.queue.borrow_mut().adopt(index).cloned();
                         self.mark_current(Some(index));
-                        self.clear_visualizer_queue();
                         self.state.set_position(0.0);
                         self.state.set_duration(
                             track
@@ -944,8 +889,6 @@ impl Player {
                     return;
                 }
                 self.state.set_position(position);
-                self.position_mark
-                    .set(Some((std::time::Instant::now(), position)));
                 if self.history_mode.borrow().as_str() == HISTORY_AFTER_30S
                     && position >= HISTORY_THRESHOLD_SECS
                     && self.state.status() == PlaybackStatus::Playing
@@ -959,24 +902,6 @@ impl Player {
                     if (self.state.duration() - d).abs() > 0.1 {
                         self.state.set_duration(d);
                     }
-                }
-            }
-            AudioTelemetry::Spectrum {
-                generation,
-                stream_time,
-                bands,
-            } => {
-                if generation != self.current.get() {
-                    return;
-                }
-                let mut queue = self.viz_queue.borrow_mut();
-                if self.viz_generation.replace(generation) != generation {
-                    queue.clear();
-                }
-                queue.push_back((stream_time, bands));
-                // About three seconds at the element's 30 Hz tick.
-                while queue.len() > 90 {
-                    queue.pop_front();
                 }
             }
         }

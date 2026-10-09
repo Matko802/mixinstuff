@@ -11,6 +11,7 @@ pub mod playing;
 pub mod scroll_box;
 pub mod song_list;
 pub mod song_row;
+pub mod sharkvis;
 pub mod track_row;
 pub mod transport;
 pub mod visualizer;

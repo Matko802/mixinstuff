@@ -14,9 +14,6 @@ use crate::model::{HttpAuth, PlaybackStatus};
 
 const TELEMETRY_CAPACITY: usize = 64;
 const POSITION_TICK: Duration = Duration::from_millis(100);
-const SPECTRUM_BANDS: u32 = 128;
-const SPECTRUM_THRESHOLD_DB: i32 = -80;
-const SPECTRUM_INTERVAL_NS: u64 = 33_000_000;
 
 #[derive(Debug)]
 pub enum AudioCommand {
@@ -46,7 +43,6 @@ pub enum AudioEvent {
 #[derive(Debug, Clone)]
 pub enum AudioTelemetry {
     Position { generation: u64, position: f64, duration: Option<f64> },
-    Spectrum { generation: u64, stream_time: i64, bands: Vec<f32> },
 }
 
 pub struct AudioEvents {
@@ -223,21 +219,6 @@ impl Engine {
             if let Some(value) = class.builder_with_value(flags).and_then(|b| b.unset_by_nick("video").unset_by_nick("text").build()) {
                 playbin.set_property_from_value("flags", &value);
             }
-        }
-
-        match gst::ElementFactory::make("spectrum")
-            .name("visualizer-spectrum")
-            .property("post-messages", true)
-            .property("message-magnitude", true)
-            .property("message-phase", false)
-            .property("interval", SPECTRUM_INTERVAL_NS)
-            .property("bands", SPECTRUM_BANDS)
-            .property("threshold", SPECTRUM_THRESHOLD_DB)
-            .property("multi-channel", false)
-            .build()
-        {
-            Ok(spectrum) => playbin.set_property("audio-filter", &spectrum),
-            Err(err) => tracing::warn!(%err, "spectrum element unavailable; visualizer stays inert"),
         }
 
         let audio_sink = match gst::ElementFactory::make("autoaudiosink").name("audio-sink").build() {
@@ -505,15 +486,6 @@ impl Engine {
                 gst::State::Null | gst::State::Ready if !self.loading.get() => self.set_status(PlaybackStatus::Stopped),
                 _ => {}
             },
-            MessageView::Element(e) => {
-                if let Some(s) = e.structure().filter(|s| s.name().as_str() == "spectrum") {
-                    if let Ok(list) = s.get::<gst::List>("magnitude") {
-                        let bands: Vec<f32> = list.iter().filter_map(|v| v.get::<f32>().ok()).collect();
-                        let stream_time = s.get::<gst::ClockTime>("stream-time").ok().map(|t| t.nseconds() as i64).unwrap_or(-1);
-                        let _ = self.telemetry.force_send(AudioTelemetry::Spectrum { generation: self.generation(), stream_time, bands });
-                    }
-                }
-            }
             _ => {}
         }
     }

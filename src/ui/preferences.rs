@@ -578,18 +578,15 @@ fn visualizer_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGrou
     let prefs = ctx.paths.read_prefs();
     let enabled = prefs.get("visualizer_enabled").and_then(Value::as_bool).unwrap_or(true);
     let bars = prefs.get("visualizer_bars").and_then(Value::as_f64).unwrap_or(56.0).clamp(8.0, 100.0);
-    let smoothing = prefs.get("visualizer_smoothing").and_then(Value::as_f64).unwrap_or(1.5).clamp(1.05, 3.0);
 
     let enabled_row = switch_row("Enable Visualizer", "Show audio bars beneath the cover art", enabled);
     let (bars_row, bars_scale) = scale_row("Bar Count", "Number of bars in the visualizer (more = finer)", (16.0, 100.0, 4.0), bars, 0);
-    let (smooth_row, smooth_scale) = scale_row("Smoothing", "Higher = tighter spikes, lower = peaks bleed into neighbors", (1.1, 3.0, 0.05), smoothing, 2);
     bars_row.set_sensitive(enabled);
-    smooth_row.set_sensitive(enabled);
 
     {
         let ctx = ctx.clone();
         let win = Rc::downgrade(win);
-        let (bars_row, smooth_row) = (bars_row.clone(), smooth_row.clone());
+        let bars_row = bars_row.clone();
         enabled_row.connect_active_notify(move |row| {
             let on = row.is_active();
             save(&ctx, "visualizer_enabled", on);
@@ -599,7 +596,6 @@ fn visualizer_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGrou
                 }
             }
             bars_row.set_sensitive(on);
-            smooth_row.set_sensitive(on);
         });
     }
     {
@@ -615,22 +611,8 @@ fn visualizer_group(win: &Rc<MainWindow>, ctx: &Rc<App>) -> adw::PreferencesGrou
             }
         });
     }
-    {
-        let ctx = ctx.clone();
-        let win = Rc::downgrade(win);
-        smooth_scale.connect_value_changed(move |scale| {
-            let v = scale.value();
-            save(&ctx, "visualizer_smoothing", v);
-            if let Some(win) = win.upgrade() {
-                for viz in win.visualizers() {
-                    viz.set_smoothing(v);
-                }
-            }
-        });
-    }
     group.add(&enabled_row);
     group.add(&bars_row);
-    group.add(&smooth_row);
     group
 }
 
